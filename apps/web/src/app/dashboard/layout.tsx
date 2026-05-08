@@ -32,8 +32,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   useEffect(() => {
     if (!profile || !user) return;
+    const roleChanged = profile.role !== user.role;
     const changed =
-      profile.role !== user.role ||
+      roleChanged ||
       profile.photoUrl !== user.photoUrl ||
       profile.firstName !== user.firstName ||
       profile.lastName !== user.lastName;
@@ -44,6 +45,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         firstName: profile.firstName,
         lastName: profile.lastName,
       });
+    }
+    // If the role changed, the JWT still carries the old role — force a refresh
+    // so all subsequent API calls use the updated role immediately.
+    if (roleChanged) {
+      const refreshToken = localStorage.getItem("cadb_refresh_token");
+      if (refreshToken) {
+        api.post("/api/v1/auth/refresh", { refreshToken })
+          .then(({ data }) => {
+            if (data.data?.accessToken) {
+              localStorage.setItem("cadb_access_token", data.data.accessToken);
+            }
+          })
+          .catch(() => {});
+      }
     }
   }, [profile]);
 

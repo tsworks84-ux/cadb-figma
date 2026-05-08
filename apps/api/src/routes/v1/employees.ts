@@ -192,6 +192,10 @@ export async function employeeRoutes(fastify: FastifyInstance) {
         select: { departmentId: true },
       });
       scopedDeptIds = headMemberships.map((m) => m.departmentId);
+      // DEPT_HEAD with no departments — return empty list immediately
+      if (scopedDeptIds.length === 0) {
+        return reply.send({ success: true, data: [], meta: { total: 0, page: 1, limit, totalPages: 0 } });
+      }
     } else if (user.role !== "SUPER_ADMIN" && user.role !== "HR_ADMIN") {
       // Custom role — fetch their department access list
       const access = await prisma.roleDepartmentAccess.findMany({
