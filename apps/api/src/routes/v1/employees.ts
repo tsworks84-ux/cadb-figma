@@ -278,12 +278,6 @@ export async function employeeRoutes(fastify: FastifyInstance) {
         department: true,
         designation: true,
         reportingTo: { select: { id: true, firstName: true, lastName: true, employeeCode: true } },
-        qualifications: true,
-        certifications: true,
-        salaryStructure: { include: { items: true } },
-        bankDetails: true,
-        leaveBalances: true,
-        trainingEnrollments: { include: { program: true } },
       },
     });
 

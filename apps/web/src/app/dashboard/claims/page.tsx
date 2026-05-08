@@ -257,7 +257,8 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
   const isSubmitted = claim.status === "SUBMITTED";
   const isApproved = claim.status === "APPROVED";
   const needsReceipt = claim.claimedAmount > threshold && claim.receipts?.length === 0;
-  const canEdit = isDraft && !isAdmin;
+  const isOwnClaim = !claim?.employee;
+  const canEdit = isDraft && (isOwnClaim || !isAdmin);
 
   function openApproval(action: "APPROVED" | "REJECTED") {
     setApprovalAction(action);
@@ -407,7 +408,7 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
 
         {/* Action buttons */}
         <div className="flex gap-2 justify-end pt-1 border-t border-gray-100">
-          {isDraft && !isAdmin && (
+          {isDraft && (isOwnClaim || !isAdmin) && (
             <button
               type="button"
               onClick={() => submitMutation.mutate()}
@@ -583,10 +584,18 @@ function ThresholdSetting() {
 export default function ClaimsPage() {
   const { user } = useAuthStore();
   const isAdmin = user?.role === "SUPER_ADMIN" || user?.role === "HR_ADMIN";
+  const qc = useQueryClient();
 
   const [showNewClaim, setShowNewClaim] = useState(false);
   const [selectedClaimId, setSelectedClaimId] = useState<string | null>(null);
   const [adminTab, setAdminTab] = useState<"pending" | "all">("pending");
+
+  function prefetchClaim(id: string) {
+    qc.prefetchQuery({
+      queryKey: ["claim", id],
+      queryFn: () => api.get(`/api/v1/claims/${id}`).then((r) => r.data.data),
+    });
+  }
 
   const { data: myClaims } = useQuery({
     queryKey: ["my-claims"],
@@ -660,7 +669,7 @@ export default function ClaimsPage() {
                 <p className="px-6 py-10 text-sm text-center text-gray-400">No claims pending approval.</p>
               ) : (
                 pendingClaims.map((claim: any) => (
-                  <div key={claim.id} className="px-5 py-4 flex items-center gap-4 hover:bg-gray-50">
+                  <div key={claim.id} onMouseEnter={() => prefetchClaim(claim.id)} className="px-5 py-4 flex items-center gap-4 hover:bg-gray-50">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-semibold text-gray-900">{claim.employee.firstName} {claim.employee.lastName}</span>
@@ -711,7 +720,7 @@ export default function ClaimsPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-50">
                     {allClaims.map((claim: any) => (
-                      <tr key={claim.id} className="hover:bg-gray-50">
+                      <tr key={claim.id} onMouseEnter={() => prefetchClaim(claim.id)} className="hover:bg-gray-50">
                         <td className="px-5 py-3 text-sm">{claim.employee.firstName} {claim.employee.lastName}</td>
                         <td className="px-5 py-3 text-xs font-mono text-gray-400">{claim.claimNumber}</td>
                         <td className="px-5 py-3 text-xs text-gray-500">{claim.claimType}</td>
@@ -750,7 +759,7 @@ export default function ClaimsPage() {
               <tr><td colSpan={8} className="px-6 py-10 text-center text-sm text-gray-400">No claims yet. Click <strong>+ New Claim</strong> to get started.</td></tr>
             ) : (
               myClaims.map((claim: any) => (
-                <tr key={claim.id} className="hover:bg-gray-50">
+                <tr key={claim.id} onMouseEnter={() => prefetchClaim(claim.id)} className="hover:bg-gray-50">
                   <td className="px-5 py-4 text-xs font-mono text-gray-400">{claim.claimNumber}</td>
                   <td className="px-5 py-4 text-xs text-gray-500">{claim.claimType}</td>
                   <td className="px-5 py-4 text-sm text-gray-800 max-w-xs truncate">{claim.title}</td>

@@ -97,23 +97,25 @@ export async function teamRoutes(fastify: FastifyInstance) {
       return acc;
     }, {});
 
-    const data = memberships.map((m) => {
-      const member = memberMap.get(m.memberId) ?? null;
-      const activeLeave = leaveMap.get(m.memberId) ?? null;
-      const tasks = taskMap[m.memberId] ?? [];
-      const total = tasks.length;
-      const completed = tasks.filter((t) => t.status === "COMPLETED").length;
-      const due = tasks.filter((t) => t.status !== "COMPLETED" && new Date(t.dueDate) < today).length;
-      return {
-        id: m.id,
-        memberId: m.memberId,
-        addedAt: m.addedAt,
-        member,
-        presence: activeLeave ? "ON_LEAVE" : "PRESENT",
-        activeLeave,
-        tasks: { total, due, completed },
-      };
-    });
+    const data = memberships
+      .map((m) => {
+        const member = memberMap.get(m.memberId) ?? null;
+        const activeLeave = leaveMap.get(m.memberId) ?? null;
+        const tasks = taskMap[m.memberId] ?? [];
+        const total = tasks.length;
+        const completed = tasks.filter((t) => t.status === "COMPLETED").length;
+        const due = tasks.filter((t) => t.status !== "COMPLETED" && new Date(t.dueDate) < today).length;
+        return {
+          id: m.id,
+          memberId: m.memberId,
+          addedAt: m.addedAt,
+          member,
+          presence: activeLeave ? "ON_LEAVE" : "PRESENT",
+          activeLeave,
+          tasks: { total, due, completed },
+        };
+      })
+      .filter((m) => m.member !== null);
 
     return reply.send({ success: true, data });
   });

@@ -1,5 +1,6 @@
 import "dotenv/config";
 import Fastify from "fastify";
+import { prisma } from "@cadb/db";
 import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
@@ -122,6 +123,8 @@ server.setErrorHandler((error, _request, reply) => {
 
 const port = parseInt(process.env.API_PORT ?? "4000");
 try {
+  // Establish DB connection before accepting traffic so the first request isn't slow
+  await prisma.$connect();
   await server.listen({ port, host: "0.0.0.0" });
   console.log(`API running at http://localhost:${port}`);
   console.log(`Swagger docs at http://localhost:${port}/docs`);

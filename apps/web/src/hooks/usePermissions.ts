@@ -34,7 +34,7 @@ export function usePermissions(): PermMap {
   const { data } = useQuery<PermMap>({
     queryKey: ["my-permissions", role],
     queryFn: () => api.get("/api/v1/roles/my-permissions").then((r) => r.data.data),
-    staleTime: 0,
+    staleTime: 2 * 60 * 1000,
     // SUPER_ADMIN permissions cannot be modified — skip the network round-trip
     enabled: role !== "SUPER_ADMIN",
   });

@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev --turbopack --port 3001",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 3001",
+    "prod": "next build && next start -p 3001",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
   },

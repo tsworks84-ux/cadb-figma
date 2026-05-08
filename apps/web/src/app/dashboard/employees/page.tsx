@@ -239,6 +239,13 @@ export default function EmployeesPage() {
     router.push(`/dashboard/employees/${id}`);
   }, [router]);
 
+  const handleRowEnter = useCallback((id: string) => {
+    queryClient.prefetchQuery({
+      queryKey: ["employee", id],
+      queryFn: () => api.get(`/api/v1/employees/${id}`).then((r) => r.data.data),
+    });
+  }, [queryClient]);
+
   const incompleteCount = employees.filter((e) => !e.profileComplete).length;
 
   const selectedEmployees = employees.filter((e) => selected.has(e.id));
@@ -506,6 +513,7 @@ export default function EmployeesPage() {
                 <tr
                   key={emp.id}
                   onClick={(e) => handleRowClick(e, emp.id)}
+                  onMouseEnter={() => handleRowEnter(emp.id)}
                   className={`hover:bg-blue-50 transition-colors cursor-pointer ${
                     selected.has(emp.id) ? "bg-blue-50" : emp.status === "DRAFT" ? "bg-amber-50/60" : ""
                   }`}
