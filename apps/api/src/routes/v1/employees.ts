@@ -109,6 +109,23 @@ function profileCompleteness(emp: Record<string, unknown>) {
   };
 }
 
+// Returns true if the target employee belongs to any of the given departments,
+// checking both their primary departmentId and any EmployeeDepartment membership rows.
+async function isInDepts(employeeId: string, deptIds: string[]): Promise<boolean> {
+  if (deptIds.length === 0) return false;
+  const emp = await prisma.employee.findFirst({
+    where: {
+      id: employeeId,
+      OR: [
+        { departmentId: { in: deptIds } },
+        { deptMemberships: { some: { departmentId: { in: deptIds } } } },
+      ],
+    },
+    select: { id: true },
+  });
+  return emp !== null;
+}
+
 // Returns false (and sends 403) if the requester cannot access the target employee.
 // SUPER_ADMIN and HR_ADMIN have unrestricted access.
 // DEPT_HEAD can only access employees in departments they head.
@@ -127,10 +144,7 @@ async function assertCanAccess(
       select: { departmentId: true },
     });
     const deptIds = headDepts.map((m) => m.departmentId);
-    const member = await prisma.employeeDepartment.findFirst({
-      where: { employeeId: targetId, departmentId: { in: deptIds } },
-    });
-    if (member) return true;
+    if (await isInDepts(targetId, deptIds)) return true;
   } else if (user.role !== "EMPLOYEE") {
     // Custom role — check RoleDepartmentAccess
     const access = await prisma.roleDepartmentAccess.findMany({
@@ -139,10 +153,7 @@ async function assertCanAccess(
     });
     if (access.length > 0) {
       const deptIds = access.map((a) => a.departmentId);
-      const member = await prisma.employeeDepartment.findFirst({
-        where: { employeeId: targetId, departmentId: { in: deptIds } },
-      });
-      if (member) return true;
+      if (await isInDepts(targetId, deptIds)) return true;
     }
   }
   reply.status(403).send({ success: false, error: "Forbidden", statusCode: 403 });
@@ -203,9 +214,12 @@ export async function employeeRoutes(fastify: FastifyInstance) {
           { employeeCode: { contains: search, mode: "insensitive" as const } },
         ],
       }),
-      // Scope to allowed departments when applicable
+      // Scope to allowed departments: match primary departmentId OR any EmployeeDepartment membership
       ...(scopedDeptIds !== null && {
-        deptMemberships: { some: { departmentId: { in: scopedDeptIds } } },
+        OR: [
+          { departmentId: { in: scopedDeptIds } },
+          { deptMemberships: { some: { departmentId: { in: scopedDeptIds } } } },
+        ],
       }),
       // Honour explicit department filter but never let scoped roles escape their scope
       ...(departmentId && (scopedDeptIds === null || scopedDeptIds.includes(departmentId)) && { departmentId }),
