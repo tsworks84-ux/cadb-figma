@@ -1,4 +1,5 @@
-export type Role = "SUPER_ADMIN" | "HR_ADMIN" | "DEPT_HEAD" | "EMPLOYEE";
+export type SystemRole = "SUPER_ADMIN" | "HR_ADMIN" | "DEPT_HEAD" | "EMPLOYEE";
+export type Role = SystemRole | string;
 
 export interface JwtPayload {
   sub: string;

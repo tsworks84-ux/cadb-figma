@@ -30,8 +30,10 @@ export function Sidebar() {
   const permissions = usePermissions();
 
   const role = user?.role ?? "EMPLOYEE";
-  // Directory access is role-based — never depends on async permissions fetch
-  const canViewDirectory = role === "SUPER_ADMIN" || role === "HR_ADMIN" || role === "DEPT_HEAD";
+  // Directory access: system roles are hardcoded; custom roles use their EMP_PROFILE.canView permission
+  const SYSTEM_DIR_ROLES = ["SUPER_ADMIN", "HR_ADMIN", "DEPT_HEAD"];
+  const canViewDirectory = SYSTEM_DIR_ROLES.includes(role)
+    || (role !== "EMPLOYEE" && (permissions["EMP_PROFILE"]?.canView ?? false));
   // Administration is restricted to SUPER_ADMIN only — not configurable via permissions
   const canViewAdmin = role === "SUPER_ADMIN";
   const canViewMIS = Object.keys(permissions)

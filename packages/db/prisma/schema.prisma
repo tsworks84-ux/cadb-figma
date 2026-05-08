@@ -228,11 +228,35 @@ model Department {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  employees    Employee[]
-  head         Employee?           @relation("DeptHead", fields: [headId], references: [id])
-  memberships  EmployeeDepartment[]
+  employees       Employee[]
+  head            Employee?              @relation("DeptHead", fields: [headId], references: [id])
+  memberships     EmployeeDepartment[]
+  roleAccess      RoleDepartmentAccess[]
 
   @@index([code])
+}
+
+// ─── CUSTOM ROLES ─────────────────────────────────────────────────────────────
+
+model CustomRole {
+  name      String   @id
+  label     String
+  createdAt DateTime @default(now())
+
+  deptAccess RoleDepartmentAccess[]
+}
+
+model RoleDepartmentAccess {
+  id           String @id @default(cuid())
+  roleName     String
+  departmentId String
+
+  role       CustomRole @relation(fields: [roleName],     references: [name],       onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id],         onDelete: Cascade)
+
+  @@unique([roleName, departmentId])
+  @@index([roleName])
+  @@index([departmentId])
 }
 
 model Designation {

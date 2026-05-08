@@ -143,7 +143,12 @@ export async function roleRoutes(fastify: FastifyInstance) {
   fastify.put("/:role/:module", { preHandler: requireRole("SUPER_ADMIN") }, async (request, reply) => {
     const { role, module } = request.params as { role: string; module: string };
 
-    if (!ROLES.includes(role as any)) return reply.status(400).send({ success: false, error: "Invalid role" });
+    // Allow system roles + any custom role that exists in the DB
+    const isSystemRole = ROLES.includes(role as any);
+    if (!isSystemRole) {
+      const exists = await prisma.customRole.findUnique({ where: { name: role } });
+      if (!exists) return reply.status(400).send({ success: false, error: "Invalid role" });
+    }
     if (!MODULES.includes(module as any)) return reply.status(400).send({ success: false, error: "Invalid module" });
 
     // SUPER_ADMIN always has all permissions — cannot be downgraded
@@ -183,5 +188,99 @@ export async function roleRoutes(fastify: FastifyInstance) {
     }
     await prisma.rolePermission.createMany({ data: seeds });
     return reply.send({ success: true, message: "Permissions reset to defaults" });
+  });
+
+  // ── Custom Roles ─────────────────────────────────────────────────────────────
+
+  // GET /custom — list all custom roles with dept access
+  fastify.get("/custom", { preHandler: requireRole("SUPER_ADMIN") }, async (_request, reply) => {
+    const roles = await prisma.customRole.findMany({
+      orderBy: { createdAt: "asc" },
+      include: {
+        deptAccess: { select: { departmentId: true } },
+      },
+    });
+    return reply.send({ success: true, data: roles });
+  });
+
+  // POST /custom — create a custom role + seed deny-all permissions + set dept access
+  fastify.post("/custom", { preHandler: requireRole("SUPER_ADMIN") }, async (request, reply) => {
+    const schema = z.object({
+      name:          z.string().min(2).max(50).regex(/^[A-Z0-9_]+$/, "Use uppercase letters, digits, underscores"),
+      label:         z.string().min(2).max(80),
+      departmentIds: z.array(z.string()).min(1, "Select at least one department"),
+    });
+    const parsed = schema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
+
+    const { name, label, departmentIds } = parsed.data;
+
+    // Prevent clashing with system roles
+    if (ROLES.includes(name as any)) {
+      return reply.status(400).send({ success: false, error: "Name conflicts with a system role" });
+    }
+
+    const role = await prisma.customRole.create({
+      data: {
+        name,
+        label,
+        deptAccess: { create: departmentIds.map((departmentId) => ({ departmentId })) },
+      },
+      include: { deptAccess: { select: { departmentId: true } } },
+    });
+
+    // Seed deny-all permissions so the role appears in the permissions table immediately
+    await prisma.rolePermission.createMany({
+      data: MODULES.map((module) => ({ role: name, module })),
+      skipDuplicates: true,
+    });
+
+    return reply.status(201).send({ success: true, data: role });
+  });
+
+  // PATCH /custom/:name — update label and/or department access
+  fastify.patch("/custom/:name", { preHandler: requireRole("SUPER_ADMIN") }, async (request, reply) => {
+    const { name } = request.params as { name: string };
+    const schema = z.object({
+      label:         z.string().min(2).max(80).optional(),
+      departmentIds: z.array(z.string()).min(1).optional(),
+    });
+    const parsed = schema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
+
+    const existing = await prisma.customRole.findUnique({ where: { name } });
+    if (!existing) return reply.status(404).send({ success: false, error: "Role not found" });
+
+    const { label, departmentIds } = parsed.data;
+
+    await prisma.$transaction(async (tx) => {
+      if (label) await tx.customRole.update({ where: { name }, data: { label } });
+      if (departmentIds) {
+        await tx.roleDepartmentAccess.deleteMany({ where: { roleName: name } });
+        await tx.roleDepartmentAccess.createMany({
+          data: departmentIds.map((departmentId) => ({ roleName: name, departmentId })),
+        });
+      }
+    });
+
+    const updated = await prisma.customRole.findUnique({
+      where: { name },
+      include: { deptAccess: { select: { departmentId: true } } },
+    });
+    return reply.send({ success: true, data: updated });
+  });
+
+  // DELETE /custom/:name — delete custom role, its permissions, and dept access
+  fastify.delete("/custom/:name", { preHandler: requireRole("SUPER_ADMIN") }, async (request, reply) => {
+    const { name } = request.params as { name: string };
+    const existing = await prisma.customRole.findUnique({ where: { name } });
+    if (!existing) return reply.status(404).send({ success: false, error: "Role not found" });
+
+    await prisma.$transaction([
+      prisma.rolePermission.deleteMany({ where: { role: name } }),
+      prisma.customRole.delete({ where: { name } }),
+    ]);
+
+    return reply.send({ success: true, data: null });
   });
 }

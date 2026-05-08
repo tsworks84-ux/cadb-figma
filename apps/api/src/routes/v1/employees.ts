@@ -112,6 +112,7 @@ function profileCompleteness(emp: Record<string, unknown>) {
 // Returns false (and sends 403) if the requester cannot access the target employee.
 // SUPER_ADMIN and HR_ADMIN have unrestricted access.
 // DEPT_HEAD can only access employees in departments they head.
+// Custom roles can only access employees in their configured department access list.
 // EMPLOYEE can only access their own record.
 async function assertCanAccess(
   user: JwtPayload,
@@ -130,6 +131,19 @@ async function assertCanAccess(
       where: { employeeId: targetId, departmentId: { in: deptIds } },
     });
     if (member) return true;
+  } else if (user.role !== "EMPLOYEE") {
+    // Custom role — check RoleDepartmentAccess
+    const access = await prisma.roleDepartmentAccess.findMany({
+      where: { roleName: user.role },
+      select: { departmentId: true },
+    });
+    if (access.length > 0) {
+      const deptIds = access.map((a) => a.departmentId);
+      const member = await prisma.employeeDepartment.findFirst({
+        where: { employeeId: targetId, departmentId: { in: deptIds } },
+      });
+      if (member) return true;
+    }
   }
   reply.status(403).send({ success: false, error: "Forbidden", statusCode: 403 });
   return false;
@@ -138,9 +152,15 @@ async function assertCanAccess(
 export async function employeeRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", authenticate);
 
-  // List employees with pagination + search (admin roles only)
-  fastify.get("/", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN", "DEPT_HEAD") }, async (request, reply) => {
+  // List employees with pagination + search
+  fastify.get("/", async (request, reply) => {
     const user = request.user as JwtPayload;
+
+    // EMPLOYEE role cannot access the directory
+    if (user.role === "EMPLOYEE") {
+      return reply.status(403).send({ success: false, error: "Forbidden", statusCode: 403 });
+    }
+
     const query = request.query as Record<string, string>;
     const page = Math.max(1, parseInt(query.page ?? "1"));
     const limit = Math.min(100, parseInt(query.limit ?? "20"));
@@ -152,14 +172,25 @@ export async function employeeRoutes(fastify: FastifyInstance) {
     const employmentType = query.employmentType;
     const gender = query.gender;
 
-    // For DEPT_HEAD: scope to departments they lead
-    let deptHeadDeptIds: string[] | null = null;
+    // Resolve the department scope for non-admin roles
+    let scopedDeptIds: string[] | null = null;
+
     if (user.role === "DEPT_HEAD") {
       const headMemberships = await prisma.employeeDepartment.findMany({
         where: { employeeId: user.sub, isHead: true },
         select: { departmentId: true },
       });
-      deptHeadDeptIds = headMemberships.map((m) => m.departmentId);
+      scopedDeptIds = headMemberships.map((m) => m.departmentId);
+    } else if (user.role !== "SUPER_ADMIN" && user.role !== "HR_ADMIN") {
+      // Custom role — fetch their department access list
+      const access = await prisma.roleDepartmentAccess.findMany({
+        where: { roleName: user.role },
+        select: { departmentId: true },
+      });
+      if (access.length === 0) {
+        return reply.status(403).send({ success: false, error: "Forbidden", statusCode: 403 });
+      }
+      scopedDeptIds = access.map((a) => a.departmentId);
     }
 
     const where: any = {
@@ -172,12 +203,12 @@ export async function employeeRoutes(fastify: FastifyInstance) {
           { employeeCode: { contains: search, mode: "insensitive" as const } },
         ],
       }),
-      // DEPT_HEAD can only see employees in their own departments
-      ...(deptHeadDeptIds !== null && {
-        deptMemberships: { some: { departmentId: { in: deptHeadDeptIds } } },
+      // Scope to allowed departments when applicable
+      ...(scopedDeptIds !== null && {
+        deptMemberships: { some: { departmentId: { in: scopedDeptIds } } },
       }),
-      // Honour explicit department filter but never let DEPT_HEAD escape their scope
-      ...(departmentId && (deptHeadDeptIds === null || deptHeadDeptIds.includes(departmentId)) && { departmentId }),
+      // Honour explicit department filter but never let scoped roles escape their scope
+      ...(departmentId && (scopedDeptIds === null || scopedDeptIds.includes(departmentId)) && { departmentId }),
       ...(designationId && { designationId }),
       ...(status && { status: status as any }),
       ...(employmentType && { employmentType: employmentType as any }),

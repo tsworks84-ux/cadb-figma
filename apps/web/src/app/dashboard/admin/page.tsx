@@ -315,6 +315,11 @@ function RolesTab({ isSA }: { isSA: boolean }) {
     queryFn: () => api.get("/api/v1/roles").then((r) => r.data.data),
   });
 
+  const { data: customRoles = [] } = useQuery<any[]>({
+    queryKey: ["custom-roles"],
+    queryFn: () => api.get("/api/v1/roles/custom").then((r) => r.data.data),
+  });
+
   const updateMut = useMutation({
     mutationFn: ({ role, module, perms }: { role: string; module: string; perms: Record<string, boolean> }) =>
       api.put(`/api/v1/roles/${role}/${module}`, perms),
@@ -350,8 +355,12 @@ function RolesTab({ isSA }: { isSA: boolean }) {
     updateMut.mutate({ role, module, perms: payload });
   }
 
-  const ROLE_ORDER = ["SUPER_ADMIN", "HR_ADMIN", "DEPT_HEAD", "EMPLOYEE"];
+  const SYSTEM_ROLE_ORDER = ["SUPER_ADMIN", "HR_ADMIN", "DEPT_HEAD", "EMPLOYEE"];
   const COLS = PERMS.length;
+  const allRoles = [
+    ...SYSTEM_ROLE_ORDER.map((r) => ({ name: r, label: ROLE_META[r].label, color: ROLE_META[r].color, description: ROLE_META[r].description, isCustom: false })),
+    ...(customRoles as any[]).map((r) => ({ name: r.name, label: r.label, color: "bg-orange-100 text-orange-700", description: `Custom role · ${r.deptAccess.length} dept${r.deptAccess.length !== 1 ? "s" : ""}`, isCustom: true })),
+  ];
 
   return (
     <div className="space-y-4">
@@ -376,8 +385,7 @@ function RolesTab({ isSA }: { isSA: boolean }) {
         </div>
       ) : (
         <div className="space-y-3">
-          {ROLE_ORDER.map((role) => {
-            const meta = ROLE_META[role];
+          {allRoles.map(({ name: role, label, color, description, isCustom }) => {
             const isLocked = role === "SUPER_ADMIN";
             const isOpen = expandedRole === role;
 
@@ -388,10 +396,11 @@ function RolesTab({ isSA }: { isSA: boolean }) {
                   onClick={() => setExpandedRole(isOpen ? null : role)}
                   className="w-full flex items-center gap-4 px-5 py-4 hover:bg-gray-50 transition-colors text-left"
                 >
-                  <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${meta.color}`}>
-                    {meta.label}
+                  <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${color}`}>
+                    {label}
                   </span>
-                  <span className="text-sm text-gray-500 flex-1">{meta.description}</span>
+                  <span className="text-sm text-gray-500 flex-1">{description}</span>
+                  {isCustom && <span className="text-xs text-orange-500 font-medium">Custom</span>}
                   {isLocked && <span className="text-xs text-gray-400 italic">Locked</span>}
                   <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${isOpen ? "rotate-180" : ""}`} />
                 </button>
@@ -846,6 +855,244 @@ function LeavePoliciesTab() {
   );
 }
 
+// ── Custom Roles Tab ──────────────────────────────────────────────────────────
+function CustomRolesTab() {
+  const qc = useQueryClient();
+  const [showCreate, setShowCreate] = useState(false);
+  const [editingName, setEditingName] = useState<string | null>(null);
+  const [form, setForm] = useState({ label: "", name: "", departmentIds: [] as string[] });
+  const [editForm, setEditForm] = useState({ label: "", departmentIds: [] as string[] });
+
+  const { data: customRoles = [], isLoading } = useQuery<any[]>({
+    queryKey: ["custom-roles"],
+    queryFn: () => api.get("/api/v1/roles/custom").then((r) => r.data.data),
+  });
+
+  const { data: departments = [] } = useQuery<any[]>({
+    queryKey: ["departments-admin"],
+    queryFn: () => api.get("/api/v1/departments").then((r) => r.data.data),
+  });
+
+  const createMut = useMutation({
+    mutationFn: () => api.post("/api/v1/roles/custom", {
+      name: form.name,
+      label: form.label,
+      departmentIds: form.departmentIds,
+    }),
+    onSuccess: () => {
+      toast.success("Role created");
+      qc.invalidateQueries({ queryKey: ["custom-roles"] });
+      qc.invalidateQueries({ queryKey: ["role-permissions"] });
+      setShowCreate(false);
+      setForm({ label: "", name: "", departmentIds: [] });
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
+  });
+
+  const updateMut = useMutation({
+    mutationFn: (name: string) => api.patch(`/api/v1/roles/custom/${name}`, {
+      label: editForm.label,
+      departmentIds: editForm.departmentIds,
+    }),
+    onSuccess: () => {
+      toast.success("Role updated");
+      qc.invalidateQueries({ queryKey: ["custom-roles"] });
+      setEditingName(null);
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (name: string) => api.delete(`/api/v1/roles/custom/${name}`),
+    onSuccess: () => {
+      toast.success("Role deleted");
+      qc.invalidateQueries({ queryKey: ["custom-roles"] });
+      qc.invalidateQueries({ queryKey: ["role-permissions"] });
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
+  });
+
+  function labelToName(label: string) {
+    return label.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_|_$/g, "");
+  }
+
+  function startEdit(role: any) {
+    setEditingName(role.name);
+    setEditForm({
+      label: role.label,
+      departmentIds: role.deptAccess.map((d: any) => d.departmentId),
+    });
+  }
+
+  function DeptMultiSelect({ value, onChange }: { value: string[]; onChange: (ids: string[]) => void }) {
+    function toggle(id: string) {
+      onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
+    }
+    return (
+      <div className="grid grid-cols-2 gap-1.5 mt-1">
+        {(departments as any[]).map((d) => (
+          <label key={d.id} className={`flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer text-sm transition-colors ${
+            value.includes(d.id) ? "border-blue-400 bg-blue-50 text-blue-800" : "border-gray-200 text-gray-600 hover:border-gray-300"
+          }`}>
+            <input type="checkbox" className="hidden" checked={value.includes(d.id)} onChange={() => toggle(d.id)} />
+            <span className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 ${value.includes(d.id) ? "bg-blue-500 border-blue-500" : "border-gray-300"}`}>
+              {value.includes(d.id) && <Check className="h-2.5 w-2.5 text-white" />}
+            </span>
+            {d.name}
+          </label>
+        ))}
+      </div>
+    );
+  }
+
+  const deptMap = Object.fromEntries((departments as any[]).map((d) => [d.id, d.name]));
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500">{customRoles.length} custom role{customRoles.length !== 1 ? "s" : ""}</p>
+        <button
+          onClick={() => setShowCreate(true)}
+          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+        >
+          <Plus className="h-4 w-4" /> New Role
+        </button>
+      </div>
+
+      {/* Create form */}
+      {showCreate && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-5 space-y-4">
+          <h3 className="text-sm font-semibold text-gray-800">Create Custom Role</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Display Name</label>
+              <Input
+                autoFocus
+                value={form.label}
+                onChange={(e) => setForm((f) => ({ ...f, label: e.target.value, name: labelToName(e.target.value) }))}
+                placeholder="e.g. Finance Head"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Role Key <span className="text-gray-400 normal-case font-normal">(auto-generated)</span></label>
+              <Input
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "") }))}
+                placeholder="FINANCE_HEAD"
+                className="mt-1 font-mono"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Department Access</label>
+            <p className="text-xs text-gray-400 mt-0.5 mb-2">This role can view employees from the selected departments.</p>
+            <DeptMultiSelect value={form.departmentIds} onChange={(ids) => setForm((f) => ({ ...f, departmentIds: ids }))} />
+          </div>
+          <div className="flex gap-3 pt-1">
+            <button
+              onClick={() => createMut.mutate()}
+              disabled={!form.label || !form.name || form.departmentIds.length === 0 || createMut.isPending}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {createMut.isPending ? "Creating…" : "Create Role"}
+            </button>
+            <button
+              onClick={() => { setShowCreate(false); setForm({ label: "", name: "", departmentIds: [] }); }}
+              className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Role list */}
+      {isLoading ? (
+        <div className="space-y-3">
+          {[1, 2].map((i) => <div key={i} className="h-20 rounded-xl border border-gray-200 bg-white animate-pulse" />)}
+        </div>
+      ) : customRoles.length === 0 && !showCreate ? (
+        <div className="rounded-xl border border-dashed border-gray-200 bg-white py-16 text-center">
+          <Users className="h-8 w-8 text-gray-300 mx-auto mb-3" />
+          <p className="text-sm font-medium text-gray-500">No custom roles yet</p>
+          <p className="text-xs text-gray-400 mt-1">Create a role to define cross-department access for specific positions.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {customRoles.map((role: any) => (
+            <div key={role.name} className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+              {editingName === role.name ? (
+                <div className="p-5 space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Display Name</label>
+                      <Input value={editForm.label} onChange={(e) => setEditForm((f) => ({ ...f, label: e.target.value }))} className="mt-1" autoFocus />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Role Key</label>
+                      <Input value={role.name} disabled className="mt-1 font-mono bg-gray-50 text-gray-400" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Department Access</label>
+                    <DeptMultiSelect value={editForm.departmentIds} onChange={(ids) => setEditForm((f) => ({ ...f, departmentIds: ids }))} />
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => updateMut.mutate(role.name)}
+                      disabled={!editForm.label || editForm.departmentIds.length === 0 || updateMut.isPending}
+                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {updateMut.isPending ? "Saving…" : "Save Changes"}
+                    </button>
+                    <button onClick={() => setEditingName(null)} className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-4 px-5 py-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-gray-900 text-sm">{role.label}</span>
+                      <span className="font-mono text-xs text-gray-400 bg-gray-100 rounded px-1.5 py-0.5">{role.name}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {role.deptAccess.map((d: any) => (
+                        <span key={d.departmentId} className="rounded-full bg-blue-100 text-blue-700 px-2.5 py-0.5 text-xs font-medium">
+                          {deptMap[d.departmentId] ?? d.departmentId}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button onClick={() => startEdit(role)} className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-100">
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => { if (confirm(`Delete role "${role.label}"? Employees with this role will lose access.`)) deleteMut.mutate(role.name); }}
+                      disabled={deleteMut.isPending}
+                      className="rounded-lg border border-gray-200 p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
+        After creating a role, go to <strong>Roles &amp; Permissions</strong> to configure what this role can view, edit, approve, etc.
+        Department access here only controls which employees they can see — module permissions are set separately.
+      </div>
+    </div>
+  );
+}
+
 // ── Work Locations Tab ────────────────────────────────────────────────────────
 function WorkLocationsTab() {
   const qc = useQueryClient();
@@ -948,6 +1195,7 @@ const TABS = [
   { id: "designations",   label: "Designations" },
   { id: "leaves",         label: "Leave Policies" },
   { id: "work-locations", label: "Work Locations" },
+  { id: "custom-roles",   label: "Custom Roles" },
   { id: "roles",          label: "Roles & Permissions" },
 ] as const;
 
@@ -993,6 +1241,7 @@ export default function AdminPage() {
       {tab === "designations"   && <DesignationsTab />}
       {tab === "leaves"         && <LeavePoliciesTab />}
       {tab === "work-locations" && <WorkLocationsTab />}
+      {tab === "custom-roles"   && <CustomRolesTab />}
       {tab === "roles"          && <RolesTab isSA={isSA} />}
     </div>
   );

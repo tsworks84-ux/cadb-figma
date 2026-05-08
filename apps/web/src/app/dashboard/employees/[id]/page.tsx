@@ -2759,6 +2759,12 @@ export default function EmployeeDetailPage() {
   const adminCanDelete  = (mod: string) => isAdmin && (permissions[mod]?.canDelete ?? false);
   const canEdit = adminCanEdit("EMP_PROFILE") || isSelfView;
   const isSA = currentUser?.role === "SUPER_ADMIN";
+  const { data: customRoles = [] } = useQuery<{ name: string; label: string }[]>({
+    queryKey: ["custom-roles"],
+    queryFn: () => api.get("/api/v1/roles/custom").then((r) => r.data.data),
+    enabled: isSA,
+    staleTime: 5 * 60 * 1000,
+  });
   const [editingPersonal, setEditingPersonal] = useState(() => searchParams.get("edit") === "true");
   const [editingRole, setEditingRole] = useState(false);
   const [roleDraft, setRoleDraft] = useState("");
@@ -3309,6 +3315,10 @@ export default function EmployeeDetailPage() {
                         <option value="DEPT_HEAD">Manager (Dept Head)</option>
                         <option value="HR_ADMIN">HR Admin</option>
                         <option value="SUPER_ADMIN">Super Admin</option>
+                        {customRoles.length > 0 && <option disabled>──────────</option>}
+                        {customRoles.map((r) => (
+                          <option key={r.name} value={r.name}>{r.label}</option>
+                        ))}
                       </select>
                       <button onClick={async () => {
                         try {
