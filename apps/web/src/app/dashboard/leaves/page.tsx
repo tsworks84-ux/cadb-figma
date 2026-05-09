@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuthStore } from "@/store/auth";
-import { CalendarDays, Plus, Paperclip, XCircle, ChevronRight, Clock } from "lucide-react";
+import { CalendarDays, Plus, Paperclip, XCircle, ChevronRight, Clock, AlertTriangle, X, FileText } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -227,7 +227,8 @@ function ApplyForm({
   }, [form.fromDate, form.toDate, form.duration]);
 
   const selectedBalance = balances.find((b) => b.leaveType === form.leaveType);
-  const balanceAfter = selectedBalance ? Math.max(0, selectedBalance.balance - previewDays) : 0;
+  const isInsufficient = !!selectedBalance && previewDays > 0 && previewDays > selectedBalance.balance;
+  const balanceAfter = selectedBalance ? selectedBalance.balance - previewDays : 0;
 
   const applyMut = useMutation({
     mutationFn: async () => {
@@ -397,20 +398,34 @@ function ApplyForm({
 
         {/* Request summary bar */}
         {previewDays > 0 && (
-          <div className="flex items-center justify-between bg-gray-50 border border-gray-100 rounded-xl px-4 py-3">
-            <div>
-              <p className="text-xs text-gray-500 mb-0.5">Request summary</p>
-              <p className="text-sm font-bold text-gray-900">
-                {previewDays} working {previewDays === 1 ? "day" : "days"} · {LEAVE_LABEL[form.leaveType]}
-                {isHalfDay ? ` (${form.duration === "FIRST_HALF" ? "First" : "Second"} half)` : ""}
-              </p>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between bg-gray-50 border border-gray-100 rounded-xl px-4 py-3">
+              <div>
+                <p className="text-xs text-gray-500 mb-0.5">Request summary</p>
+                <p className="text-sm font-bold text-gray-900">
+                  {previewDays} working {previewDays === 1 ? "day" : "days"} · {LEAVE_LABEL[form.leaveType]}
+                  {isHalfDay ? ` (${form.duration === "FIRST_HALF" ? "First" : "Second"} half)` : ""}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-gray-400">Balance after approval</p>
+                <p className={`text-sm font-bold ${balanceAfter < 0 ? "text-red-500" : balanceAfter === 0 ? "text-orange-500" : "text-gray-800"}`}>
+                  {balanceAfter} {Math.abs(balanceAfter) === 1 ? "day" : "days"}
+                </p>
+              </div>
             </div>
-            <div className="text-right">
-              <p className="text-xs text-gray-400">Balance after approval</p>
-              <p className={`text-sm font-bold ${balanceAfter === 0 ? "text-red-500" : "text-gray-800"}`}>
-                {balanceAfter} {balanceAfter === 1 ? "day" : "days"}
-              </p>
-            </div>
+            {isInsufficient && (
+              <div className="flex items-start gap-2.5 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3">
+                <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-orange-800">Insufficient leave balance</p>
+                  <p className="text-xs text-orange-700 mt-0.5">
+                    You have {selectedBalance!.balance} {selectedBalance!.balance === 1 ? "day" : "days"} available but are requesting {previewDays} {previewDays === 1 ? "day" : "days"}.
+                    Your application will still be sent to your supervisor — approval is at their discretion.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -429,6 +444,115 @@ function ApplyForm({
   );
 }
 
+// ── Leave Detail Modal ────────────────────────────────────────────────────────
+
+function LeaveDetailModal({ leave, onClose, onCancel }: {
+  leave: LeaveApplication;
+  onClose: () => void;
+  onCancel: (id: string) => void;
+}) {
+  const c = LEAVE_COLORS[leave.leaveType] ?? LEAVE_COLORS.UNPAID;
+  const sameDay = leave.fromDate.slice(0, 10) === leave.toDate.slice(0, 10);
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+        {/* Header */}
+        <div className={`${c.bg} ${c.border} border-b rounded-t-2xl px-6 py-4 flex items-start justify-between`}>
+          <div>
+            <span className={`text-xs font-bold uppercase tracking-wider ${c.text}`}>
+              {LEAVE_LABEL[leave.leaveType] ?? leave.leaveType}
+            </span>
+            <p className="text-lg font-bold text-gray-900 mt-0.5">
+              {sameDay ? fmtShort(leave.fromDate) : `${fmtShort(leave.fromDate)} – ${fmtShort(leave.toDate)}`}
+            </p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {sameDay ? fmtDayName(leave.fromDate) : `${fmtDayName(leave.fromDate)} – ${fmtDayName(leave.toDate)}`}
+              {" · "}{leave.totalDays} {leave.totalDays === 1 ? "day" : "days"}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 mt-0.5">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-6 py-5 space-y-4">
+          {/* Status */}
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Status</span>
+            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${STATUS_STYLES[leave.status] ?? "bg-gray-100 text-gray-500"}`}>
+              {leave.status.charAt(0) + leave.status.slice(1).toLowerCase()}
+            </span>
+          </div>
+
+          {/* Reason */}
+          <div>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Reason</p>
+            <p className="text-sm text-gray-800 bg-gray-50 rounded-xl px-4 py-3">{leave.reason}</p>
+          </div>
+
+          {/* Rejection note */}
+          {leave.rejectionNote && (
+            <div className="flex items-start gap-2 rounded-xl bg-red-50 border border-red-100 px-4 py-3">
+              <XCircle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-red-700 mb-0.5">Rejection Reason</p>
+                <p className="text-sm text-red-700">{leave.rejectionNote}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Meta grid */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-gray-50 rounded-xl px-4 py-3">
+              <p className="text-xs text-gray-400 mb-0.5">Applied on</p>
+              <p className="text-sm font-semibold text-gray-800">{fmtShort(leave.createdAt)}</p>
+            </div>
+            <div className="bg-gray-50 rounded-xl px-4 py-3">
+              <p className="text-xs text-gray-400 mb-0.5">Approver</p>
+              <p className="text-sm font-semibold text-gray-800">
+                {leave.approver ? `${leave.approver.firstName} ${leave.approver.lastName}` : "—"}
+              </p>
+            </div>
+          </div>
+
+          {/* Document */}
+          {leave.documentUrl && (
+            <a
+              href={`${API_BASE}${leave.documentUrl}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700 hover:bg-blue-100 transition-colors"
+            >
+              <FileText className="h-4 w-4 shrink-0" />
+              View attached document
+            </a>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 pb-5 flex justify-end gap-2">
+          {leave.status === "PENDING" && (
+            <button
+              onClick={() => { onCancel(leave.id); onClose(); }}
+              className="px-4 py-2 text-sm font-semibold text-red-600 border border-red-200 rounded-xl hover:bg-red-50 transition-colors"
+            >
+              Cancel Leave
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Leave History ─────────────────────────────────────────────────────────────
 
 function LeaveHistory({
@@ -439,6 +563,7 @@ function LeaveHistory({
   onCancel: (id: string) => void;
 }) {
   const [filter, setFilter] = useState<"ALL" | "PENDING" | "APPROVED">("ALL");
+  const [selected, setSelected] = useState<LeaveApplication | null>(null);
 
   const filtered = leaves.filter((l) => {
     if (filter === "PENDING")  return l.status === "PENDING";
@@ -447,108 +572,104 @@ function LeaveHistory({
   });
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-50">
-        <div>
-          <h2 className="font-semibold text-gray-900">Leave History</h2>
-          <p className="text-xs text-gray-400 mt-0.5">Recent applications and approval status.</p>
-        </div>
-        <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-          {(["ALL", "PENDING", "APPROVED"] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors ${
-                filter === f ? "bg-white text-gray-800 shadow-sm" : "text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              {f.charAt(0) + f.slice(1).toLowerCase()}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center px-6">
-          <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center mb-3">
-            <CalendarDays className="h-6 w-6 text-blue-400" />
-          </div>
-          <p className="text-sm font-medium text-gray-600">No leave applications yet</p>
-          <p className="text-xs text-gray-400 mt-1">Your submitted leave requests will appear here with approval status and balance impact.</p>
-        </div>
-      ) : (
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-gray-50">
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Type</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Dates</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Days</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Status</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Approver</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Applied</th>
-              <th className="px-6 py-3" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-50">
-            {filtered.map((l) => {
-              const sameDay = l.fromDate.slice(0, 10) === l.toDate.slice(0, 10);
-              const dateStr = sameDay
-                ? fmtShort(l.fromDate)
-                : `${fmtShort(l.fromDate)} – ${fmtShort(l.toDate)}`;
-              const dayStr = sameDay
-                ? fmtDayName(l.fromDate)
-                : `${fmtDayName(l.fromDate)} – ${fmtDayName(l.toDate)}`;
-
-              return (
-                <tr key={l.id} className="hover:bg-gray-50/50 transition-colors">
-                  <td className="px-6 py-4">
-                    <p className="text-sm font-semibold text-gray-800">{LEAVE_LABEL[l.leaveType] ?? l.leaveType}</p>
-                    <p className="text-xs text-gray-400 mt-0.5 truncate max-w-[140px]">{l.reason}</p>
-                  </td>
-                  <td className="px-6 py-4">
-                    <p className="text-sm text-gray-700">{dateStr}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{dayStr}</p>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-700">{l.totalDays}</td>
-                  <td className="px-6 py-4">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[l.status] ?? "bg-gray-100 text-gray-500"}`}>
-                      {l.status.charAt(0) + l.status.slice(1).toLowerCase()}
-                    </span>
-                    {l.rejectionNote && (
-                      <p className="text-xs text-red-400 mt-0.5">{l.rejectionNote}</p>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-600">
-                    {l.approver ? `${l.approver.firstName} ${l.approver.lastName}` : "—"}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-400">{fmtShort(l.createdAt)}</td>
-                  <td className="px-6 py-4 text-right">
-                    {l.status === "PENDING" && (
-                      <button
-                        onClick={() => onCancel(l.id)}
-                        className="text-xs text-red-400 hover:text-red-600 font-medium"
-                      >
-                        Cancel
-                      </button>
-                    )}
-                    {l.documentUrl && (
-                      <a
-                        href={`${API_BASE}${l.documentUrl}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="ml-3 text-xs text-blue-400 hover:underline"
-                      >
-                        Doc
-                      </a>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+    <>
+      {selected && (
+        <LeaveDetailModal
+          leave={selected}
+          onClose={() => setSelected(null)}
+          onCancel={onCancel}
+        />
       )}
-    </div>
+
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-50">
+          <div>
+            <h2 className="font-semibold text-gray-900">Leave History</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Recent applications and approval status.</p>
+          </div>
+          <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+            {(["ALL", "PENDING", "APPROVED"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors ${
+                  filter === f ? "bg-white text-gray-800 shadow-sm" : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                {f.charAt(0) + f.slice(1).toLowerCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center px-6">
+            <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center mb-3">
+              <CalendarDays className="h-6 w-6 text-blue-400" />
+            </div>
+            <p className="text-sm font-medium text-gray-600">No leave applications yet</p>
+            <p className="text-xs text-gray-400 mt-1">Your submitted leave requests will appear here with approval status and balance impact.</p>
+          </div>
+        ) : (
+          <div className="overflow-y-auto max-h-96">
+            <table className="w-full">
+              <thead className="sticky top-0 bg-white z-10">
+                <tr className="border-b border-gray-50">
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Type</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Dates</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Days</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Approver</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Applied</th>
+                  <th className="px-6 py-3" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {filtered.map((l) => {
+                  const sameDay = l.fromDate.slice(0, 10) === l.toDate.slice(0, 10);
+                  const dateStr = sameDay
+                    ? fmtShort(l.fromDate)
+                    : `${fmtShort(l.fromDate)} – ${fmtShort(l.toDate)}`;
+                  const dayStr = sameDay
+                    ? fmtDayName(l.fromDate)
+                    : `${fmtDayName(l.fromDate)} – ${fmtDayName(l.toDate)}`;
+
+                  return (
+                    <tr
+                      key={l.id}
+                      onClick={() => setSelected(l)}
+                      className="hover:bg-blue-50/40 transition-colors cursor-pointer"
+                    >
+                      <td className="px-6 py-4">
+                        <p className="text-sm font-semibold text-gray-800">{LEAVE_LABEL[l.leaveType] ?? l.leaveType}</p>
+                        <p className="text-xs text-gray-400 mt-0.5 truncate max-w-[140px]">{l.reason}</p>
+                      </td>
+                      <td className="px-6 py-4">
+                        <p className="text-sm text-gray-700">{dateStr}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">{dayStr}</p>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-700">{l.totalDays}</td>
+                      <td className="px-6 py-4">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[l.status] ?? "bg-gray-100 text-gray-500"}`}>
+                          {l.status.charAt(0) + l.status.slice(1).toLowerCase()}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-600">
+                        {l.approver ? `${l.approver.firstName} ${l.approver.lastName}` : "—"}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-400">{fmtShort(l.createdAt)}</td>
+                      <td className="px-6 py-4 text-right">
+                        <ChevronRight className="h-4 w-4 text-gray-300 inline-block" />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 

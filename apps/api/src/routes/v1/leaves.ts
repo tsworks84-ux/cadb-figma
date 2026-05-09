@@ -75,15 +75,7 @@ export async function leaveRoutes(fastify: FastifyInstance) {
       where: { employeeId_leaveType_year: { employeeId: user.sub, leaveType, year } },
     });
 
-    const accrued = balance ? computeAccrued(balance.allocated, year) : 0;
-    if (!balance || accrued - balance.used - balance.pending < totalDays) {
-      return reply.status(400).send({
-        success: false,
-        error: `Insufficient leave balance. Requested: ${totalDays} day(s), available: ${Math.max(0, accrued - (balance?.used ?? 0) - (balance?.pending ?? 0))}`,
-        statusCode: 400,
-      });
-    }
-
+    // Allow application even with insufficient balance — supervisor decides
     const [application] = await prisma.$transaction([
       prisma.leaveApplication.create({
         data: {
@@ -97,8 +89,9 @@ export async function leaveRoutes(fastify: FastifyInstance) {
           documentUrl,
         },
       }),
-      prisma.leaveBalance.update({
-        where: { employeeId_leaveType_year: { employeeId: user.sub, leaveType, year } },
+      // Only update pending count if a balance record exists
+      prisma.leaveBalance.updateMany({
+        where: { employeeId: user.sub, leaveType, year },
         data: { pending: { increment: totalDays } },
       }),
     ]);

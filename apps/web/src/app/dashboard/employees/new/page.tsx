@@ -634,6 +634,7 @@ export default function NewEmployeePage() {
   const { data: designations } = useQuery({ queryKey: ["designations"], queryFn: () => api.get("/api/v1/designations").then((r) => r.data.data), staleTime: Infinity });
   const { data: employees }    = useQuery({ queryKey: ["employees-list"], queryFn: () => api.get("/api/v1/employees", { params: { limit: 500 } }).then((r) => r.data.data), staleTime: Infinity });
   const { data: workLocations } = useQuery({ queryKey: ["work-locations"], queryFn: () => api.get("/api/v1/work-locations").then((r) => r.data.data as { id: string; name: string }[]), staleTime: Infinity });
+  const { data: customRoles = [] } = useQuery<{ name: string; label: string }[]>({ queryKey: ["custom-roles"], queryFn: () => api.get("/api/v1/roles/custom").then((r) => r.data.data), staleTime: 5 * 60 * 1000 });
 
   // ── Live checklist for Step 1 ─────────────────────────────────────────────
   const checklist = [
@@ -1041,27 +1042,25 @@ export default function NewEmployeePage() {
 
                   {/* Access Level */}
                   <div className="px-6 py-5 border-b border-gray-100">
-                    <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center justify-between mb-3">
                       <p className="text-sm font-semibold text-gray-700">Access Level</p>
                       <span className="text-xs text-gray-400">Dashboard permissions</span>
                     </div>
-                    <div className="grid grid-cols-3 gap-3">
-                      {[
-                        { value: "EMPLOYEE",    label: "Employee",   desc: "Self-service dashboard, tasks, leaves, policies, and training." },
-                        { value: "DEPT_HEAD",   label: "Manager",    desc: "Team visibility, leave approvals, task review, and reports." },
-                        { value: "HR_ADMIN",    label: "Admin",      desc: "Employee data, announcements, policies, and configuration." },
-                      ].map((opt) => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => setValue("role", opt.value as any)}
-                          className={`flex flex-col gap-1.5 rounded-xl border-2 px-4 py-3.5 text-left transition-colors ${role === opt.value ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:border-gray-300 bg-white"}`}
-                        >
-                          <p className={`text-sm font-semibold ${role === opt.value ? "text-blue-700" : "text-gray-800"}`}>{opt.label}</p>
-                          <p className="text-xs text-gray-500 leading-snug">{opt.desc}</p>
-                        </button>
-                      ))}
-                    </div>
+                    <SelectEl value={role} onChange={(e) => setValue("role", e.target.value as any)}>
+                      <optgroup label="System Roles">
+                        <option value="EMPLOYEE">Employee — Self-service dashboard, tasks, leaves, policies and training</option>
+                        <option value="DEPT_HEAD">Manager (Dept Head) — Team visibility, leave approvals, task review and reports</option>
+                        <option value="HR_ADMIN">HR Admin — Employee data, announcements, policies and configuration</option>
+                        <option value="SUPER_ADMIN">Super Admin — Full unrestricted access</option>
+                      </optgroup>
+                      {customRoles.length > 0 && (
+                        <optgroup label="Custom Roles">
+                          {customRoles.map((r) => (
+                            <option key={r.name} value={r.name}>{r.label}</option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </SelectEl>
                   </div>
 
                   {/* Login Setup */}
