@@ -161,6 +161,28 @@ export async function claimRoutes(fastify: FastifyInstance) {
     return reply.status(201).send({ success: true, data: receipt });
   });
 
+  // ── Delete a draft claim (employee only, DRAFT status) ───────────────────
+  fastify.delete("/:id", async (request, reply) => {
+    const user = request.user as JwtPayload;
+    const { id } = request.params as { id: string };
+
+    const claim = await prisma.reimbursementClaim.findFirst({
+      where: { id, employeeId: user.sub, status: "DRAFT" },
+      include: { receipts: true },
+    });
+    if (!claim) return reply.status(404).send({ success: false, error: "Draft claim not found", statusCode: 404 });
+
+    for (const receipt of claim.receipts) {
+      try {
+        const filePath = join(__dirname, "../../../uploads", receipt.fileUrl.replace("/uploads/", ""));
+        unlinkSync(filePath);
+      } catch { /* file may already be gone */ }
+    }
+
+    await prisma.reimbursementClaim.delete({ where: { id } });
+    return reply.send({ success: true, data: null });
+  });
+
   // ── Delete a receipt ──────────────────────────────────────────────────────
   fastify.delete("/:id/receipts/:rid", async (request, reply) => {
     const user = request.user as JwtPayload;

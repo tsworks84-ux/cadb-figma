@@ -169,20 +169,11 @@ function ReceiptUploader({ claimId, onUploaded }: { claimId: string; onUploaded:
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const token = localStorage.getItem("cadb_access_token");
-      const res = await fetch(`${API_BASE}/api/v1/claims/${claimId}/receipts`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: fd,
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error ?? "Upload failed");
-      }
+      await api.post(`/api/v1/claims/${claimId}/receipts`, fd);
       onUploaded();
       toast.success("Receipt uploaded");
     } catch (e: any) {
-      toast.error(e.message ?? "Upload failed");
+      toast.error(e.response?.data?.error ?? e.message ?? "Upload failed");
     } finally {
       setUploading(false);
     }
@@ -272,6 +263,16 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
       onClose();
     },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => api.delete(`/api/v1/claims/${claimId}`),
+    onSuccess: () => {
+      toast.success("Draft claim deleted");
+      qc.invalidateQueries({ queryKey: ["my-claims"] });
+      onClose();
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to delete"),
   });
 
   if (isLoading) {
@@ -441,6 +442,19 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
 
         {/* Action buttons */}
         <div className="flex gap-2 justify-end pt-1 border-t border-gray-100">
+          {isDraft && (isOwnClaim || !isAdmin) && (
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm("Delete this draft claim? This cannot be undone.")) deleteMutation.mutate();
+              }}
+              disabled={deleteMutation.isPending}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50 mr-auto"
+            >
+              <Trash2 className="h-4 w-4" />
+              {deleteMutation.isPending ? "Deleting…" : "Delete Draft"}
+            </button>
+          )}
           {isDraft && (isOwnClaim || !isAdmin) && (
             <button
               type="button"
