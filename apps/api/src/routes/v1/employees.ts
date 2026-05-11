@@ -352,8 +352,12 @@ export async function employeeRoutes(fastify: FastifyInstance) {
     }
 
     const { passwordHash, aadhaarEncrypted, panEncrypted, ...safe } = employee;
+    // Return masked PAN so the employee can confirm it's on file without exposing the full number
+    const maskedPan = panEncrypted
+      ? panEncrypted.slice(0, 2) + "XXXXXXX" + panEncrypted.slice(-1)
+      : null;
     const completeness = profileCompleteness(safe as any);
-    return reply.send({ success: true, data: { ...safe, ...completeness } });
+    return reply.send({ success: true, data: { ...safe, pan: maskedPan, ...completeness } });
   });
 
   // Create employee (HR_ADMIN / SUPER_ADMIN only)
@@ -482,6 +486,7 @@ export async function employeeRoutes(fastify: FastifyInstance) {
       "dateOfBirth", "gender", "maritalStatus", "bloodGroup", "religion", "nationality",
       "currentAddress", "permanentAddress",
       "emergencyContactName", "emergencyContactPhone", "emergencyRelation",
+      "panEncrypted",
     ];
     const updateData: Record<string, unknown> = {};
 
@@ -496,6 +501,14 @@ export async function employeeRoutes(fastify: FastifyInstance) {
       if (user.role !== "SUPER_ADMIN") {
         delete updateData.role;
       }
+    }
+
+    if (updateData.panEncrypted !== undefined) {
+      const pan = String(updateData.panEncrypted).toUpperCase();
+      if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) {
+        return reply.status(400).send({ success: false, error: "Invalid PAN format. Must be like ABCDE1234F", statusCode: 400 });
+      }
+      updateData.panEncrypted = pan;
     }
 
     const updated = await prisma.employee.update({

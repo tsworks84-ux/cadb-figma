@@ -427,6 +427,8 @@ const addrSchema = z.object({
 });
 
 const personalEditSchema = z.object({
+  panEncrypted: z.string()
+    .refine((v) => v === "" || /^[A-Za-z]{5}[0-9]{4}[A-Za-z]$/.test(v), "Invalid PAN (e.g. ABCDE1234F)"),
   personalPhone: z.string().length(10, "Must be 10 digits").optional().or(z.literal("")),
   officialPhone: z.string().length(10).optional().or(z.literal("")),
   personalEmail: z.string().email().optional().or(z.literal("")),
@@ -458,6 +460,7 @@ function EditPersonalForm({
   const { register, handleSubmit, formState: { errors } } = useForm<PersonalEditForm>({
     resolver: zodResolver(personalEditSchema),
     defaultValues: {
+      panEncrypted: "",
       personalPhone: emp.personalPhone ?? "",
       officialPhone: emp.officialPhone ?? "",
       personalEmail: emp.personalEmail ?? "",
@@ -489,6 +492,8 @@ function EditPersonalForm({
   const mutation = useMutation({
     mutationFn: (data: PersonalEditForm) => {
       const payload: Record<string, any> = { ...data };
+      if (!payload.panEncrypted) delete payload.panEncrypted;
+      else payload.panEncrypted = payload.panEncrypted.toUpperCase();
       if (!payload.personalPhone) delete payload.personalPhone;
       if (!payload.officialPhone) delete payload.officialPhone;
       if (!payload.personalEmail) delete payload.personalEmail;
@@ -574,6 +579,24 @@ function EditPersonalForm({
           </div>
           <FInput label="Official Phone" maxLength={10} {...register("officialPhone")} />
           <FInput label="Personal Email" type="email" {...register("personalEmail")} />
+        </div>
+      </div>
+
+      {/* PAN */}
+      <div className="rounded-xl border border-amber-100 bg-amber-50 p-5">
+        <h3 className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-1">PAN Number <span className="text-red-500">*</span></h3>
+        {emp.pan
+          ? <p className="text-xs text-amber-600 mb-3">PAN on file: <span className="font-mono font-semibold">{emp.pan}</span> — enter below only if updating</p>
+          : <p className="text-xs text-red-600 font-medium mb-3">PAN not on file — please enter your PAN number</p>
+        }
+        <div className="max-w-xs">
+          <FInput
+            label=""
+            placeholder={emp.pan ? "Enter new PAN to update" : "e.g. ABCDE1234F (required)"}
+            maxLength={10}
+            {...register("panEncrypted")}
+          />
+          <ErrMsg err={errors.panEncrypted} />
         </div>
       </div>
 
@@ -3247,6 +3270,10 @@ export default function EmployeeDetailPage() {
               <Field label="Blood Group" value={emp.bloodGroup?.replace("_", " ")} />
               <Field label="Nationality" value={emp.nationality} />
               <Field label="Religion" value={emp.religion} />
+              <Field
+                label="PAN Number"
+                value={emp.pan ?? <span className="text-red-500 text-xs font-medium">Not on file — please update</span>}
+              />
             </Section>
             <Section title="Contact">
               <Field label="Personal Phone" value={emp.personalPhone} />
