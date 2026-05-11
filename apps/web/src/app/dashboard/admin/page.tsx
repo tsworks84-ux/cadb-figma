@@ -39,6 +39,7 @@ const MODULE_ROWS: ModuleRow[] = [
   { key: "MIS_SALARY_DISB",    label: "Monthly Salary Disbursement", indent: true },
   { key: "MIS_LEAVE_RECORDS",  label: "Leave Records",            indent: true },
   { key: "MIS_HOLIDAYS",       label: "Holidays List",            indent: true },
+  { key: "MIS_CLAIMS",         label: "Claims Report",            indent: true },
   { key: "ADMIN",     label: "Admin" },
 ];
 const ROLE_META: Record<string, { label: string; color: string; description: string }> = {

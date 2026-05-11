@@ -7,7 +7,7 @@ const ROLES = ["SUPER_ADMIN", "HR_ADMIN", "DEPT_HEAD", "EMPLOYEE"] as const;
 const MODULES = [
   "EMP_PROFILE", "EMP_DOCUMENTS", "EMP_SALARY", "EMP_BANK", "EMP_LEAVES", "EMP_PAYOUT",
   "LEAVES", "CLAIMS", "POLICIES", "TRAINING",
-  "MIS_EMP_DIRECTORY", "MIS_SALARY_STRUCT", "MIS_SALARY_DISB", "MIS_LEAVE_RECORDS", "MIS_HOLIDAYS",
+  "MIS_EMP_DIRECTORY", "MIS_SALARY_STRUCT", "MIS_SALARY_DISB", "MIS_LEAVE_RECORDS", "MIS_HOLIDAYS", "MIS_CLAIMS",
   "ADMIN",
 ] as const;
 
@@ -28,6 +28,7 @@ const DEFAULT_PERMISSIONS: Record<string, Record<string, Partial<Record<"canView
     MIS_SALARY_DISB:   { canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true, canAppraise: false },
     MIS_LEAVE_RECORDS: { canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true, canAppraise: false },
     MIS_HOLIDAYS:      { canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true, canAppraise: false },
+    MIS_CLAIMS:        { canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true, canAppraise: false },
     ADMIN:             { canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true, canAppraise: false },
   },
   HR_ADMIN: {
@@ -46,6 +47,7 @@ const DEFAULT_PERMISSIONS: Record<string, Record<string, Partial<Record<"canView
     MIS_SALARY_DISB:   { canView: true,  canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
     MIS_LEAVE_RECORDS: { canView: true,  canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
     MIS_HOLIDAYS:      { canView: true,  canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
+    MIS_CLAIMS:        { canView: true,  canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
     ADMIN:             { canView: true,  canCreate: true,  canEdit: true,  canDelete: false, canApprove: false, canAppraise: false },
   },
   DEPT_HEAD: {
@@ -64,6 +66,7 @@ const DEFAULT_PERMISSIONS: Record<string, Record<string, Partial<Record<"canView
     MIS_SALARY_DISB:   { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
     MIS_LEAVE_RECORDS: { canView: true,  canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
     MIS_HOLIDAYS:      { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
+    MIS_CLAIMS:        { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
     ADMIN:             { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
   },
   EMPLOYEE: {
@@ -82,6 +85,7 @@ const DEFAULT_PERMISSIONS: Record<string, Record<string, Partial<Record<"canView
     MIS_SALARY_DISB:   { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
     MIS_LEAVE_RECORDS: { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
     MIS_HOLIDAYS:      { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
+    MIS_CLAIMS:        { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
     ADMIN:             { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
   },
 };

@@ -6,8 +6,9 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
   FileSpreadsheet, Download, Users, ChevronDown, ChevronUp,
-  CheckSquare, Square, Loader2, BarChart3, DollarSign, Banknote, CalendarDays, Receipt,
+  CheckSquare, Square, Loader2, BarChart3, DollarSign, Banknote, CalendarDays, Receipt, Lock,
 } from "lucide-react";
+import { usePermissions } from "@/hooks/usePermissions";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1329,7 +1330,37 @@ function ComingSoonCard({ icon: Icon, title, description }: {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+function AccessDeniedSection({ title }: { title: string }) {
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="flex items-center justify-between px-6 py-5">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-gray-100 rounded-xl"><Lock className="h-5 w-5 text-gray-400" /></div>
+          <div>
+            <h2 className="text-base font-semibold text-gray-400">{title}</h2>
+            <p className="text-xs text-gray-300 mt-0.5">You do not have permission to view this report</p>
+          </div>
+        </div>
+        <span className="text-xs bg-gray-100 text-gray-400 px-2.5 py-1 rounded-full">No Access</span>
+      </div>
+    </div>
+  );
+}
+
 export default function MISReportsPage() {
+  const permissions = usePermissions();
+
+  const canView = {
+    empDir:   permissions["MIS_EMP_DIRECTORY"]?.canView ?? false,
+    salary:   permissions["MIS_SALARY_STRUCT"]?.canView ?? false,
+    disb:     permissions["MIS_SALARY_DISB"]?.canView ?? false,
+    leave:    permissions["MIS_LEAVE_RECORDS"]?.canView ?? false,
+    holidays: permissions["MIS_HOLIDAYS"]?.canView ?? false,
+    claims:   permissions["MIS_CLAIMS"]?.canView ?? false,
+  };
+
+  const hasAnyAccess = Object.values(canView).some(Boolean);
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-5xl mx-auto px-6 py-8">
@@ -1343,18 +1374,24 @@ export default function MISReportsPage() {
           </p>
         </div>
 
-        <div className="space-y-3">
-          <EmployeeDirectoryReport />
-          <SalaryStructuresReport />
-          <MonthlySalaryDisbursementReport />
-          <LeaveRecordsReport />
-          <ClaimsReport />
-          <ComingSoonCard
-            icon={FileSpreadsheet}
-            title="Holidays List"
-            description="Yearly holiday calendar export to Excel and PDF."
-          />
-        </div>
+        {!hasAnyAccess ? (
+          <div className="flex flex-col items-center justify-center py-24 text-center">
+            <div className="p-4 bg-gray-100 rounded-full mb-4"><Lock className="h-8 w-8 text-gray-400" /></div>
+            <h2 className="text-lg font-semibold text-gray-700 mb-1">Access Restricted</h2>
+            <p className="text-sm text-gray-400">You do not have permission to view MIS reports.<br />Contact your Super Admin to request access.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {canView.empDir   ? <EmployeeDirectoryReport />          : <AccessDeniedSection title="Employee Directory" />}
+            {canView.salary   ? <SalaryStructuresReport />           : <AccessDeniedSection title="Salary Structures" />}
+            {canView.disb     ? <MonthlySalaryDisbursementReport />  : <AccessDeniedSection title="Monthly Salary Disbursement" />}
+            {canView.leave    ? <LeaveRecordsReport />               : <AccessDeniedSection title="Leave Records" />}
+            {canView.claims   ? <ClaimsReport />                     : <AccessDeniedSection title="Claims Report" />}
+            {canView.holidays
+              ? <ComingSoonCard icon={FileSpreadsheet} title="Holidays List" description="Yearly holiday calendar export to Excel and PDF." />
+              : <AccessDeniedSection title="Holidays List" />}
+          </div>
+        )}
       </div>
     </div>
   );
