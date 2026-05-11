@@ -209,6 +209,7 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
   claimId: string; onClose: () => void; isAdmin: boolean;
 }) {
   const qc = useQueryClient();
+  const { user: currentUser } = useAuthStore();
   const [showApprovalForm, setShowApprovalForm] = useState(false);
   const [approvalAction, setApprovalAction] = useState<"APPROVED" | "REJECTED">("APPROVED");
   const [approvedAmount, setApprovedAmount] = useState("");
@@ -291,8 +292,8 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
   const isSubmitted = claim.status === "SUBMITTED";
   const isApproved = claim.status === "APPROVED";
   const needsReceipt = claim.claimedAmount > threshold && claim.receipts?.length === 0;
-  const isOwnClaim = !claim?.employee;
-  const canEdit = isDraft && (isOwnClaim || !isAdmin);
+  const isOwnClaim = claim?.employee?.id === currentUser?.id;
+  const canEdit = isDraft && isOwnClaim;
 
   function openApproval(action: "APPROVED" | "REJECTED") {
     setApprovalAction(action);
