@@ -71,15 +71,17 @@ async function generateEmployeeCode(joiningDate: Date): Promise<string> {
   const mm = String(joiningDate.getMonth() + 1).padStart(2, "0");
   const prefix = `${yy}${mm}`;
 
-  const last = await prisma.employee.findFirst({
-    where: { employeeCode: { startsWith: prefix } },
-    orderBy: { employeeCode: "desc" },
-    select: { employeeCode: true },
-  });
+  // Serial is global across all employees (not per-month), ignoring special codes like SA0001
+  const all = await prisma.employee.findMany({ select: { employeeCode: true } });
+  let maxSerial = 0;
+  for (const { employeeCode } of all) {
+    if (/^\d{7}$/.test(employeeCode)) {
+      const s = parseInt(employeeCode.slice(4), 10);
+      if (s > maxSerial) maxSerial = s;
+    }
+  }
 
-  const lastSerial = last ? parseInt(last.employeeCode.slice(4), 10) : 0;
-  const serial = String(lastSerial + 1).padStart(3, "0");
-  return `${prefix}${serial}`;
+  return `${prefix}${String(maxSerial + 1).padStart(3, "0")}`;
 }
 
 const PROFILE_FIELDS = [
