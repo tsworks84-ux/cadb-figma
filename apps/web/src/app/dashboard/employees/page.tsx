@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { formatDate, getInitials } from "@/lib/utils";
-import { Plus, Search, Trash2, ChevronDown, X, AlertTriangle, UserCheck, UserX } from "lucide-react";
+import { Plus, Search, Trash2, ChevronDown, X, AlertTriangle, UserCheck, UserX, Users, CalendarOff, UserPlus, LogOut } from "lucide-react";
 import Link from "next/link";
 import type { EmployeeListItem } from "@cadb/types";
 import { toast } from "sonner";
@@ -173,6 +173,13 @@ export default function EmployeesPage() {
     placeholderData: (prev) => prev,
   });
 
+  const { data: empStats } = useQuery({
+    queryKey: ["employee-stats"],
+    queryFn: () => api.get("/api/v1/employees/stats").then((r) => r.data.data),
+    staleTime: 60 * 1000,
+    enabled: isAdmin,
+  });
+
   const { data: departments } = useQuery({
     queryKey: ["departments"],
     queryFn: () => api.get("/api/v1/departments").then((r) => r.data.data),
@@ -284,6 +291,57 @@ export default function EmployeesPage() {
           <Plus className="h-4 w-4" /> Add Employee
         </Link>
       </div>
+
+      {/* Stats cards */}
+      {isAdmin && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {[
+            {
+              label: "Total Employees",
+              value: empStats?.total ?? "—",
+              sub: "active headcount",
+              icon: Users,
+              color: "bg-blue-50 text-blue-600",
+              textColor: "text-blue-700",
+            },
+            {
+              label: "On Leave Today",
+              value: empStats?.onLeaveToday ?? "—",
+              sub: new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" }),
+              icon: CalendarOff,
+              color: "bg-amber-50 text-amber-600",
+              textColor: "text-amber-700",
+            },
+            {
+              label: `Onboarded in ${empStats?.monthName ?? new Date().toLocaleString("en-IN", { month: "long" })}`,
+              value: empStats?.onboardedThisMonth ?? "—",
+              sub: "joined this month",
+              icon: UserPlus,
+              color: "bg-emerald-50 text-emerald-600",
+              textColor: "text-emerald-700",
+            },
+            {
+              label: `Quit in ${empStats?.monthName ?? new Date().toLocaleString("en-IN", { month: "long" })}`,
+              value: empStats?.quitThisMonth ?? "—",
+              sub: "left this month",
+              icon: LogOut,
+              color: "bg-red-50 text-red-600",
+              textColor: "text-red-700",
+            },
+          ].map((s) => (
+            <div key={s.label} className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-4 flex items-center gap-4">
+              <div className={`p-2.5 rounded-xl shrink-0 ${s.color}`}>
+                <s.icon className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-gray-500 font-medium truncate">{s.label}</p>
+                <p className={`text-2xl font-bold mt-0.5 ${s.textColor}`}>{s.value}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{s.sub}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Incomplete profiles alert */}
       {isAdmin && incompleteCount > 0 && !incompleteOnly && (

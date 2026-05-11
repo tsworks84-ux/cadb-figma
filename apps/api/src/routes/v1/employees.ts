@@ -5,15 +5,8 @@ import { authenticate, requireRole } from "../../middleware/authenticate.js";
 import { hashPassword } from "../../utils/password.js";
 import { sendCredentialsMail } from "../../utils/mailer.js";
 import type { JwtPayload } from "@cadb/types";
-import { createWriteStream, mkdirSync } from "fs";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
-import { pipeline } from "stream/promises";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const UPLOADS_DIR = join(__dirname, "../../../uploads");
-mkdirSync(UPLOADS_DIR, { recursive: true });
+import { uploadFile } from "../../utils/s3.js";
 
 const addressSchema = z.object({
   line1: z.string().min(1),
@@ -38,7 +31,7 @@ const createEmployeeSchema = z.object({
   reportingToId: z.string().cuid().optional(),
   employmentType: z.enum(["FULL_TIME", "PART_TIME", "CONTRACT", "VISITING", "INTERN"]).default("FULL_TIME"),
   joiningDate: z.string(),
-  role: z.enum(["SUPER_ADMIN", "HR_ADMIN", "DEPT_HEAD", "EMPLOYEE"]).default("EMPLOYEE"),
+  role: z.string().default("EMPLOYEE"),
   workLocation: z.string().optional(),
   isDraft: z.boolean().optional(),
   initialPassword: z.string().min(8).optional(),
@@ -163,6 +156,61 @@ async function assertCanAccess(
 export async function employeeRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", authenticate);
 
+  // ── Employee stats (total, on leave today, onboarded this month, quit this month) ──
+  fastify.get("/stats", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN") }, async (_request, reply) => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayEnd   = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+    const [total, onLeaveToday, onboardedThisMonth, quitThisMonth] = await Promise.all([
+      // Total active employees (not terminated, not deleted)
+      prisma.employee.count({
+        where: { deletedAt: null, status: { not: "TERMINATED" } },
+      }),
+
+      // Distinct employees on approved leave today
+      prisma.employee.count({
+        where: {
+          deletedAt: null,
+          status: { not: "TERMINATED" },
+          leaveApplications: {
+            some: {
+              status: "APPROVED",
+              fromDate: { lte: todayEnd },
+              toDate:   { gte: todayStart },
+            },
+          },
+        },
+      }),
+
+      // Joined this calendar month
+      prisma.employee.count({
+        where: {
+          deletedAt: null,
+          joiningDate: { gte: monthStart, lte: monthEnd },
+        },
+      }),
+
+      // Left (terminated) this calendar month
+      prisma.employee.count({
+        where: {
+          deletedAt: null,
+          status: "TERMINATED",
+          terminationDate: { gte: monthStart, lte: monthEnd },
+        },
+      }),
+    ]);
+
+    const monthName = now.toLocaleString("en-IN", { month: "long" });
+
+    return reply.send({
+      success: true,
+      data: { total, onLeaveToday, onboardedThisMonth, quitThisMonth, monthName },
+    });
+  });
+
   // List employees with pagination + search
   fastify.get("/", async (request, reply) => {
     const user = request.user as JwtPayload;
@@ -208,30 +256,46 @@ export async function employeeRoutes(fastify: FastifyInstance) {
       scopedDeptIds = access.map((a) => a.departmentId);
     }
 
-    const where: any = {
-      deletedAt: null,
-      ...(search && {
+    // Build AND conditions to avoid OR key collision when search + dept scope both need OR
+    const andConditions: any[] = [{ deletedAt: null }];
+
+    if (search) {
+      andConditions.push({
         OR: [
           { firstName: { contains: search, mode: "insensitive" as const } },
           { lastName: { contains: search, mode: "insensitive" as const } },
           { email: { contains: search, mode: "insensitive" as const } },
           { employeeCode: { contains: search, mode: "insensitive" as const } },
         ],
-      }),
-      // Scope to allowed departments: match primary departmentId OR any EmployeeDepartment membership
-      ...(scopedDeptIds !== null && {
+      });
+    }
+
+    // Scope non-admin roles to their allowed departments (primary or via membership)
+    if (scopedDeptIds !== null) {
+      andConditions.push({
         OR: [
           { departmentId: { in: scopedDeptIds } },
           { deptMemberships: { some: { departmentId: { in: scopedDeptIds } } } },
         ],
-      }),
-      // Honour explicit department filter but never let scoped roles escape their scope
-      ...(departmentId && (scopedDeptIds === null || scopedDeptIds.includes(departmentId)) && { departmentId }),
-      ...(designationId && { designationId }),
-      ...(status && { status: status as any }),
-      ...(employmentType && { employmentType: employmentType as any }),
-      ...(gender && { gender: gender as any }),
-    };
+      });
+    }
+
+    // Explicit department filter — check both primary dept and memberships
+    if (departmentId && (scopedDeptIds === null || scopedDeptIds.includes(departmentId))) {
+      andConditions.push({
+        OR: [
+          { departmentId },
+          { deptMemberships: { some: { departmentId } } },
+        ],
+      });
+    }
+
+    if (designationId) andConditions.push({ designationId });
+    if (status)        andConditions.push({ status: status as any });
+    if (employmentType) andConditions.push({ employmentType: employmentType as any });
+    if (gender)        andConditions.push({ gender: gender as any });
+
+    const where: any = { AND: andConditions };
 
     const [raw, total] = await Promise.all([
       prisma.employee.findMany({
@@ -628,7 +692,6 @@ export async function employeeRoutes(fastify: FastifyInstance) {
 
     const ext = data.filename.split(".").pop() ?? "jpg";
     const fileName = `photo_${id}_${randomUUID()}.${ext}`;
-    const filePath = join(UPLOADS_DIR, fileName);
 
     let size = 0;
     const chunks: Buffer[] = [];
@@ -640,12 +703,12 @@ export async function employeeRoutes(fastify: FastifyInstance) {
       chunks.push(chunk);
     }
 
-    await pipeline(
-      (async function* () { for (const c of chunks) yield c; })(),
-      createWriteStream(filePath)
+    const photoUrl = await uploadFile(
+      Buffer.concat(chunks),
+      `uploads/${fileName}`,
+      data.mimetype,
+      fileName
     );
-
-    const photoUrl = `/uploads/${fileName}`;
     await prisma.employee.update({ where: { id }, data: { photoUrl } });
 
     return reply.send({ success: true, data: { photoUrl } });
@@ -695,7 +758,12 @@ export async function employeeRoutes(fastify: FastifyInstance) {
         config: body.config as any,
         effectiveFrom: body.effectiveFrom ? new Date(body.effectiveFrom) : new Date(),
       },
-      update: { config: body.config as any, updatedAt: new Date() },
+      update: {
+        employmentType: body.employmentType as any,
+        config: body.config as any,
+        effectiveFrom: body.effectiveFrom ? new Date(body.effectiveFrom) : new Date(),
+        updatedAt: new Date(),
+      },
     });
     return reply.send({ success: true, data });
   });

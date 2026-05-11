@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
@@ -597,6 +597,7 @@ function CredentialsDialog({ employeeId, employeeCode, temporaryPassword, person
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function NewEmployeePage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [step, setStep] = useState(0);
   const [created, setCreated] = useState<{
     id: string; employeeCode: string; temporaryPassword: string; personalEmail?: string | null;
@@ -720,7 +721,10 @@ export default function NewEmployeePage() {
       if (config) await api.post(`/api/v1/employees/${emp.id}/salary-config`, { employmentType: data.employmentType, config }).catch(() => {});
       return emp;
     },
-    onSuccess: (emp) => setCreated({ id: emp.id, employeeCode: emp.employeeCode, temporaryPassword: emp.temporaryPassword, personalEmail: emp.personalEmail }),
+    onSuccess: (emp) => {
+      queryClient.invalidateQueries({ queryKey: ["employees"] });
+      setCreated({ id: emp.id, employeeCode: emp.employeeCode, temporaryPassword: emp.temporaryPassword, personalEmail: emp.personalEmail });
+    },
     onError: (err: any) => {
       const data = err.response?.data;
       if (data?.details) toast.error(`Validation failed — check: ${Object.keys(data.details).join(", ")}`);
@@ -770,6 +774,7 @@ export default function NewEmployeePage() {
       return empRes.data.data;
     },
     onSuccess: (emp) => {
+      queryClient.invalidateQueries({ queryKey: ["employees"] });
       toast.success(`Draft saved — ${emp.employeeCode}`);
       router.push("/dashboard/employees");
     },
@@ -1050,7 +1055,7 @@ export default function NewEmployeePage() {
                       <optgroup label="System Roles">
                         <option value="EMPLOYEE">Employee — Self-service dashboard, tasks, leaves, policies and training</option>
                         <option value="DEPT_HEAD">Manager (Dept Head) — Team visibility, leave approvals, task review and reports</option>
-                        <option value="HR_ADMIN">HR Admin — Employee data, announcements, policies and configuration</option>
+                        <option value="HR_ADMIN">HR Admin — Employee data, notice board, policies and configuration</option>
                         <option value="SUPER_ADMIN">Super Admin — Full unrestricted access</option>
                       </optgroup>
                       {customRoles.length > 0 && (

@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
   FileSpreadsheet, Download, Users, ChevronDown, ChevronUp,
-  CheckSquare, Square, Loader2, BarChart3, DollarSign, Banknote, CalendarDays,
+  CheckSquare, Square, Loader2, BarChart3, DollarSign, Banknote, CalendarDays, Receipt,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -1080,6 +1080,236 @@ function LeaveRecordsReport() {
   );
 }
 
+// ── Report 5: Claims Report ───────────────────────────────────────────────────
+
+interface ClaimRow {
+  claimNumber:    string;
+  employeeCode:   string;
+  name:           string;
+  department:     string;
+  designation:    string;
+  claimType:      string;
+  title:          string;
+  claimedAmount:  number;
+  approvedAmount: number | null;
+  status:         string;
+  submittedAt:    string;
+  resolvedAt:     string | null;
+  paidAt:         string | null;
+  approver:       string | null;
+}
+
+interface ClaimStats {
+  total:         number;
+  submitted:     number;
+  approved:      number;
+  rejected:      number;
+  paid:          number;
+  totalClaimed:  number;
+  totalApproved: number;
+  totalPaid:     number;
+}
+
+const CLAIM_STATUS_BADGE: Record<string, string> = {
+  APPROVED:  "bg-emerald-50 text-emerald-700",
+  PAID:      "bg-teal-50 text-teal-700",
+  SUBMITTED: "bg-amber-50 text-amber-700",
+  REJECTED:  "bg-red-50 text-red-700",
+};
+
+function todayStr() { return new Date().toISOString().slice(0, 10); }
+function monthStartStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+function ClaimsReport() {
+  const [open, setOpen]     = useState(false);
+  const [from, setFrom]     = useState(monthStartStr);
+  const [to, setTo]         = useState(todayStr);
+  const [preview, setPreview] = useState(false);
+  const [xlsLoading, setXlsLoading] = useState(false);
+
+  const canPreview = !!from && !!to && from <= to;
+
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ["report-claims", from, to],
+    queryFn: () =>
+      api.get<{ success: boolean; data: { rows: ClaimRow[]; stats: ClaimStats } }>(
+        `/api/v1/reports/claims/data?from=${from}&to=${to}`
+      ).then((r) => r.data.data),
+    enabled: false,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  function handlePreview() {
+    if (!canPreview) return;
+    setPreview(true);
+    refetch();
+  }
+
+  async function handleExcel() {
+    if (!canPreview) return;
+    setXlsLoading(true);
+    try {
+      const res = await api.get(`/api/v1/reports/claims/export?from=${from}&to=${to}`, { responseType: "blob" });
+      triggerDownload(res.data as Blob, `claims_report_${from}_to_${to}.xlsx`);
+      toast.success("Excel downloaded");
+    } catch {
+      toast.error("Failed to export Excel");
+    } finally {
+      setXlsLoading(false);
+    }
+  }
+
+  const rows  = data?.rows  ?? [];
+  const stats = data?.stats;
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      {/* Header */}
+      <button
+        className="flex items-center justify-between w-full px-6 py-5 text-left hover:bg-gray-50 transition-colors"
+        onClick={() => setOpen(!open)}
+      >
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-violet-50 rounded-xl"><Receipt className="h-5 w-5 text-violet-600" /></div>
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">Claims Report</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Reimbursement claims by date range — preview and export to Excel</p>
+          </div>
+        </div>
+        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="border-t border-gray-100 p-6">
+          {/* Date range + preview trigger */}
+          <div className="flex flex-wrap items-end gap-4 mb-5">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">From date</label>
+              <input
+                type="date"
+                value={from}
+                max={to || todayStr()}
+                onChange={(e) => { setFrom(e.target.value); setPreview(false); }}
+                className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">To date</label>
+              <input
+                type="date"
+                value={to}
+                min={from}
+                max={todayStr()}
+                onChange={(e) => { setTo(e.target.value); setPreview(false); }}
+                className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+              />
+            </div>
+            <button
+              onClick={handlePreview}
+              disabled={!canPreview || isLoading}
+              className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-xl hover:bg-violet-700 disabled:opacity-50 transition-colors"
+            >
+              {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <BarChart3 className="h-4 w-4" />}
+              {isLoading ? "Loading…" : "Preview"}
+            </button>
+          </div>
+
+          {/* Stats */}
+          {stats && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+              {[
+                { label: "Total Claims",     value: stats.total,                          sub: `${stats.submitted} pending · ${stats.rejected} rejected` },
+                { label: "Total Claimed",    value: fmt(stats.totalClaimed),              sub: `across ${stats.total} claims` },
+                { label: "Total Approved",   value: fmt(stats.totalApproved),             sub: `${stats.approved} approved` },
+                { label: "Total Paid",       value: fmt(stats.totalPaid),                 sub: `${stats.paid} paid out` },
+              ].map((s) => (
+                <div key={s.label} className="bg-violet-50 rounded-xl px-4 py-3">
+                  <p className="text-xs text-violet-500 font-medium">{s.label}</p>
+                  <p className="text-lg font-bold text-violet-900 mt-0.5">{s.value}</p>
+                  <p className="text-xs text-violet-400 mt-0.5">{s.sub}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Preview table */}
+          {preview && (
+            <div className="border border-gray-100 rounded-xl overflow-x-auto mb-2">
+              {isLoading ? (
+                <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-violet-500" /></div>
+              ) : rows.length === 0 ? (
+                <div className="text-center py-12 text-sm text-gray-400">No claims found for this date range.</div>
+              ) : (
+                <>
+                  <table className="min-w-full text-xs">
+                    <thead>
+                      <tr className="bg-[#5B21B6] text-white text-left">
+                        <th className="px-3 py-2 whitespace-nowrap">Claim No.</th>
+                        <th className="px-3 py-2 whitespace-nowrap">Date</th>
+                        <th className="px-3 py-2 whitespace-nowrap">Employee</th>
+                        <th className="px-3 py-2 whitespace-nowrap">Department</th>
+                        <th className="px-3 py-2 whitespace-nowrap">Type</th>
+                        <th className="px-3 py-2 whitespace-nowrap">Title</th>
+                        <th className="px-3 py-2 text-right whitespace-nowrap">Claimed</th>
+                        <th className="px-3 py-2 text-right whitespace-nowrap">Approved</th>
+                        <th className="px-3 py-2 whitespace-nowrap">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.slice(0, 10).map((r, i) => (
+                        <tr key={r.claimNumber} className={i % 2 === 0 ? "bg-white" : "bg-violet-50/30"}>
+                          <td className="px-3 py-2 font-mono text-gray-500 whitespace-nowrap">{r.claimNumber}</td>
+                          <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{r.submittedAt}</td>
+                          <td className="px-3 py-2 font-medium text-gray-800 whitespace-nowrap">{r.name}</td>
+                          <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{r.department}</td>
+                          <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{r.claimType}</td>
+                          <td className="px-3 py-2 text-gray-700 max-w-[180px] truncate">{r.title}</td>
+                          <td className="px-3 py-2 text-right text-gray-700 whitespace-nowrap">{fmt(r.claimedAmount)}</td>
+                          <td className="px-3 py-2 text-right text-emerald-700 whitespace-nowrap">
+                            {r.approvedAmount != null ? fmt(r.approvedAmount) : "—"}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${CLAIM_STATUS_BADGE[r.status] ?? "bg-gray-100 text-gray-600"}`}>
+                              {r.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {rows.length > 10 && (
+                    <p className="text-xs text-gray-400 text-center py-2 border-t border-gray-50">
+                      Showing 10 of {rows.length} claims — full data is in the exported file
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Export */}
+          <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
+            <p className="text-xs text-gray-400">
+              Includes all submitted, approved, rejected and paid claims. Drafts excluded.
+            </p>
+            <button
+              onClick={handleExcel}
+              disabled={xlsLoading || !canPreview}
+              className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-xl hover:bg-violet-700 disabled:opacity-50 transition-colors"
+            >
+              {xlsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+              {xlsLoading ? "Exporting…" : "Export Excel"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Placeholder card ──────────────────────────────────────────────────────────
 
 function ComingSoonCard({ icon: Icon, title, description }: {
@@ -1118,6 +1348,7 @@ export default function MISReportsPage() {
           <SalaryStructuresReport />
           <MonthlySalaryDisbursementReport />
           <LeaveRecordsReport />
+          <ClaimsReport />
           <ComingSoonCard
             icon={FileSpreadsheet}
             title="Holidays List"

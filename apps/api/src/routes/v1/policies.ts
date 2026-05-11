@@ -3,15 +3,9 @@ import { z } from "zod";
 import { prisma } from "@cadb/db";
 import { authenticate, requireRole } from "../../middleware/authenticate.js";
 import type { JwtPayload } from "@cadb/types";
-import { createWriteStream, mkdirSync } from "fs";
 import { randomUUID } from "crypto";
-import { join, dirname, extname } from "path";
-import { fileURLToPath } from "url";
-import { pipeline } from "stream/promises";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const POLICIES_DIR = join(__dirname, "../../../uploads/policies");
-mkdirSync(POLICIES_DIR, { recursive: true });
+import { extname } from "path";
+import { uploadFile } from "../../utils/s3.js";
 
 const ALLOWED_CATEGORIES = ["HR", "FINANCE", "IT", "OPERATIONS", "COMPLIANCE", "ACADEMIC", "OTHER"] as const;
 
@@ -86,9 +80,12 @@ export async function policyRoutes(fastify: FastifyInstance) {
               .send({ success: false, error: "Only PDF files are allowed", statusCode: 400 });
           }
           const fileName = `policy_${randomUUID()}.pdf`;
-          const filePath = join(POLICIES_DIR, fileName);
-          await pipeline(part.file, createWriteStream(filePath));
-          fileUrl = `/uploads/policies/${fileName}`;
+          fileUrl = await uploadFile(
+            part.file,
+            `uploads/policies/${fileName}`,
+            "application/pdf",
+            `policies/${fileName}`
+          );
         } else {
           fields[part.fieldname] = part.value as string;
         }

@@ -15,7 +15,7 @@ const RECEIPTS_DIR = join(__dirname, "../../../uploads/receipts");
 mkdirSync(RECEIPTS_DIR, { recursive: true });
 
 const RECEIPT_THRESHOLD_KEY = "claim_receipt_threshold";
-const DEFAULT_THRESHOLD = 1000;
+const DEFAULT_THRESHOLD = 250;
 
 async function getReceiptThreshold(): Promise<number> {
   const s = await prisma.appSetting.findUnique({ where: { key: RECEIPT_THRESHOLD_KEY } });
@@ -23,7 +23,7 @@ async function getReceiptThreshold(): Promise<number> {
 }
 
 const createClaimSchema = z.object({
-  claimType: z.enum(["TRAVEL", "MEDICAL", "FOOD", "ACCOMMODATION", "TRAINING", "OTHER"]),
+  claimType: z.string().min(1),
   title: z.string().min(1),
   description: z.string().optional(),
   claimedAmount: z.number().positive(),
@@ -38,6 +38,10 @@ export async function claimRoutes(fastify: FastifyInstance) {
     const parsed = createClaimSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({ success: false, error: "Validation failed", statusCode: 400 });
+    }
+    const claimTypeCfg = await prisma.claimTypeConfig.findUnique({ where: { name: parsed.data.claimType } });
+    if (!claimTypeCfg || !claimTypeCfg.isActive) {
+      return reply.status(400).send({ success: false, error: "Invalid or inactive claim type", statusCode: 400 });
     }
     const data = await prisma.reimbursementClaim.create({
       data: { claimNumber: generateClaimNumber(), employeeId: user.sub, ...parsed.data, status: "DRAFT" },
@@ -192,14 +196,17 @@ export async function claimRoutes(fastify: FastifyInstance) {
     });
     if (!claim) return reply.status(404).send({ success: false, error: "Claim not found", statusCode: 404 });
 
-    // Enforce receipt requirement
-    const threshold = await getReceiptThreshold();
-    if (claim.claimedAmount > threshold && claim.receipts.length === 0) {
-      return reply.status(400).send({
-        success: false,
-        error: `Claims above ₹${threshold.toLocaleString("en-IN")} require at least one supporting document.`,
-        statusCode: 400,
-      });
+    // Enforce receipt requirement — by threshold OR by claim type flag
+    const [threshold, claimTypeCfg] = await Promise.all([
+      getReceiptThreshold(),
+      prisma.claimTypeConfig.findUnique({ where: { name: claim.claimType } }),
+    ]);
+    const needsDoc = claimTypeCfg?.requiresDocument || claim.claimedAmount > threshold;
+    if (needsDoc && claim.receipts.length === 0) {
+      const reason = claimTypeCfg?.requiresDocument
+        ? `${claimTypeCfg.label} claims always require a supporting document.`
+        : `Claims above ₹${threshold.toLocaleString("en-IN")} require at least one supporting document.`;
+      return reply.status(400).send({ success: false, error: reason, statusCode: 400 });
     }
 
     const updated = await prisma.reimbursementClaim.update({

@@ -296,8 +296,8 @@ function AnnouncementCard({
   const seenCount = a._count.views;
   const ackCount  = a._count.acks;
   const notified  = a.notifiedCount > 0 ? a.notifiedCount : totalEmployees;
-  const seenPct   = notified > 0 ? Math.round((seenCount / notified) * 100) : 0;
-  const ackPct    = notified > 0 ? Math.round((ackCount / notified) * 100) : 0;
+  const seenPct   = notified > 0 ? Math.min(100, Math.round((seenCount / notified) * 100)) : 0;
+  const ackPct    = notified > 0 ? Math.min(100, Math.round((ackCount  / notified) * 100)) : 0;
 
   const timestamp = a.status === "PUBLISHED" && a.publishedAt
     ? fmtDateTime(a.publishedAt)
@@ -519,6 +519,64 @@ function AcknowledgementsModal({ announcementId, title, onClose }: { announcemen
   );
 }
 
+// ─── Month grouping helpers ───────────────────────────────────────────────────
+
+const ANN_MONTH_NAMES = [
+  "January","February","March","April","May","June",
+  "July","August","September","October","November","December",
+];
+
+function annMonthKey(a: Announcement) {
+  const d = new Date(a.publishedAt ?? a.createdAt);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function annMonthLabel(key: string) {
+  const [y, m] = key.split("-").map(Number);
+  return `${ANN_MONTH_NAMES[m - 1]} ${y}`;
+}
+
+function annCurrentMonthKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+// ─── Month section wrapper (collapsible) ─────────────────────────────────────
+
+function MonthSection({ monthKey, announcements, defaultOpen, children }: {
+  monthKey: string;
+  announcements: Announcement[];
+  defaultOpen: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const isCurrent = monthKey === annCurrentMonthKey();
+
+  return (
+    <div className="space-y-0">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 hover:bg-gray-100 transition-colors mb-2"
+      >
+        <div className="flex items-center gap-3">
+          <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${open ? "" : "-rotate-90"}`} />
+          <span className="text-sm font-semibold text-gray-700">{annMonthLabel(monthKey)}</span>
+          {isCurrent && (
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">Current</span>
+          )}
+          <span className="text-xs text-gray-400">
+            {announcements.length} notice{announcements.length !== 1 ? "s" : ""}
+          </span>
+        </div>
+        <span className="text-xs text-gray-400 pr-1">
+          {open ? "Collapse" : "Expand"}
+        </span>
+      </button>
+      {open && <div className="space-y-3">{children}</div>}
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 type FilterTab = "all" | "pinned" | "drafts" | "archived";
@@ -591,7 +649,7 @@ export default function AnnouncementsPage() {
     onSuccess: (res) => {
       addToList(res.data.data);
       setShowForm(false);
-      toast.success("Announcement created");
+      toast.success("Notice posted");
       queryClient.invalidateQueries({ queryKey: QK });
     },
     onError: () => toast.error("Failed to create"),
@@ -700,7 +758,7 @@ export default function AnnouncementsPage() {
       <div className="flex items-start justify-between mb-6">
         <div>
           <p className="text-xs font-semibold text-blue-600 uppercase tracking-widest mb-1">Team Communications</p>
-          <h1 className="text-3xl font-bold text-gray-900">Announcements</h1>
+          <h1 className="text-3xl font-bold text-gray-900">Notice Board</h1>
           <p className="text-sm text-gray-400 mt-1 max-w-xl">
             Publish updates that every team member can scan quickly. Pin critical notices, save drafts, and review what has already gone out.
           </p>
@@ -717,7 +775,7 @@ export default function AnnouncementsPage() {
               onClick={() => { setEditing(null); setShowForm(true); }}
               className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
             >
-              <Plus className="h-4 w-4" /> New Announcement
+              <Plus className="h-4 w-4" /> New Notice
             </button>
           </div>
         )}
@@ -727,7 +785,7 @@ export default function AnnouncementsPage() {
       {showForm && isAdmin && (
         <div className="mb-6 p-5 bg-white border border-blue-100 rounded-xl shadow-sm animate-slide-down-reveal">
           <div className="flex items-center justify-between mb-4">
-            <p className="font-semibold text-gray-800">{editing ? "Edit Announcement" : "New Announcement"}</p>
+            <p className="font-semibold text-gray-800">{editing ? "Edit Notice" : "New Notice"}</p>
             <button onClick={() => { setShowForm(false); setEditing(null); }} className="text-gray-400 hover:text-gray-600"><X className="h-4 w-4" /></button>
           </div>
           <AnnouncementForm
@@ -802,26 +860,49 @@ export default function AnnouncementsPage() {
                 {search ? "No announcements match your search" : "Nothing here yet"}
               </p>
               {isAdmin && !search && (
-                <p className="text-sm text-gray-400 mt-1">Post an announcement to notify all employees.</p>
+                <p className="text-sm text-gray-400 mt-1">Post a notice to notify all employees.</p>
               )}
             </div>
           )}
 
-          {filtered.map((a) => (
-            <AnnouncementCard
-              key={a.id}
-              a={a}
-              isAdmin={isAdmin}
-              totalEmployees={stats?.totalEmployees ?? 0}
-              onEdit={openEdit}
-              onDelete={(id) => deleteMut.mutate(id)}
-              onPublish={(id) => publishMut.mutate(id)}
-              onArchive={(id) => archiveMut.mutate(id)}
-              onTogglePin={(id, pinned) => updateMut.mutate({ id, pinned })}
-              onAcknowledge={(id) => acknowledgeMut.mutate(id)}
-              onViewAcks={(id) => setAcksModal({ id, title: a.title })}
-            />
-          ))}
+          {(() => {
+            const curKey = annCurrentMonthKey();
+            const groups = new Map<string, Announcement[]>();
+            for (const a of filtered) {
+              const key = annMonthKey(a);
+              if (!groups.has(key)) groups.set(key, []);
+              groups.get(key)!.push(a);
+            }
+            const sortedKeys = [...groups.keys()].sort((a, b) => b.localeCompare(a));
+
+            return sortedKeys.map((key) => {
+              const group = groups.get(key)!;
+              return (
+                <MonthSection
+                  key={key}
+                  monthKey={key}
+                  announcements={group}
+                  defaultOpen={key === curKey}
+                >
+                  {group.map((a) => (
+                    <AnnouncementCard
+                      key={a.id}
+                      a={a}
+                      isAdmin={isAdmin}
+                      totalEmployees={stats?.totalEmployees ?? 0}
+                      onEdit={openEdit}
+                      onDelete={(id) => deleteMut.mutate(id)}
+                      onPublish={(id) => publishMut.mutate(id)}
+                      onArchive={(id) => archiveMut.mutate(id)}
+                      onTogglePin={(id, pinned) => updateMut.mutate({ id, pinned })}
+                      onAcknowledge={(id) => acknowledgeMut.mutate(id)}
+                      onViewAcks={(id) => setAcksModal({ id, title: a.title })}
+                    />
+                  ))}
+                </MonthSection>
+              );
+            });
+          })()}
         </div>
 
         {/* Right sidebar */}

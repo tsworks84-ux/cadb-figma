@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuthStore } from "@/store/auth";
-import { CalendarDays, Plus, Paperclip, XCircle, ChevronRight, Clock, AlertTriangle, X, FileText } from "lucide-react";
+import { CalendarDays, Plus, Paperclip, XCircle, ChevronRight, ChevronDown, Clock, AlertTriangle, X, FileText, CheckCircle2 } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -221,6 +221,7 @@ function ApplyForm({
     if (!form.fromDate) return 0;
     if (isHalfDay) return 0.5;
     if (!form.toDate) return 0;
+    if (form.fromDate === form.toDate) return 1;
     const from = new Date(form.fromDate);
     const to = new Date(form.toDate);
     return from > to ? 0 : workingDaysBetween(from, to);
@@ -270,26 +271,23 @@ function ApplyForm({
   });
 
   function handleSubmit() {
-    if (!form.leaveType || !form.fromDate || !form.reason.trim()) {
-      toast.error("Please fill in all required fields");
+    if (!form.fromDate) {
+      toast.error("Please select a start date");
       return;
     }
     if (!isHalfDay && !form.toDate) {
-      toast.error("Please select a to date");
+      toast.error("Please select an end date");
       return;
     }
-    if (form.reason.trim().length < 5) {
-      toast.error("Reason must be at least 5 characters");
+    if (!form.reason.trim() || form.reason.trim().length < 5) {
+      toast.error("Please enter a reason (at least 5 characters)");
       return;
     }
     applyMut.mutate();
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-      <h2 className="font-semibold text-gray-900 mb-0.5">Apply for Leave</h2>
-      <p className="text-xs text-gray-400 mb-5">Fill in the details below and submit your request.</p>
-
+    <div>
       <div className="space-y-4">
         {/* Leave type + duration on same row */}
         <div className="grid grid-cols-2 gap-4">
@@ -338,7 +336,10 @@ function ApplyForm({
             <input
               type="date"
               value={form.fromDate}
-              onChange={(e) => set("fromDate", e.target.value)}
+              onChange={(e) => {
+                set("fromDate", e.target.value);
+                if (!form.toDate) set("toDate", e.target.value);
+              }}
               className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -782,6 +783,106 @@ function PolicySnapshot({ balances }: { balances: LeaveBalance[] }) {
   );
 }
 
+// ── Decision History (for managers/HR) ───────────────────────────────────────
+
+interface DecidedLeave {
+  id: string;
+  leaveType: string;
+  fromDate: string;
+  toDate: string;
+  totalDays: number;
+  status: string;
+  approvedAt: string | null;
+  rejectedAt: string | null;
+  employee: { firstName: string; lastName: string; department: { name: string } };
+}
+
+function DecisionHistory() {
+  const { user } = useAuthStore();
+  const [open, setOpen] = useState(false);
+  const isApprover = user?.role !== "EMPLOYEE";
+
+  const { data: decided = [], isLoading } = useQuery<DecidedLeave[]>({
+    queryKey: ["decided-leaves"],
+    queryFn: () => api.get("/api/v1/leaves/decided").then((r) => r.data.data),
+    enabled: isApprover,
+  });
+
+  if (!isApprover) return null;
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4 text-green-500" />
+          <h2 className="font-semibold text-gray-900">Decision History</h2>
+          <span className="text-xs text-gray-400 font-normal ml-1">Leaves you've approved or rejected</span>
+        </div>
+        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        isLoading ? (
+          <div className="px-6 py-8 text-center text-sm text-gray-400">Loading…</div>
+        ) : decided.length === 0 ? (
+          <div className="px-6 py-8 text-center text-sm text-gray-400">No decisions recorded yet.</div>
+        ) : (
+          <div className="overflow-y-auto max-h-96">
+            <table className="w-full">
+              <thead className="sticky top-0 bg-white z-10 border-b border-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Employee</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Type</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Dates</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Days</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Decision</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {decided.map((leave) => {
+                  const sameDay = leave.fromDate.slice(0, 10) === leave.toDate.slice(0, 10);
+                  const dateStr = sameDay
+                    ? fmtShort(leave.fromDate)
+                    : `${fmtShort(leave.fromDate)} – ${fmtShort(leave.toDate)}`;
+                  const decidedAt = leave.approvedAt ?? leave.rejectedAt;
+                  return (
+                    <tr key={leave.id} className="hover:bg-gray-50/50 transition-colors">
+                      <td className="px-6 py-4">
+                        <p className="text-sm font-semibold text-gray-800">
+                          {leave.employee.firstName} {leave.employee.lastName}
+                        </p>
+                        <p className="text-xs text-gray-400 mt-0.5">{leave.employee.department.name}</p>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-700">
+                        {LEAVE_LABEL[leave.leaveType] ?? leave.leaveType}
+                      </td>
+                      <td className="px-6 py-4">
+                        <p className="text-sm text-gray-700">{dateStr}</p>
+                        {decidedAt && (
+                          <p className="text-xs text-gray-400 mt-0.5">Decided {fmtShort(decidedAt)}</p>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-700">{leave.totalDays}</td>
+                      <td className="px-6 py-4">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[leave.status] ?? "bg-gray-100 text-gray-500"}`}>
+                          {leave.status.charAt(0) + leave.status.slice(1).toLowerCase()}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 // ── Pending Approvals (for managers/HR) ───────────────────────────────────────
 
 function PendingApprovals() {
@@ -801,6 +902,7 @@ function PendingApprovals() {
     onSuccess: () => {
       toast.success("Decision recorded");
       queryClient.invalidateQueries({ queryKey: ["pending-leaves"] });
+      queryClient.invalidateQueries({ queryKey: ["decided-leaves"] });
       queryClient.invalidateQueries({ queryKey: ["my-leaves"] });
       queryClient.invalidateQueries({ queryKey: ["my-leave-balances"] });
     },
@@ -859,6 +961,37 @@ function PendingApprovals() {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ── Collapsible Apply wrapper ─────────────────────────────────────────────────
+
+function CollapsibleApplyForm({ balances, onSuccess }: { balances: LeaveBalance[]; onSuccess: () => void }) {
+  const [open, setOpen] = useState(false);
+
+  function handleSuccess() {
+    onSuccess();
+    setOpen(false);
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <Plus className="h-4 w-4 text-blue-500" />
+          <h2 className="font-semibold text-gray-900">Apply for Leave</h2>
+        </div>
+        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="border-t border-gray-50 p-6">
+          <ApplyForm balances={balances} onSuccess={handleSuccess} />
+        </div>
+      )}
     </div>
   );
 }
@@ -929,8 +1062,9 @@ export default function LeavesPage() {
           <div className="flex-1 min-w-0 space-y-5">
             <BalanceSection balances={balances} />
             <PendingApprovals />
+            <DecisionHistory />
             <div id="apply">
-              <ApplyForm balances={balances} onSuccess={invalidateLeaves} />
+              <CollapsibleApplyForm balances={balances} onSuccess={invalidateLeaves} />
             </div>
             <LeaveHistory leaves={leaves} onCancel={(id) => cancelMut.mutate(id)} />
           </div>

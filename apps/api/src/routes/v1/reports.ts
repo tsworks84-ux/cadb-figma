@@ -1307,4 +1307,202 @@ export async function reportRoutes(fastify: FastifyInstance) {
         .send(Buffer.from(buffer));
     }
   );
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // CLAIMS REPORT
+  // ════════════════════════════════════════════════════════════════════════════
+
+  async function fetchClaimsData(from: Date, to: Date) {
+    const claims = await prisma.reimbursementClaim.findMany({
+      where: { createdAt: { gte: from, lte: to }, status: { not: "DRAFT" as any } },
+      orderBy: { createdAt: "asc" },
+      include: {
+        employee: {
+          select: {
+            employeeCode: true, firstName: true, lastName: true,
+            department:  { select: { name: true } },
+            designation: { select: { title: true } },
+          },
+        },
+        approver: { select: { firstName: true, lastName: true } },
+      },
+    });
+
+    return claims.map((c) => ({
+      claimNumber:    c.claimNumber,
+      employeeCode:   c.employee.employeeCode,
+      name:           `${c.employee.firstName} ${c.employee.lastName}`,
+      department:     c.employee.department.name,
+      designation:    c.employee.designation.title,
+      claimType:      c.claimType,
+      title:          c.title,
+      description:    c.description ?? "",
+      claimedAmount:  c.claimedAmount,
+      approvedAmount: c.approvedAmount ?? null,
+      status:         c.status,
+      submittedAt:    c.createdAt.toISOString().slice(0, 10),
+      resolvedAt:     (c.approvedAt ?? c.rejectedAt)?.toISOString().slice(0, 10) ?? null,
+      paidAt:         (c as any).paidAt?.toISOString().slice(0, 10) ?? null,
+      approver:       c.approver ? `${c.approver.firstName} ${c.approver.lastName}` : null,
+      rejectionNote:  (c as any).rejectionNote ?? null,
+    }));
+  }
+
+  // ── GET /reports/claims/data ────────────────────────────────────────────────
+  fastify.get(
+    "/claims/data",
+    { preHandler: requireRole(...ADMIN_ROLES) },
+    async (request, reply) => {
+      const q = request.query as { from?: string; to?: string };
+      if (!q.from || !q.to) {
+        return reply.status(400).send({ success: false, error: "from and to date params required (YYYY-MM-DD)", statusCode: 400 });
+      }
+      const from = new Date(q.from + "T00:00:00.000Z");
+      const to   = new Date(q.to   + "T23:59:59.999Z");
+      if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+        return reply.status(400).send({ success: false, error: "Invalid date format", statusCode: 400 });
+      }
+
+      const rows = await fetchClaimsData(from, to);
+      const stats = {
+        total:         rows.length,
+        submitted:     rows.filter((r) => r.status === "SUBMITTED").length,
+        approved:      rows.filter((r) => r.status === "APPROVED" || r.status === "PAID").length,
+        rejected:      rows.filter((r) => r.status === "REJECTED").length,
+        paid:          rows.filter((r) => r.status === "PAID").length,
+        totalClaimed:  rows.reduce((s, r) => s + r.claimedAmount, 0),
+        totalApproved: rows.filter((r) => r.approvedAmount != null).reduce((s, r) => s + (r.approvedAmount ?? 0), 0),
+        totalPaid:     rows.filter((r) => r.status === "PAID").reduce((s, r) => s + (r.approvedAmount ?? 0), 0),
+      };
+
+      return reply.send({ success: true, data: { rows, stats } });
+    }
+  );
+
+  // ── GET /reports/claims/export ──────────────────────────────────────────────
+  fastify.get(
+    "/claims/export",
+    { preHandler: requireRole(...ADMIN_ROLES) },
+    async (request, reply) => {
+      const q = request.query as { from?: string; to?: string };
+      if (!q.from || !q.to) {
+        return reply.status(400).send({ success: false, error: "from and to date params required", statusCode: 400 });
+      }
+      const from = new Date(q.from + "T00:00:00.000Z");
+      const to   = new Date(q.to   + "T23:59:59.999Z");
+      const rows = await fetchClaimsData(from, to);
+
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "CADB";
+      wb.created = new Date();
+
+      const ws = wb.addWorksheet("Claims Report", {
+        pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1 },
+      });
+
+      const COLS = [
+        { key: "sno",            header: "S.No",           width: 6  },
+        { key: "claimNumber",    header: "Claim No.",       width: 16 },
+        { key: "submittedAt",    header: "Date",            width: 13 },
+        { key: "employeeCode",   header: "Emp Code",        width: 13 },
+        { key: "name",           header: "Employee Name",   width: 24 },
+        { key: "department",     header: "Department",      width: 20 },
+        { key: "designation",    header: "Designation",     width: 20 },
+        { key: "claimType",      header: "Claim Type",      width: 18 },
+        { key: "title",          header: "Title",           width: 28 },
+        { key: "claimedAmount",  header: "Claimed (₹)",     width: 14 },
+        { key: "approvedAmount", header: "Approved (₹)",    width: 14 },
+        { key: "status",         header: "Status",          width: 13 },
+        { key: "resolvedAt",     header: "Resolved On",     width: 13 },
+        { key: "paidAt",         header: "Paid On",         width: 13 },
+        { key: "approver",       header: "Processed By",    width: 22 },
+        { key: "rejectionNote",  header: "Rejection Note",  width: 35 },
+      ];
+      ws.columns = COLS.map((c) => ({ key: c.key, width: c.width }));
+
+      // Title row
+      ws.mergeCells(1, 1, 1, COLS.length);
+      const tc = ws.getCell(1, 1);
+      tc.value = `Claims Report  —  ${q.from} to ${q.to}`;
+      tc.font = { bold: true, size: 13, color: { argb: "FFFFFFFF" } };
+      tc.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF7C3AED" } };
+      tc.alignment = { horizontal: "center", vertical: "middle" };
+      ws.getRow(1).height = 28;
+
+      // Header row
+      ws.getRow(2).height = 26;
+      COLS.forEach((col, i) => {
+        const cell = ws.getCell(2, i + 1);
+        cell.value = col.header;
+        cell.font  = { bold: true, size: 10, color: { argb: "FFFFFFFF" } };
+        cell.fill  = { type: "pattern", pattern: "solid", fgColor: { argb: "FF5B21B6" } };
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+        cell.border = { right: { style: "thin", color: { argb: "FF7C3AED" } }, bottom: { style: "thin", color: { argb: "FFFFFFFF" } } };
+      });
+
+      const STATUS_ARGB: Record<string, string> = {
+        APPROVED:  "FF14532D", PAID: "FF064E3B",
+        SUBMITTED: "FF92400E", REJECTED: "FF7F1D1D", DRAFT: "FF374151",
+      };
+
+      rows.forEach((row, idx) => {
+        const isEven = idx % 2 === 0;
+        COLS.forEach((col, ci) => {
+          const cell = ws.getCell(idx + 3, ci + 1);
+          const key = col.key as keyof typeof row | "sno";
+          cell.value = key === "sno" ? idx + 1 : ((row as any)[key] ?? "");
+
+          const isAmt = col.key === "claimedAmount" || col.key === "approvedAmount";
+          if (isAmt && typeof (row as any)[col.key] === "number") {
+            cell.numFmt = "₹#,##0";
+            cell.alignment = { horizontal: "right", vertical: "middle" };
+          } else {
+            cell.alignment = { vertical: "middle", wrapText: col.key === "rejectionNote" };
+          }
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isEven ? "FFF5F3FF" : "FFEDE9FE" } };
+          cell.border = { bottom: { style: "hair", color: { argb: "FFE5E7EB" } }, right: { style: "hair", color: { argb: "FFD1D5DB" } } };
+        });
+
+        // Coloured status cell
+        const sci = COLS.findIndex((c) => c.key === "status") + 1;
+        const sc = ws.getCell(idx + 3, sci);
+        const argb = STATUS_ARGB[row.status] ?? "FF374151";
+        sc.fill = { type: "pattern", pattern: "solid", fgColor: { argb: argb + "22" } };
+        sc.font = { color: { argb }, bold: true, size: 9 };
+        sc.alignment = { horizontal: "center", vertical: "middle" };
+
+        ws.getRow(idx + 3).height = 17;
+      });
+
+      // Totals row
+      const totRow = rows.length + 3;
+      ws.getRow(totRow).height = 20;
+      COLS.forEach((col, ci) => {
+        const cell = ws.getCell(totRow, ci + 1);
+        if (col.key === "name") {
+          cell.value = `TOTAL (${rows.length} claims)`;
+          cell.font = { bold: true };
+        } else if (col.key === "claimedAmount") {
+          cell.value = rows.reduce((s, r) => s + r.claimedAmount, 0);
+          cell.numFmt = "₹#,##0"; cell.font = { bold: true };
+          cell.alignment = { horizontal: "right", vertical: "middle" };
+        } else if (col.key === "approvedAmount") {
+          cell.value = rows.reduce((s, r) => s + (r.approvedAmount ?? 0), 0);
+          cell.numFmt = "₹#,##0"; cell.font = { bold: true };
+          cell.alignment = { horizontal: "right", vertical: "middle" };
+        }
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEDE9FE" } };
+        cell.border = { top: { style: "medium", color: { argb: "FF7C3AED" } } };
+      });
+
+      ws.views = [{ state: "frozen", ySplit: 2, xSplit: 2, activeCell: "C3" }];
+      ws.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: COLS.length } };
+
+      const buffer = await wb.xlsx.writeBuffer();
+      reply
+        .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .header("Content-Disposition", `attachment; filename="claims_report_${q.from}_to_${q.to}.xlsx"`)
+        .send(Buffer.from(buffer));
+    }
+  );
 }

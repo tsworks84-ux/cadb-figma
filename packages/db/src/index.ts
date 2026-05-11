@@ -32,19 +32,3 @@ export type {
   AuditLog,
   Session,
 } from "@prisma/client";
-
-export {
-  Gender,
-  MaritalStatus,
-  BloodGroup,
-  EmploymentType,
-  EmploymentStatus,
-  DegreeLevel,
-  LeaveType,
-  LeaveStatus,
-  ClaimType,
-  ClaimStatus,
-  TrainingStatus,
-  PolicyCategory,
-  SalaryComponent,
-} from "@prisma/client";

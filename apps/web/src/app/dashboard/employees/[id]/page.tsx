@@ -418,26 +418,26 @@ function AddBankModal({ employeeId, onClose }: { employeeId: string; onClose: ()
 // ─── Personal info edit form ──────────────────────────────────────────────────
 
 const addrSchema = z.object({
-  line1: z.string().min(1, "Required"),
+  line1: z.string().optional().or(z.literal("")),
   line2: z.string().optional(),
-  city: z.string().min(1, "Required"),
-  state: z.string().min(1, "Required"),
-  pincode: z.string().length(6, "Must be 6 digits"),
+  city: z.string().optional().or(z.literal("")),
+  state: z.string().optional().or(z.literal("")),
+  pincode: z.string().optional().or(z.literal("")),
   country: z.string().default("India"),
 });
 
 const personalEditSchema = z.object({
-  personalPhone: z.string().length(10, "Must be 10 digits"),
+  personalPhone: z.string().length(10, "Must be 10 digits").optional().or(z.literal("")),
   officialPhone: z.string().length(10).optional().or(z.literal("")),
   personalEmail: z.string().email().optional().or(z.literal("")),
   maritalStatus: z.enum(["SINGLE", "MARRIED", "DIVORCED", "WIDOWED"]).optional().or(z.literal("")),
   bloodGroup: z.enum(["A_POS", "A_NEG", "B_POS", "B_NEG", "AB_POS", "AB_NEG", "O_POS", "O_NEG"]).optional().or(z.literal("")),
   religion: z.string().optional(),
-  currentAddress: addrSchema,
+  currentAddress: addrSchema.optional(),
   permanentAddress: addrSchema.optional(),
-  emergencyContactName: z.string().min(1, "Required"),
-  emergencyContactPhone: z.string().length(10, "Must be 10 digits"),
-  emergencyRelation: z.string().min(1, "Required"),
+  emergencyContactName: z.string().optional().or(z.literal("")),
+  emergencyContactPhone: z.string().optional().or(z.literal("")),
+  emergencyRelation: z.string().optional().or(z.literal("")),
 });
 
 type PersonalEditForm = z.infer<typeof personalEditSchema>;
@@ -489,11 +489,16 @@ function EditPersonalForm({
   const mutation = useMutation({
     mutationFn: (data: PersonalEditForm) => {
       const payload: Record<string, any> = { ...data };
+      if (!payload.personalPhone) delete payload.personalPhone;
       if (!payload.officialPhone) delete payload.officialPhone;
       if (!payload.personalEmail) delete payload.personalEmail;
       if (!payload.maritalStatus) delete payload.maritalStatus;
       if (!payload.bloodGroup) delete payload.bloodGroup;
+      if (!payload.currentAddress?.line1) delete payload.currentAddress;
       if (!payload.permanentAddress?.line1) delete payload.permanentAddress;
+      if (!payload.emergencyContactName) delete payload.emergencyContactName;
+      if (!payload.emergencyContactPhone) delete payload.emergencyContactPhone;
+      if (!payload.emergencyRelation) delete payload.emergencyRelation;
       return api.patch(`/api/v1/employees/${employeeId}`, payload);
     },
     onSuccess: () => {
@@ -2610,6 +2615,7 @@ function EditEmploymentInlineForm({
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["employee", employeeId] });
+      await qc.invalidateQueries({ queryKey: ["employees"] });
       toast.success("Employment details updated");
       onClose();
     },
@@ -2867,6 +2873,12 @@ export default function EmployeeDetailPage() {
   const { data: claims } = useQuery({
     queryKey: ["claims", id],
     queryFn: () => api.get(`/api/v1/claims/my`).then((r) => r.data.data),
+    enabled: activeTab === "claims",
+  });
+
+  const { data: claimThreshold } = useQuery({
+    queryKey: ["claim-threshold"],
+    queryFn: () => api.get(`/api/v1/claims/threshold`).then((r) => r.data.data.threshold as number),
     enabled: activeTab === "claims",
   });
 
@@ -3352,6 +3364,14 @@ export default function EmployeeDetailPage() {
                       )}
                     </div>
                   )}
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-gray-400 mb-0.5">Status</p>
+                  {emp.status ? (
+                    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_COLOR[emp.status] ?? "bg-gray-100 text-gray-700"}`}>
+                      {emp.status.replace(/_/g, " ")}
+                    </span>
+                  ) : <p className="text-sm text-gray-300">—</p>}
                 </div>
                 <Field label="Employment Type" value={emp.employmentType?.replace(/_/g, " ")} />
                 <Field label="Joining Date" value={emp.joiningDate ? formatDate(emp.joiningDate) : null} />
@@ -3936,7 +3956,51 @@ export default function EmployeeDetailPage() {
 
         {/* ── Claims ── */}
         {activeTab === "claims" && (
-          <div>
+          <div className="space-y-4">
+            {/* Entitlement / payout context banner */}
+            {(() => {
+              const empType = emp?.employmentType as string | undefined;
+              const isVariable = empType === "PART_TIME" || empType === "VISITING";
+              const approved = (claims ?? []).filter((c: any) => c.status === "APPROVED" || c.status === "PAID");
+              const paid     = (claims ?? []).filter((c: any) => c.status === "PAID");
+              const pending  = (claims ?? []).filter((c: any) => c.status === "SUBMITTED");
+              const approvedTotal = approved.reduce((s: number, c: any) => s + (c.approvedAmount ?? c.claimedAmount), 0);
+              const paidTotal     = paid.reduce((s: number, c: any) => s + (c.approvedAmount ?? c.claimedAmount), 0);
+              const thr = claimThreshold ?? 250;
+              return (
+                <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 space-y-2">
+                  <p className="text-sm font-semibold text-blue-800">Reimbursement Entitlement</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                    <div className="bg-white rounded-lg py-2 px-3 shadow-sm">
+                      <p className="text-xs text-gray-500">Approved (total)</p>
+                      <p className="text-base font-bold text-green-700">{formatCurrency(approvedTotal)}</p>
+                    </div>
+                    <div className="bg-white rounded-lg py-2 px-3 shadow-sm">
+                      <p className="text-xs text-gray-500">Already Paid</p>
+                      <p className="text-base font-bold text-emerald-600">{formatCurrency(paidTotal)}</p>
+                    </div>
+                    <div className="bg-white rounded-lg py-2 px-3 shadow-sm">
+                      <p className="text-xs text-gray-500">Pending Approval</p>
+                      <p className="text-base font-bold text-amber-600">{pending.length} claim{pending.length !== 1 ? "s" : ""}</p>
+                    </div>
+                    <div className="bg-white rounded-lg py-2 px-3 shadow-sm">
+                      <p className="text-xs text-gray-500">Receipt Required Above</p>
+                      <p className="text-base font-bold text-gray-700">{formatCurrency(thr)}</p>
+                    </div>
+                  </div>
+                  {isVariable ? (
+                    <p className="text-xs text-blue-700 mt-1">
+                      Approved claims are reimbursed separately from the variable monthly payout — they are not included in the per-hour / per-visit calculation.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-blue-700 mt-1">
+                      Approved claims are added to the monthly salary payout. Amounts marked <span className="font-semibold">Paid</span> have already been disbursed.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
+
             {!claims?.length ? (
               <Empty label="No reimbursement claims." />
             ) : (

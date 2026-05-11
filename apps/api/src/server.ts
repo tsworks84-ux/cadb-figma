@@ -1,5 +1,5 @@
 import "dotenv/config";
-import Fastify from "fastify";
+import Fastify, { type FastifyError } from "fastify";
 import { prisma } from "@cadb/db";
 import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
@@ -11,6 +11,7 @@ import { authRoutes } from "./routes/v1/auth.js";
 import { employeeRoutes } from "./routes/v1/employees.js";
 import { leaveRoutes } from "./routes/v1/leaves.js";
 import { claimRoutes } from "./routes/v1/claims.js";
+import { claimTypeRoutes } from "./routes/v1/claimTypes.js";
 import { policyRoutes } from "./routes/v1/policies.js";
 import { trainingRoutes } from "./routes/v1/training.js";
 import { departmentRoutes } from "./routes/v1/departments.js";
@@ -28,6 +29,7 @@ import { googleCalendarRoutes } from "./routes/v1/googleCalendar.js";
 import { announcementRoutes } from "./routes/v1/announcements.js";
 import { reportRoutes } from "./routes/v1/reports.js";
 import { workLocationRoutes } from "./routes/v1/workLocations.js";
+import { directoryRoutes } from "./routes/v1/directory.js";
 import fastifyStatic from "@fastify/static";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -84,6 +86,7 @@ await server.register(authRoutes, { prefix: "/api/v1/auth" });
 await server.register(employeeRoutes, { prefix: "/api/v1/employees" });
 await server.register(leaveRoutes, { prefix: "/api/v1/leaves" });
 await server.register(claimRoutes, { prefix: "/api/v1/claims" });
+await server.register(claimTypeRoutes, { prefix: "/api/v1/claim-types" });
 await server.register(policyRoutes, { prefix: "/api/v1/policies" });
 await server.register(trainingRoutes, { prefix: "/api/v1/training" });
 await server.register(departmentRoutes, { prefix: "/api/v1/departments" });
@@ -101,6 +104,7 @@ await server.register(googleCalendarRoutes, { prefix: "/api/v1/auth/google" });
 await server.register(announcementRoutes, { prefix: "/api/v1/announcements" });
 await server.register(reportRoutes, { prefix: "/api/v1/reports" });
 await server.register(workLocationRoutes, { prefix: "/api/v1/work-locations" });
+await server.register(directoryRoutes,    { prefix: "/api/v1/directory" });
 await server.register(fastifyStatic, {
   root: join(__dirname, "../uploads"),
   prefix: "/uploads/",
@@ -108,7 +112,7 @@ await server.register(fastifyStatic, {
 });
 
 // Global error handler
-server.setErrorHandler((error, _request, reply) => {
+server.setErrorHandler((error: FastifyError, _request, reply) => {
   server.log.error(error);
   if (error.statusCode === 429) {
     return reply.status(429).send({ success: false, error: "Too many requests", statusCode: 429 });

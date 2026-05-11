@@ -68,7 +68,7 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     if (isHalfDay && fromDate !== toDate) {
       return reply.status(400).send({ success: false, error: "Half-day leave must be for a single day", statusCode: 400 });
     }
-    const totalDays = isHalfDay ? 0.5 : workingDaysBetween(from, to);
+    const totalDays = isHalfDay ? 0.5 : (fromDate === toDate ? 1 : workingDaysBetween(from, to));
     const year = getFiscalYear(from);
 
     const balance = await prisma.leaveBalance.findUnique({
@@ -321,6 +321,33 @@ export async function leaveRoutes(fastify: FastifyInstance) {
 
     const [updated] = await prisma.$transaction(updates);
     return reply.send({ success: true, data: updated, message: `Leave ${body.action.toLowerCase()}` });
+  });
+
+  // Get all leaves decided (approved/rejected) by the current manager/HR
+  fastify.get("/decided", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN", "DEPT_HEAD") }, async (request, reply) => {
+    const user = request.user as JwtPayload;
+
+    const data = await prisma.leaveApplication.findMany({
+      where: {
+        approverId: user.sub,
+        status: { in: ["APPROVED", "REJECTED"] },
+      },
+      include: {
+        employee: {
+          select: {
+            id: true,
+            employeeCode: true,
+            firstName: true,
+            lastName: true,
+            department: { select: { name: true } },
+          },
+        },
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 100,
+    });
+
+    return reply.send({ success: true, data });
   });
 
 }

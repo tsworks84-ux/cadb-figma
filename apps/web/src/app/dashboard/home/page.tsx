@@ -165,12 +165,12 @@ export default function HomeDashboardPage() {
         </Link>
       )}
 
-      {/* Announcements */}
+      {/* Notice Board */}
       {announcements && announcements.length > 0 && (
         <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
             <h2 className="font-semibold text-gray-900 flex items-center gap-2">
-              <Megaphone className="h-4 w-4 text-blue-600" /> Announcements
+              <Megaphone className="h-4 w-4 text-blue-600" /> Notice Board
             </h2>
             <Link href="/dashboard/announcements" className="text-xs text-blue-600 hover:underline">View all →</Link>
           </div>
@@ -203,7 +203,7 @@ export default function HomeDashboardPage() {
               href="/dashboard/announcements"
               className="flex items-center justify-center px-4 py-2.5 text-xs text-blue-600 hover:bg-blue-50 transition-colors border-t border-gray-100"
             >
-              +{announcements.length - 3} more announcements →
+              +{announcements.length - 3} more notices →
             </Link>
           )}
         </div>

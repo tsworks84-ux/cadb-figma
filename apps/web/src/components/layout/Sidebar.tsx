@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import {
   Users, Home, CalendarOff, Receipt, Shield,
   GraduationCap, Settings, LogOut, BarChart3, Building2, User,
-  CalendarDays, UsersRound, ListTodo, Megaphone,
+  CalendarDays, UsersRound, ListTodo, Megaphone, BookUser,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useRouter } from "next/navigation";
@@ -46,7 +46,7 @@ export function Sidebar() {
 
   const mainNav = [
     { name: "Home", href: "/dashboard/home", icon: Home },
-    { name: "Announcements", href: "/dashboard/announcements", icon: Megaphone },
+    { name: "Notice Board", href: "/dashboard/announcements", icon: Megaphone },
     { name: "My Team", href: "/dashboard/my-team", icon: UsersRound },
     { name: "My To-Do", href: "/dashboard/todos", icon: ListTodo },
     { name: "Leaves", href: "/dashboard/leaves", icon: CalendarOff },
@@ -54,6 +54,7 @@ export function Sidebar() {
     { name: "Claims", href: "/dashboard/claims", icon: Receipt },
     { name: "Policies", href: "/dashboard/policies", icon: Shield },
     { name: "Training", href: "/dashboard/training", icon: GraduationCap },
+    { name: "Directory", href: "/dashboard/directory", icon: BookUser },
     { name: "Settings", href: "/dashboard/settings", icon: Settings },
   ];
 

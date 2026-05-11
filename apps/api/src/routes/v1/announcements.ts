@@ -3,16 +3,8 @@ import { z } from "zod";
 import { prisma } from "@cadb/db";
 import { authenticate, requireRole } from "../../middleware/authenticate.js";
 import type { JwtPayload } from "@cadb/types";
-import { createWriteStream, mkdirSync } from "fs";
-import { pipeline } from "stream/promises";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const UPLOADS_DIR = join(__dirname, "../../../uploads");
-const ANN_DIR = join(UPLOADS_DIR, "announcements");
-mkdirSync(ANN_DIR, { recursive: true });
+import { uploadFile } from "../../utils/s3.js";
 
 const POSTER_ROLES = ["SUPER_ADMIN", "HR_ADMIN"] as const;
 
@@ -59,7 +51,6 @@ export async function announcementRoutes(fastify: FastifyInstance) {
 
       const ext = data.filename.split(".").pop()?.toLowerCase() ?? "bin";
       const fileName = `ann_${randomUUID()}.${ext}`;
-      const filePath = join(ANN_DIR, fileName);
 
       let size = 0;
       const chunks: Buffer[] = [];
@@ -71,14 +62,16 @@ export async function announcementRoutes(fastify: FastifyInstance) {
         chunks.push(chunk);
       }
 
-      await pipeline(
-        (async function* () { for (const c of chunks) yield c; })(),
-        createWriteStream(filePath)
+      const url = await uploadFile(
+        Buffer.concat(chunks),
+        `uploads/announcements/${fileName}`,
+        data.mimetype,
+        `announcements/${fileName}`
       );
 
       return reply.send({
         success: true,
-        data: { name: data.filename, url: `/uploads/announcements/${fileName}`, size, type: data.mimetype },
+        data: { name: data.filename, url, size, type: data.mimetype },
       });
     }
   );
@@ -169,7 +162,8 @@ export async function announcementRoutes(fastify: FastifyInstance) {
         seenRate: (() => {
           const pub = announcements.filter((a) => a.status === "PUBLISHED" && a.notifiedCount > 0);
           if (!pub.length) return 0;
-          const avg = pub.reduce((s, a) => s + (a._count.views / a.notifiedCount), 0) / pub.length;
+          // Cap views at notifiedCount so ratio never exceeds 1 (new hires can view after publish)
+          const avg = pub.reduce((s, a) => s + Math.min(1, a._count.views / a.notifiedCount), 0) / pub.length;
           return Math.round(avg * 100);
         })(),
         totalEmployees,

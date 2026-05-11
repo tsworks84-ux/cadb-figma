@@ -309,6 +309,7 @@ function DesignationsTab() {
 function RolesTab({ isSA }: { isSA: boolean }) {
   const qc = useQueryClient();
   const [expandedRole, setExpandedRole] = useState<string | null>("HR_ADMIN");
+  const [bulkPending, setBulkPending] = useState(false);
 
   const { data: permissions, isLoading } = useQuery({
     queryKey: ["role-permissions"],
@@ -353,6 +354,80 @@ function RolesTab({ isSA }: { isSA: boolean }) {
       canAppraise: updated.canAppraise ?? false,
     };
     updateMut.mutate({ role, module, perms: payload });
+  }
+
+  async function toggleColumn(role: string, perm: string) {
+    if (!isSA || role === "SUPER_ADMIN" || bulkPending) return;
+    const dataRows = MODULE_ROWS.filter((r) => !r.isHeader);
+    const allChecked = dataRows.every((row) => permMap[role]?.[row.key]?.[perm] ?? false);
+    const setTo = !allChecked;
+    setBulkPending(true);
+    try {
+      await Promise.all(dataRows.map((row) => {
+        const ex = permMap[role]?.[row.key] ?? {};
+        return api.put(`/api/v1/roles/${role}/${row.key}`, {
+          canView: ex.canView ?? false, canCreate: ex.canCreate ?? false,
+          canEdit: ex.canEdit ?? false, canDelete: ex.canDelete ?? false,
+          canApprove: ex.canApprove ?? false, canAppraise: ex.canAppraise ?? false,
+          [perm]: setTo,
+        });
+      }));
+      toast.success(`${PERM_LABEL[perm]} ${setTo ? "enabled" : "disabled"} for all modules`);
+      qc.invalidateQueries({ queryKey: ["role-permissions"] });
+      qc.invalidateQueries({ queryKey: ["my-permissions"] });
+    } catch { toast.error("Failed to update permissions"); }
+    finally { setBulkPending(false); }
+  }
+
+  async function toggleRow(role: string, module: string) {
+    if (!isSA || role === "SUPER_ADMIN" || bulkPending) return;
+    const ex = permMap[role]?.[module] ?? {};
+    const allChecked = PERMS.every((p) => ex[p] ?? false);
+    const setTo = !allChecked;
+    setBulkPending(true);
+    try {
+      await api.put(`/api/v1/roles/${role}/${module}`, {
+        canView: setTo, canCreate: setTo, canEdit: setTo,
+        canDelete: setTo, canApprove: setTo, canAppraise: setTo,
+      });
+      toast.success(`All permissions ${setTo ? "enabled" : "disabled"}`);
+      qc.invalidateQueries({ queryKey: ["role-permissions"] });
+      qc.invalidateQueries({ queryKey: ["my-permissions"] });
+    } catch { toast.error("Failed to update permissions"); }
+    finally { setBulkPending(false); }
+  }
+
+  async function toggleAll(role: string) {
+    if (!isSA || role === "SUPER_ADMIN" || bulkPending) return;
+    const dataRows = MODULE_ROWS.filter((r) => !r.isHeader);
+    const allChecked = dataRows.every((row) => PERMS.every((p) => permMap[role]?.[row.key]?.[p] ?? false));
+    const setTo = !allChecked;
+    setBulkPending(true);
+    try {
+      await Promise.all(dataRows.map((row) =>
+        api.put(`/api/v1/roles/${role}/${row.key}`, {
+          canView: setTo, canCreate: setTo, canEdit: setTo,
+          canDelete: setTo, canApprove: setTo, canAppraise: setTo,
+        })
+      ));
+      toast.success(`All permissions ${setTo ? "enabled" : "disabled"}`);
+      qc.invalidateQueries({ queryKey: ["role-permissions"] });
+      qc.invalidateQueries({ queryKey: ["my-permissions"] });
+    } catch { toast.error("Failed to update permissions"); }
+    finally { setBulkPending(false); }
+  }
+
+  function colAllChecked(role: string, perm: string) {
+    return MODULE_ROWS.filter((r) => !r.isHeader).every((row) => permMap[role]?.[row.key]?.[perm] ?? false);
+  }
+  function colSomeChecked(role: string, perm: string) {
+    return MODULE_ROWS.filter((r) => !r.isHeader).some((row) => permMap[role]?.[row.key]?.[perm] ?? false);
+  }
+  function masterAllChecked(role: string) {
+    return MODULE_ROWS.filter((r) => !r.isHeader).every((row) => PERMS.every((p) => permMap[role]?.[row.key]?.[p] ?? false));
+  }
+  function masterSomeChecked(role: string) {
+    return MODULE_ROWS.filter((r) => !r.isHeader).some((row) => PERMS.some((p) => permMap[role]?.[row.key]?.[p] ?? false));
   }
 
   const SYSTEM_ROLE_ORDER = ["SUPER_ADMIN", "HR_ADMIN", "DEPT_HEAD", "EMPLOYEE"];
@@ -411,10 +486,43 @@ function RolesTab({ isSA }: { isSA: boolean }) {
                     <table className="w-full">
                       <thead>
                         <tr className="bg-gray-50 border-b border-gray-100">
-                          <th className="px-5 py-2.5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider w-32">Module</th>
+                          <th className="px-5 py-2.5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider w-32">
+                            <div className="flex items-center gap-2">
+                              <span>Module</span>
+                              {isSA && !isLocked && (
+                                <button
+                                  onClick={() => toggleAll(role)}
+                                  disabled={bulkPending}
+                                  title={masterAllChecked(role) ? "Deselect all" : "Select all"}
+                                  className={`h-4 w-4 rounded flex items-center justify-center transition-colors disabled:opacity-50 ${
+                                    masterAllChecked(role) ? "bg-blue-600 text-white" : masterSomeChecked(role) ? "bg-blue-200 text-blue-600 border border-blue-300" : "border-2 border-gray-300 text-transparent"
+                                  }`}
+                                >
+                                  <Check className="h-2.5 w-2.5" />
+                                </button>
+                              )}
+                            </div>
+                          </th>
                           {PERMS.map((p) => (
-                            <th key={p} className="px-4 py-2.5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">{PERM_LABEL[p]}</th>
+                            <th key={p} className="px-4 py-2.5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                              <div className="flex flex-col items-center gap-1">
+                                <span>{PERM_LABEL[p]}</span>
+                                {isSA && !isLocked && (
+                                  <button
+                                    onClick={() => toggleColumn(role, p)}
+                                    disabled={bulkPending}
+                                    title={colAllChecked(role, p) ? `Deselect all ${PERM_LABEL[p]}` : `Select all ${PERM_LABEL[p]}`}
+                                    className={`h-4 w-4 rounded flex items-center justify-center transition-colors disabled:opacity-50 ${
+                                      colAllChecked(role, p) ? "bg-blue-600 text-white" : colSomeChecked(role, p) ? "bg-blue-200 text-blue-600 border border-blue-300" : "border-2 border-gray-300 text-transparent"
+                                    }`}
+                                  >
+                                    <Check className="h-2.5 w-2.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </th>
                           ))}
+                          {isSA && !isLocked && <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">All</th>}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
@@ -423,7 +531,7 @@ function RolesTab({ isSA }: { isSA: boolean }) {
                             return (
                               <tr key={row.key} className="bg-gray-50">
                                 <td
-                                  colSpan={COLS + 1}
+                                  colSpan={COLS + (isSA && !isLocked ? 2 : 1)}
                                   className="px-5 py-2 text-xs font-bold text-gray-500 uppercase tracking-wider"
                                 >
                                   {row.label}
@@ -432,6 +540,8 @@ function RolesTab({ isSA }: { isSA: boolean }) {
                             );
                           }
                           const mp = permMap[role]?.[row.key] ?? {};
+                          const rowAllChecked = PERMS.every((p) => mp[p] ?? false);
+                          const rowSomeChecked = PERMS.some((p) => mp[p] ?? false);
                           return (
                             <tr key={row.key} className="hover:bg-gray-50">
                               <td className={`py-3 text-sm font-medium text-gray-700 ${row.indent ? "pl-8 pr-3" : "px-5"}`}>
@@ -445,7 +555,7 @@ function RolesTab({ isSA }: { isSA: boolean }) {
                                   <td key={perm} className="px-4 py-3 text-center">
                                     <button
                                       onClick={() => togglePerm(role, row.key, perm, val)}
-                                      disabled={!canToggle || updateMut.isPending}
+                                      disabled={!canToggle || updateMut.isPending || bulkPending}
                                       className={`h-5 w-5 rounded flex items-center justify-center mx-auto transition-colors ${
                                         val
                                           ? "bg-blue-600 text-white"
@@ -457,6 +567,20 @@ function RolesTab({ isSA }: { isSA: boolean }) {
                                   </td>
                                 );
                               })}
+                              {isSA && !isLocked && (
+                                <td className="px-3 py-3 text-center">
+                                  <button
+                                    onClick={() => toggleRow(role, row.key)}
+                                    disabled={bulkPending}
+                                    title={rowAllChecked ? "Deselect all" : "Select all"}
+                                    className={`h-5 w-5 rounded flex items-center justify-center mx-auto transition-colors disabled:opacity-50 ${
+                                      rowAllChecked ? "bg-blue-600 text-white" : rowSomeChecked ? "bg-blue-200 text-blue-600 border border-blue-300" : "border-2 border-gray-300 text-transparent"
+                                    } cursor-pointer hover:opacity-80`}
+                                  >
+                                    <Check className="h-3 w-3" />
+                                  </button>
+                                </td>
+                              )}
                             </tr>
                           );
                         })}
@@ -1189,12 +1313,156 @@ function WorkLocationsTab() {
   );
 }
 
+// ── Claim Types Tab ───────────────────────────────────────────────────────────
+
+function ClaimTypesTab() {
+  const qc = useQueryClient();
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({ label: "" });
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ label: "" });
+
+  const { data: types = [], isLoading } = useQuery<any[]>({
+    queryKey: ["claim-types-admin"],
+    queryFn: () => api.get("/api/v1/claim-types/all").then((r) => r.data.data),
+  });
+
+  const createMut = useMutation({
+    mutationFn: () => api.post("/api/v1/claim-types", form),
+    onSuccess: () => {
+      toast.success("Claim type created");
+      setAdding(false);
+      setForm({ label: "" });
+      qc.invalidateQueries({ queryKey: ["claim-types-admin"] });
+      qc.invalidateQueries({ queryKey: ["claim-types"] });
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
+  });
+
+  const updateMut = useMutation({
+    mutationFn: (id: string) => api.patch(`/api/v1/claim-types/${id}`, editForm),
+    onSuccess: () => {
+      toast.success("Updated");
+      setEditId(null);
+      qc.invalidateQueries({ queryKey: ["claim-types-admin"] });
+      qc.invalidateQueries({ queryKey: ["claim-types"] });
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
+  });
+
+  const toggleMut = useMutation({
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) =>
+      api.patch(`/api/v1/claim-types/${id}`, { isActive }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["claim-types-admin"] });
+      qc.invalidateQueries({ queryKey: ["claim-types"] });
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => api.delete(`/api/v1/claim-types/${id}`),
+    onSuccess: () => {
+      toast.success("Deleted");
+      qc.invalidateQueries({ queryKey: ["claim-types-admin"] });
+      qc.invalidateQueries({ queryKey: ["claim-types"] });
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500">{types.length} claim type{types.length !== 1 ? "s" : ""}</p>
+        <button onClick={() => setAdding(true)} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
+          <Plus className="h-4 w-4" /> Add Claim Type
+        </button>
+      </div>
+
+      {adding && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 space-y-3">
+          <p className="text-sm font-semibold text-gray-700">New Claim Type</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-gray-500 mb-1 block">Display name</label>
+              <Input value={form.label} onChange={(e) => setForm({ label: e.target.value })} placeholder="e.g. Internet Reimbursement" autoFocus />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-500 mb-1 block">Internal key (auto)</label>
+              <Input value={form.label.toUpperCase().replace(/\s+/g, "_").replace(/[^A-Z0-9_]/g, "")} readOnly className="bg-gray-100 text-gray-500 font-mono text-xs" />
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setAdding(false)} className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">Cancel</button>
+            <button onClick={() => createMut.mutate()} disabled={!form.label.trim() || createMut.isPending} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              Create
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isLoading ? (
+        <p className="text-sm text-gray-400 py-4 text-center">Loading…</p>
+      ) : (
+        <div className="rounded-xl border border-gray-200 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Label</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Internal Key</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+                <th className="px-4 py-3" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {types.map((ct: any) => (
+                <tr key={ct.id} className={`hover:bg-gray-50 transition-colors ${!ct.isActive ? "opacity-50" : ""}`}>
+                  <td className="px-4 py-3">
+                    {editId === ct.id ? (
+                      <Input value={editForm.label} onChange={(e) => setEditForm({ label: e.target.value })} autoFocus />
+                    ) : (
+                      <span className="font-medium text-gray-800">{ct.label}</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-gray-500">{ct.name}</td>
+                  <td className="px-4 py-3 text-center">
+                    <button
+                      onClick={() => toggleMut.mutate({ id: ct.id, isActive: !ct.isActive })}
+                      className={`text-xs font-medium px-2 py-0.5 rounded-full transition-colors ${ct.isActive ? "bg-green-100 text-green-700 hover:bg-green-200" : "bg-gray-100 text-gray-500 hover:bg-gray-200"}`}
+                    >
+                      {ct.isActive ? "Active" : "Inactive"}
+                    </button>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {editId === ct.id ? (
+                      <div className="flex gap-1 justify-end">
+                        <button onClick={() => updateMut.mutate(ct.id)} disabled={updateMut.isPending} className="p-1 text-green-600 hover:text-green-800"><Check className="h-4 w-4" /></button>
+                        <button onClick={() => setEditId(null)} className="p-1 text-gray-400 hover:text-gray-600"><X className="h-4 w-4" /></button>
+                      </div>
+                    ) : (
+                      <div className="flex gap-1 justify-end">
+                        <button onClick={() => { setEditId(ct.id); setEditForm({ label: ct.label }); }} className="p-1 text-gray-400 hover:text-blue-600"><Pencil className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => { if (confirm(`Delete "${ct.label}"?`)) deleteMut.mutate(ct.id); }} className="p-1 text-gray-400 hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 const TABS = [
   { id: "departments",    label: "Departments" },
   { id: "designations",   label: "Designations" },
   { id: "leaves",         label: "Leave Policies" },
   { id: "work-locations", label: "Work Locations" },
+  { id: "claim-types",    label: "Claim Types" },
   { id: "custom-roles",   label: "Custom Roles" },
   { id: "roles",          label: "Roles & Permissions" },
 ] as const;
@@ -1241,6 +1509,7 @@ export default function AdminPage() {
       {tab === "designations"   && <DesignationsTab />}
       {tab === "leaves"         && <LeavePoliciesTab />}
       {tab === "work-locations" && <WorkLocationsTab />}
+      {tab === "claim-types"    && <ClaimTypesTab />}
       {tab === "custom-roles"   && <CustomRolesTab />}
       {tab === "roles"          && <RolesTab isSA={isSA} />}
     </div>

@@ -16,7 +16,14 @@ import { useAuthStore } from "@/store/auth";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
-const CLAIM_TYPES = ["TRAVEL", "MEDICAL", "FOOD", "ACCOMMODATION", "TRAINING", "OTHER"] as const;
+interface ClaimTypeConfig {
+  id: string;
+  name: string;
+  label: string;
+  requiresDocument: boolean;
+  isSettleable: boolean;
+  isActive: boolean;
+}
 
 const STATUS_COLOR: Record<string, string> = {
   DRAFT: "bg-gray-100 text-gray-600",
@@ -45,6 +52,32 @@ const claimSchema = z.object({
 type ClaimForm = z.infer<typeof claimSchema>;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const MONTH_NAMES = [
+  "January","February","March","April","May","June",
+  "July","August","September","October","November","December",
+];
+
+function monthLabel(key: string) {
+  const [y, m] = key.split("-").map(Number);
+  return `${MONTH_NAMES[m - 1]} ${y}`;
+}
+
+function claimMonthKey(claim: any) {
+  const d = new Date(claim.createdAt);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function currentMonthKeyFn() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function getFYStart() {
+  const now = new Date();
+  const fyYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+  return new Date(fyYear, 3, 1); // April 1st
+}
 
 function Modal({ title, onClose, children, wide }: {
   title: string; onClose: () => void; children: React.ReactNode; wide?: boolean;
@@ -464,12 +497,21 @@ function NewClaimModal({ onClose, onCreated }: { onClose: () => void; onCreated:
     resolver: zodResolver(claimSchema),
   });
   const amount = parseFloat(watch("claimedAmount") as any) || 0;
+  const selectedType = watch("claimType");
 
   const { data: thresholdData } = useQuery({
     queryKey: ["claim-threshold"],
     queryFn: () => api.get("/api/v1/claims/threshold").then((r) => r.data.data),
   });
-  const threshold = thresholdData?.threshold ?? 1000;
+  const threshold = thresholdData?.threshold ?? 250;
+
+  const { data: claimTypes = [] } = useQuery<ClaimTypeConfig[]>({
+    queryKey: ["claim-types"],
+    queryFn: () => api.get("/api/v1/claim-types").then((r) => r.data.data),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const needsDoc = amount > threshold;
 
   const createMutation = useMutation({
     mutationFn: (data: ClaimForm) => api.post("/api/v1/claims", { ...data, claimedAmount: Number(data.claimedAmount) }),
@@ -488,7 +530,7 @@ function NewClaimModal({ onClose, onCreated }: { onClose: () => void; onCreated:
           <label className="block text-sm font-medium text-gray-700 mb-1">Claim Type <span className="text-red-500">*</span></label>
           <select {...register("claimType")} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-blue-400 outline-none">
             <option value="">Select type</option>
-            {CLAIM_TYPES.map((t) => <option key={t} value={t}>{t.charAt(0) + t.slice(1).toLowerCase()}</option>)}
+            {claimTypes.map((t) => <option key={t.name} value={t.name}>{t.label}</option>)}
           </select>
           {errors.claimType && <p className="text-xs text-red-500 mt-1">{errors.claimType.message}</p>}
         </div>
@@ -501,10 +543,10 @@ function NewClaimModal({ onClose, onCreated }: { onClose: () => void; onCreated:
           <label className="block text-sm font-medium text-gray-700 mb-1">Amount (₹) <span className="text-red-500">*</span></label>
           <input type="number" step="0.01" {...register("claimedAmount")} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 outline-none" />
           {errors.claimedAmount && <p className="text-xs text-red-500 mt-1">{errors.claimedAmount.message}</p>}
-          {amount > threshold && (
+          {needsDoc && (
             <p className="text-xs text-orange-600 mt-1 flex items-center gap-1">
-              <AlertTriangle className="h-3.5 w-3.5" />
-              You'll need to attach a supporting receipt (required above {formatCurrency(threshold)})
+              <Paperclip className="h-3.5 w-3.5" />
+              Claims above ₹{threshold.toLocaleString("en-IN")} require a supporting document.
             </p>
           )}
         </div>
@@ -520,6 +562,78 @@ function NewClaimModal({ onClose, onCreated }: { onClose: () => void; onCreated:
         </div>
       </form>
     </Modal>
+  );
+}
+
+// ─── Month group (collapsible past months) ───────────────────────────────────
+
+function MonthGroup({ monthKey, claims, onOpen, prefetch, showEmployee = false }: {
+  monthKey: string;
+  claims: any[];
+  onOpen: (id: string) => void;
+  prefetch: (id: string) => void;
+  showEmployee?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const total    = claims.reduce((s, c) => s + c.claimedAmount, 0);
+  const approved = claims
+    .filter((c) => c.status === "APPROVED" || c.status === "PAID")
+    .reduce((s, c) => s + (c.approvedAmount ?? c.claimedAmount), 0);
+
+  return (
+    <div className="border-t border-gray-100">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full px-6 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${open ? "" : "-rotate-90"}`} />
+          <span className="text-sm font-semibold text-gray-700">{monthLabel(monthKey)}</span>
+          <span className="text-xs text-gray-400">{claims.length} claim{claims.length !== 1 ? "s" : ""}</span>
+        </div>
+        <div className="flex items-center gap-4">
+          {approved > 0 && (
+            <span className="text-xs text-green-600 font-medium">{formatCurrency(approved)} approved</span>
+          )}
+          <span className="text-sm font-semibold text-gray-900">{formatCurrency(total)} claimed</span>
+        </div>
+      </button>
+      {open && (
+        <div className="border-t border-gray-100">
+          <table className="w-full">
+            <tbody className="divide-y divide-gray-50">
+              {claims.map((claim: any) => (
+                <tr key={claim.id} onMouseEnter={() => prefetch(claim.id)} className="hover:bg-gray-50">
+                  {showEmployee && (
+                    <td className="px-5 py-3 text-sm font-medium text-gray-800">
+                      {claim.employee?.firstName} {claim.employee?.lastName}
+                    </td>
+                  )}
+                  <td className="px-5 py-4 text-xs font-mono text-gray-400 w-28">{claim.claimNumber}</td>
+                  <td className="px-5 py-4 text-xs text-gray-500">{claim.claimType}</td>
+                  <td className="px-5 py-4 text-sm text-gray-800 max-w-xs truncate">{claim.title}</td>
+                  <td className="px-5 py-4 text-sm font-semibold text-gray-900">{formatCurrency(claim.claimedAmount)}</td>
+                  <td className="px-5 py-4"><Badge status={claim.status} /></td>
+                  <td className="px-5 py-4 text-xs text-gray-400">{formatDate(claim.createdAt)}</td>
+                  {!showEmployee && (
+                    <td className="px-5 py-4">
+                      {claim.receipts?.length > 0
+                        ? <span className="inline-flex items-center gap-1 text-xs text-blue-600"><Paperclip className="h-3 w-3" />{claim.receipts.length}</span>
+                        : <span className="text-xs text-gray-300">—</span>}
+                    </td>
+                  )}
+                  <td className="px-5 py-4">
+                    <button onClick={() => onOpen(claim.id)} className="text-xs text-blue-600 hover:underline font-medium">
+                      View →
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -704,87 +818,203 @@ export default function ClaimsPage() {
             <div>
               {!allClaims?.length ? (
                 <p className="px-6 py-10 text-sm text-center text-gray-400">No claims found.</p>
-              ) : (
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-gray-100 bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
-                      <th className="px-5 py-3">Employee</th>
-                      <th className="px-5 py-3">Claim #</th>
-                      <th className="px-5 py-3">Type</th>
-                      <th className="px-5 py-3">Title</th>
-                      <th className="px-5 py-3">Amount</th>
-                      <th className="px-5 py-3">Status</th>
-                      <th className="px-5 py-3">Date</th>
-                      <th className="px-5 py-3"></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {allClaims.map((claim: any) => (
-                      <tr key={claim.id} onMouseEnter={() => prefetchClaim(claim.id)} className="hover:bg-gray-50">
-                        <td className="px-5 py-3 text-sm">{claim.employee.firstName} {claim.employee.lastName}</td>
-                        <td className="px-5 py-3 text-xs font-mono text-gray-400">{claim.claimNumber}</td>
-                        <td className="px-5 py-3 text-xs text-gray-500">{claim.claimType}</td>
-                        <td className="px-5 py-3 text-sm text-gray-800 max-w-xs truncate">{claim.title}</td>
-                        <td className="px-5 py-3 text-sm font-semibold">{formatCurrency(claim.claimedAmount)}</td>
-                        <td className="px-5 py-3"><Badge status={claim.status} /></td>
-                        <td className="px-5 py-3 text-xs text-gray-400">{formatDate(claim.createdAt)}</td>
-                        <td className="px-5 py-3">
-                          <button onClick={() => openClaim(claim.id)} className="text-xs text-blue-600 hover:underline">View</button>
-                        </td>
-                      </tr>
+              ) : (() => {
+                const curKey = currentMonthKeyFn();
+                const groups = new Map<string, any[]>();
+                for (const claim of allClaims) {
+                  const key = claimMonthKey(claim);
+                  if (!groups.has(key)) groups.set(key, []);
+                  groups.get(key)!.push(claim);
+                }
+                const sortedKeys     = [...groups.keys()].sort((a, b) => b.localeCompare(a));
+                const curMonthClaims = groups.get(curKey) ?? [];
+                const pastKeys       = sortedKeys.filter((k) => k !== curKey);
+
+                return (
+                  <>
+                    {/* Current month — expanded */}
+                    {curMonthClaims.length > 0 && (
+                      <div>
+                        <div className="px-6 py-2.5 bg-blue-50 border-b border-blue-100 flex items-center justify-between">
+                          <span className="text-xs font-semibold text-blue-700 uppercase tracking-wide">
+                            {monthLabel(curKey)} · Current
+                          </span>
+                          <span className="text-sm font-semibold text-blue-800">
+                            {formatCurrency(curMonthClaims.reduce((s, c: any) => s + c.claimedAmount, 0))} claimed
+                          </span>
+                        </div>
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b border-gray-100 bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
+                              <th className="px-5 py-3">Employee</th>
+                              <th className="px-5 py-3">Claim #</th>
+                              <th className="px-5 py-3">Type</th>
+                              <th className="px-5 py-3">Title</th>
+                              <th className="px-5 py-3">Amount</th>
+                              <th className="px-5 py-3">Status</th>
+                              <th className="px-5 py-3">Date</th>
+                              <th className="px-5 py-3"></th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-50">
+                            {curMonthClaims.map((claim: any) => (
+                              <tr key={claim.id} onMouseEnter={() => prefetchClaim(claim.id)} className="hover:bg-gray-50">
+                                <td className="px-5 py-3 text-sm font-medium text-gray-800">{claim.employee.firstName} {claim.employee.lastName}</td>
+                                <td className="px-5 py-3 text-xs font-mono text-gray-400">{claim.claimNumber}</td>
+                                <td className="px-5 py-3 text-xs text-gray-500">{claim.claimType}</td>
+                                <td className="px-5 py-3 text-sm text-gray-800 max-w-xs truncate">{claim.title}</td>
+                                <td className="px-5 py-3 text-sm font-semibold">{formatCurrency(claim.claimedAmount)}</td>
+                                <td className="px-5 py-3"><Badge status={claim.status} /></td>
+                                <td className="px-5 py-3 text-xs text-gray-400">{formatDate(claim.createdAt)}</td>
+                                <td className="px-5 py-3">
+                                  <button onClick={() => openClaim(claim.id)} className="text-xs text-blue-600 hover:underline">View</button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {/* Past months — collapsible */}
+                    {pastKeys.map((key) => (
+                      <MonthGroup
+                        key={key}
+                        monthKey={key}
+                        claims={groups.get(key)!}
+                        onOpen={openClaim}
+                        prefetch={prefetchClaim}
+                        showEmployee
+                      />
                     ))}
-                  </tbody>
-                </table>
-              )}
+                  </>
+                );
+              })()}
             </div>
           )}
         </div>
       )}
 
-      {/* My Claims */}
+      {/* My Claims — summary stats */}
+      {(() => {
+        const curKey  = currentMonthKeyFn();
+        const fyStart = getFYStart();
+        const all     = myClaims ?? [];
+        const thisMonthList = all.filter((c: any) => claimMonthKey(c) === curKey);
+        const fyList        = all.filter((c: any) => new Date(c.createdAt) >= fyStart);
+        const pendingList   = all.filter((c: any) => c.status === "SUBMITTED");
+        const approvedList  = all.filter((c: any) => c.status === "APPROVED" || c.status === "PAID");
+        return (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="rounded-xl border border-gray-200 bg-white p-4">
+              <p className="text-xs text-gray-500 mb-1">This Month</p>
+              <p className="text-xl font-bold text-gray-900">{formatCurrency(thisMonthList.reduce((s: number, c: any) => s + c.claimedAmount, 0))}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{thisMonthList.length} claim{thisMonthList.length !== 1 ? "s" : ""}</p>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white p-4">
+              <p className="text-xs text-gray-500 mb-1">This FY (Apr–Mar)</p>
+              <p className="text-xl font-bold text-gray-900">{formatCurrency(fyList.reduce((s: number, c: any) => s + c.claimedAmount, 0))}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{fyList.length} claim{fyList.length !== 1 ? "s" : ""}</p>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white p-4">
+              <p className="text-xs text-gray-500 mb-1">Pending Approval</p>
+              <p className="text-xl font-bold text-amber-600">{pendingList.length}</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {pendingList.length > 0 ? formatCurrency(pendingList.reduce((s: number, c: any) => s + c.claimedAmount, 0)) : "—"}
+              </p>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white p-4">
+              <p className="text-xs text-gray-500 mb-1">Total Approved</p>
+              <p className="text-xl font-bold text-green-700">{formatCurrency(approvedList.reduce((s: number, c: any) => s + (c.approvedAmount ?? c.claimedAmount), 0))}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{approvedList.length} claim{approvedList.length !== 1 ? "s" : ""}</p>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* My Claims — grouped by month */}
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100">
           <h2 className="font-semibold text-gray-900">My Claims</h2>
         </div>
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-gray-100 bg-gray-50">
-              {["Claim #", "Type", "Title", "Amount", "Status", "Date", "Docs", "Action"].map((h) => (
-                <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>
+
+        {!myClaims?.length ? (
+          <p className="px-6 py-10 text-center text-sm text-gray-400">No claims yet. Click <strong>+ New Claim</strong> to get started.</p>
+        ) : (() => {
+          const curKey = currentMonthKeyFn();
+          const groups = new Map<string, any[]>();
+          for (const claim of myClaims) {
+            const key = claimMonthKey(claim);
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key)!.push(claim);
+          }
+          const sortedKeys       = [...groups.keys()].sort((a, b) => b.localeCompare(a));
+          const curMonthClaims   = groups.get(curKey) ?? [];
+          const pastKeys         = sortedKeys.filter((k) => k !== curKey);
+          const curMonthTotal    = curMonthClaims.reduce((s, c: any) => s + c.claimedAmount, 0);
+
+          return (
+            <>
+              {/* Current month — always expanded */}
+              {curMonthClaims.length > 0 && (
+                <div>
+                  <div className="px-6 py-2.5 bg-blue-50 border-b border-blue-100 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-blue-700 uppercase tracking-wide">
+                      {monthLabel(curKey)} · Current
+                    </span>
+                    <span className="text-sm font-semibold text-blue-800">{formatCurrency(curMonthTotal)} claimed</span>
+                  </div>
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-100 bg-gray-50">
+                        {["Claim #", "Type", "Title", "Amount", "Status", "Date", "Docs", "Action"].map((h) => (
+                          <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {curMonthClaims.map((claim: any) => (
+                        <tr key={claim.id} onMouseEnter={() => prefetchClaim(claim.id)} className="hover:bg-gray-50">
+                          <td className="px-5 py-4 text-xs font-mono text-gray-400">{claim.claimNumber}</td>
+                          <td className="px-5 py-4 text-xs text-gray-500">{claim.claimType}</td>
+                          <td className="px-5 py-4 text-sm text-gray-800 max-w-xs truncate">{claim.title}</td>
+                          <td className="px-5 py-4 text-sm font-semibold text-gray-900">{formatCurrency(claim.claimedAmount)}</td>
+                          <td className="px-5 py-4"><Badge status={claim.status} /></td>
+                          <td className="px-5 py-4 text-xs text-gray-400">{formatDate(claim.createdAt)}</td>
+                          <td className="px-5 py-4">
+                            {claim.receipts?.length > 0
+                              ? <span className="inline-flex items-center gap-1 text-xs text-blue-600"><Paperclip className="h-3 w-3" />{claim.receipts.length}</span>
+                              : <span className="text-xs text-gray-300">—</span>}
+                          </td>
+                          <td className="px-5 py-4">
+                            <button onClick={() => openClaim(claim.id)} className="text-xs text-blue-600 hover:underline font-medium">
+                              {claim.status === "DRAFT" ? "Manage →" : "View →"}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Past months — collapsible */}
+              {pastKeys.map((key) => (
+                <MonthGroup
+                  key={key}
+                  monthKey={key}
+                  claims={groups.get(key)!}
+                  onOpen={openClaim}
+                  prefetch={prefetchClaim}
+                />
               ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-50">
-            {!myClaims?.length ? (
-              <tr><td colSpan={8} className="px-6 py-10 text-center text-sm text-gray-400">No claims yet. Click <strong>+ New Claim</strong> to get started.</td></tr>
-            ) : (
-              myClaims.map((claim: any) => (
-                <tr key={claim.id} onMouseEnter={() => prefetchClaim(claim.id)} className="hover:bg-gray-50">
-                  <td className="px-5 py-4 text-xs font-mono text-gray-400">{claim.claimNumber}</td>
-                  <td className="px-5 py-4 text-xs text-gray-500">{claim.claimType}</td>
-                  <td className="px-5 py-4 text-sm text-gray-800 max-w-xs truncate">{claim.title}</td>
-                  <td className="px-5 py-4 text-sm font-semibold text-gray-900">{formatCurrency(claim.claimedAmount)}</td>
-                  <td className="px-5 py-4"><Badge status={claim.status} /></td>
-                  <td className="px-5 py-4 text-xs text-gray-400">{formatDate(claim.createdAt)}</td>
-                  <td className="px-5 py-4">
-                    {claim.receipts?.length > 0
-                      ? <span className="inline-flex items-center gap-1 text-xs text-blue-600"><Paperclip className="h-3 w-3" />{claim.receipts.length}</span>
-                      : <span className="text-xs text-gray-300">—</span>
-                    }
-                  </td>
-                  <td className="px-5 py-4">
-                    <button
-                      onClick={() => openClaim(claim.id)}
-                      className="text-xs text-blue-600 hover:underline font-medium"
-                    >
-                      {claim.status === "DRAFT" ? "Manage →" : "View →"}
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+
+              {curMonthClaims.length === 0 && pastKeys.length === 0 && (
+                <p className="px-6 py-10 text-center text-sm text-gray-400">No claims this month.</p>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       {/* Modals */}
