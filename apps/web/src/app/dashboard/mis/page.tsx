@@ -31,6 +31,11 @@ interface SalaryRow {
   totalDeductions: number;
   netSalary:       number;
   hasStructure:    boolean;
+  accountName:     string | null;
+  accountNumber:   string | null;
+  ifscCode:        string | null;
+  bankName:        string | null;
+  branchName:      string | null;
 }
 
 interface SalaryData {
@@ -45,8 +50,12 @@ interface DisbursementRow {
   name:            string;
   department:      string;
   designation:     string;
+  employmentType:  string | null;
+  accountName:     string | null;
   accountNumber:   string | null;
+  ifscCode:        string | null;
   bankName:        string | null;
+  branchName:      string | null;
   basic:           number;
   hra:             number;
   conveyance:      number;
@@ -704,6 +713,11 @@ function MonthlySalaryDisbursementReport() {
                           <th className="px-3 py-2 whitespace-nowrap">Code</th>
                           <th className="px-3 py-2 whitespace-nowrap">Name</th>
                           <th className="px-3 py-2 whitespace-nowrap">Department</th>
+                          <th className="px-3 py-2 whitespace-nowrap bg-[#0F4C8A]">Account Holder</th>
+                          <th className="px-3 py-2 whitespace-nowrap bg-[#0F4C8A]">Account No.</th>
+                          <th className="px-3 py-2 whitespace-nowrap bg-[#0F4C8A]">IFSC</th>
+                          <th className="px-3 py-2 whitespace-nowrap bg-[#0F4C8A]">Bank</th>
+                          <th className="px-3 py-2 whitespace-nowrap bg-[#0F4C8A]">Branch</th>
                           <th className="px-3 py-2 text-right whitespace-nowrap bg-[#14532D]">Gross Pay</th>
                           <th className="px-3 py-2 text-right whitespace-nowrap bg-[#5B21B6]">LoP</th>
                           <th className="px-3 py-2 text-right whitespace-nowrap bg-[#5B21B6]">Claims</th>
@@ -718,6 +732,11 @@ function MonthlySalaryDisbursementReport() {
                             <td className="px-3 py-2 text-gray-500 font-mono whitespace-nowrap">{r.employeeCode}</td>
                             <td className="px-3 py-2 font-medium text-gray-800 whitespace-nowrap">{r.name}</td>
                             <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{r.department}</td>
+                            <td className="px-3 py-2 text-gray-700 bg-blue-50/40 whitespace-nowrap">{r.accountName ?? "—"}</td>
+                            <td className="px-3 py-2 text-gray-700 bg-blue-50/40 whitespace-nowrap font-mono">{r.accountNumber ?? "—"}</td>
+                            <td className="px-3 py-2 text-gray-700 bg-blue-50/40 whitespace-nowrap font-mono">{r.ifscCode ?? "—"}</td>
+                            <td className="px-3 py-2 text-gray-700 bg-blue-50/40 whitespace-nowrap">{r.bankName ?? "—"}</td>
+                            <td className="px-3 py-2 text-gray-700 bg-blue-50/40 whitespace-nowrap">{r.branchName ?? "—"}</td>
                             <td className="px-3 py-2 text-right text-gray-700 bg-green-50/50 whitespace-nowrap">{r.hasStructure ? fmt(r.grossEarnings) : "—"}</td>
                             <td className="px-3 py-2 text-right text-violet-700 bg-violet-50/50 whitespace-nowrap">
                               {r.lopDays > 0 ? `${r.lopDays}d / ${fmt(r.lopAmount)}` : "—"}

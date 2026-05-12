@@ -343,6 +343,7 @@ model Employee {
   bankDetails       BankDetail[]
   leaveBalances     LeaveBalance[]
   leaveApplications LeaveApplication[]
+  partTimeEntries   PartTimeEntry[]
   claimsSubmitted   ReimbursementClaim[]
   claimsApproved    ReimbursementClaim[] @relation("ClaimApprover")
   policyAcks        PolicyAcknowledgement[]
@@ -559,6 +560,27 @@ model LeaveApplication {
   @@index([status])
   @@index([fromDate, toDate])
   @@index([approverId])
+}
+
+// ─── PART-TIME TIMESHEET ──────────────────────────────────────────────────────
+
+model PartTimeEntry {
+  id            String   @id @default(cuid())
+  employeeId    String
+  date          DateTime
+  lectureHours  Float    @default(0)
+  ptmHours      Float    @default(0)
+  otherHours    Float    @default(0)
+  otherReason   String?
+  answerScripts Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, date])
+  @@index([employeeId])
+  @@index([date])
 }
 
 // ─── REIMBURSEMENT CLAIMS ────────────────────────────────────────────────────

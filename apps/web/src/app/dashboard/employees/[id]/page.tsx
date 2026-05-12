@@ -2345,7 +2345,85 @@ function MonthlySalarySlip({ employeeId, salaryConfig }: { employeeId: string; s
         </div>
       </div>
 
-      {isVariable ? (
+      {isVariable && type === "PART_TIME" ? (
+        isLoading ? (
+          <div className="px-5 py-6 space-y-3 animate-pulse">
+            {[1,2,3,4,5].map((i) => <div key={i} className="h-6 bg-gray-100 rounded" />)}
+          </div>
+        ) : (() => {
+          const ts = data?.timesheet;
+          const lectureHours  = ts?.lectureHours  ?? 0;
+          const ptmHours      = ts?.ptmHours      ?? 0;
+          const otherHours    = ts?.otherHours    ?? 0;
+          const answerScripts = ts?.answerScripts ?? 0;
+          const lRate = c.lectureRatePerHour         ?? 0;
+          const pRate = c.ptmRatePerHour             ?? 0;
+          const oRate = c.lectureRatePerHour         ?? 0;
+          const sRate = c.answerScriptRatePerStudent ?? 0;
+          const lecturePay  = lectureHours  * lRate;
+          const ptmPay      = ptmHours      * pRate;
+          const otherPay    = otherHours    * oRate;
+          const scriptPay   = answerScripts * sRate;
+          const totalAdd    = claimsTotal + bonusTotal + Math.max(0, misc);
+          const miscDed     = Math.abs(Math.min(0, misc));
+          const lopDed      = lopDays > 0 ? Math.round(lopDays * (lRate * 8)) : 0;
+          const netPayout   = lecturePay + ptmPay + otherPay + scriptPay + totalAdd - miscDed - lopDed;
+          const hasRates    = lRate > 0 || pRate > 0 || sRate > 0;
+          if (!hasRates) return (
+            <div className="px-5 py-10 text-center text-sm text-gray-400 italic">
+              No rates configured. Ask HR to set hourly rates in the salary structure.
+            </div>
+          );
+          return (
+            <div className="px-5 py-5 space-y-5">
+              <div>
+                <SlipSection label="Earnings" color="text-green-700" />
+                <div className="bg-green-50/50 rounded-lg px-4">
+                  {lRate > 0 && <SlipRow label="Lecture Hours" sub={`${lectureHours} hr × ₹${lRate}/hr`} value={formatCurrency(lecturePay)} variant="earn" />}
+                  {pRate > 0 && <SlipRow label="PTM Hours"     sub={`${ptmHours} hr × ₹${pRate}/hr`}    value={formatCurrency(ptmPay)}    variant="earn" />}
+                  {oRate > 0 && otherHours > 0 && <SlipRow label="Other Hours" sub={`${otherHours} hr × ₹${oRate}/hr`} value={formatCurrency(otherPay)} variant="earn" />}
+                  {sRate > 0 && <SlipRow label="Answer Script Evaluation" sub={`${answerScripts} scripts × ₹${sRate}/script`} value={formatCurrency(scriptPay)} variant="earn" />}
+                </div>
+                <div className="flex justify-between px-4 pt-2 pb-0.5 text-sm font-bold text-green-800">
+                  <span>Total Earnings</span><span>{formatCurrency(lecturePay + ptmPay + otherPay + scriptPay)}</span>
+                </div>
+              </div>
+              {lopDays > 0 && (
+                <div>
+                  <SlipSection label="Deductions" color="text-red-600" />
+                  <div className="bg-red-50/50 rounded-lg px-4">
+                    <SlipRow label={`Loss of Pay (${lopDays} day${lopDays !== 1 ? "s" : ""})`} value={`−${formatCurrency(lopDed)}`} variant="deduct" />
+                  </div>
+                  <div className="flex justify-between px-4 pt-2 pb-0.5 text-sm font-bold text-red-700">
+                    <span>Total Deductions</span><span>−{formatCurrency(lopDed)}</span>
+                  </div>
+                </div>
+              )}
+              {(claimsTotal > 0 || bonusTotal > 0 || misc !== 0) && (
+                <div>
+                  <SlipSection label="Additions" color="text-blue-700" />
+                  <div className="bg-blue-50/50 rounded-lg px-4">
+                    {claimsTotal > 0 && <SlipRow label={`Approved Claims (${claimsItems.length})`} value={`+${formatCurrency(claimsTotal)}`} variant="earn" />}
+                    {bonusTotal  > 0 && <SlipRow label="Bonus / Incentive"  value={`+${formatCurrency(bonusTotal)}`}  variant="earn" />}
+                    {misc < 0        && <SlipRow label="Miscellaneous Deduction" value={`−${formatCurrency(miscDed)}`} variant="deduct" />}
+                    {misc > 0        && <SlipRow label="Miscellaneous Addition"  value={`+${formatCurrency(misc)}`}   variant="earn" />}
+                  </div>
+                </div>
+              )}
+              {lectureHours === 0 && ptmHours === 0 && otherHours === 0 && answerScripts === 0 && (
+                <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-4 py-3 text-center">
+                  No timesheet entries recorded for this month.
+                </p>
+              )}
+              <div className="border-t border-indigo-100 pt-4">
+                <div className="flex justify-between text-base font-bold text-indigo-900">
+                  <span>Net Payout</span><span className="text-indigo-700">{formatCurrency(netPayout)}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })()
+      ) : isVariable ? (
         <div className="px-5 py-10 text-center text-sm text-gray-400 italic">
           Monthly payout varies by hours / visits — not applicable for this employment type.
         </div>

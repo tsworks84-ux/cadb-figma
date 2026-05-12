@@ -318,6 +318,17 @@ export async function reportRoutes(fastify: FastifyInstance) {
             items: { select: { component: true, amount: true, isPercentage: true } },
           },
         },
+        bankDetails: {
+          where: { isPrimary: true },
+          take: 1,
+          select: {
+            accountName: true,
+            accountNumber: true,
+            ifscCode: true,
+            bankName: true,
+            branchName: true,
+          },
+        },
       },
     });
     return employees;
@@ -337,6 +348,7 @@ export async function reportRoutes(fastify: FastifyInstance) {
         const grossEarnings = EARNINGS.reduce((s, c) => s + (byComp[c] ?? 0), 0);
         const totalDeductions = DEDUCTIONS.reduce((s, c) => s + (byComp[c] ?? 0), 0);
 
+        const bank = (emp as any).bankDetails?.[0];
         return {
           employeeCode:   emp.employeeCode,
           name:           `${emp.firstName} ${emp.lastName}`,
@@ -353,6 +365,11 @@ export async function reportRoutes(fastify: FastifyInstance) {
           totalDeductions,
           netSalary:      grossEarnings - totalDeductions,
           hasStructure:   !!emp.salaryStructure,
+          accountName:    bank?.accountName    ?? null,
+          accountNumber:  bank?.accountNumber  ?? null,
+          ifscCode:       bank?.ifscCode       ?? null,
+          bankName:       bank?.bankName       ?? null,
+          branchName:     bank?.branchName     ?? null,
         };
       });
 
@@ -387,6 +404,11 @@ export async function reportRoutes(fastify: FastifyInstance) {
         { key: "empType",      header: "Type",           width: 14 },
         { key: "ctcMonthly",   header: "CTC / Month",    width: 14 },
         { key: "ctcAnnual",    header: "CTC / Year",     width: 14 },
+        { key: "accountName",  header: "Account Holder", width: 22 },
+        { key: "accountNumber",header: "Account No.",    width: 20 },
+        { key: "ifscCode",     header: "IFSC Code",      width: 14 },
+        { key: "bankName",     header: "Bank Name",      width: 20 },
+        { key: "branchName",   header: "Branch",         width: 20 },
       ];
       const EARN_COLS = EARNINGS.map((c) => ({ key: c, header: COMPONENT_LABELS[c], width: 16 }));
       const GROSS_COL = { key: "grossEarnings",    header: "Gross Earnings",     width: 16 };
@@ -463,20 +485,26 @@ export async function reportRoutes(fastify: FastifyInstance) {
         const totalDeductions = DEDUCTIONS.reduce((s, c) => s + (byComp[c] ?? 0), 0);
         const netSalary       = grossEarnings - totalDeductions;
 
+        const bank = (emp as any).bankDetails?.[0];
         const rowData: Record<string, string | number> = {
-          employeeCode: emp.employeeCode,
-          name:         `${emp.firstName} ${emp.lastName}`,
-          department:   emp.department.name,
-          designation:  emp.designation.title,
-          empType:      emp.employmentType.replace(/_/g, " "),
-          ctcMonthly:   emp.salaryStructure ? Math.round(emp.salaryStructure.ctc / 12) : 0,
-          ctcAnnual:    emp.salaryStructure?.ctc ?? 0,
+          employeeCode:  emp.employeeCode,
+          name:          `${emp.firstName} ${emp.lastName}`,
+          department:    emp.department.name,
+          designation:   emp.designation.title,
+          empType:       emp.employmentType.replace(/_/g, " "),
+          ctcMonthly:    emp.salaryStructure ? Math.round(emp.salaryStructure.ctc / 12) : 0,
+          ctcAnnual:     emp.salaryStructure?.ctc ?? 0,
           grossEarnings,
           totalDeductions,
           netSalary,
           effectiveFrom: emp.salaryStructure?.effectiveFrom
             ? emp.salaryStructure.effectiveFrom.toLocaleDateString("en-IN")
             : "—",
+          accountName:   bank?.accountName   ?? "—",
+          accountNumber: bank?.accountNumber ?? "—",
+          ifscCode:      bank?.ifscCode      ?? "—",
+          bankName:      bank?.bankName      ?? "—",
+          branchName:    bank?.branchName    ?? "—",
         };
         for (const c of [...EARNINGS, ...DEDUCTIONS]) rowData[c] = byComp[c] ?? 0;
 
@@ -563,7 +591,7 @@ export async function reportRoutes(fastify: FastifyInstance) {
     const monthStart = new Date(year, month - 1, 1);
     const monthEnd   = new Date(year, month, 0, 23, 59, 59, 999);
 
-    const [employees, unpaidLeaves, claims, bonusPayouts] = await Promise.all([
+    const [employees, unpaidLeaves, claims, bonusPayouts, timesheetEntries] = await Promise.all([
       // All active employees with salary structure + primary bank
       prisma.employee.findMany({
         where: { deletedAt: null },
@@ -581,10 +609,17 @@ export async function reportRoutes(fastify: FastifyInstance) {
               items: { select: { component: true, amount: true } },
             },
           },
+          employmentType: true,
           bankDetails: {
             where: { isPrimary: true },
             take: 1,
-            select: { accountNumber: true, bankName: true },
+            select: {
+              accountName: true,
+              accountNumber: true,
+              ifscCode: true,
+              bankName: true,
+              branchName: true,
+            },
           },
         },
       }),
@@ -617,6 +652,12 @@ export async function reportRoutes(fastify: FastifyInstance) {
         },
         select: { employeeId: true, amount: true },
       }),
+
+      // Part-time timesheet entries for this month
+      prisma.partTimeEntry.findMany({
+        where: { date: { gte: monthStart, lte: monthEnd } },
+        select: { employeeId: true, lectureHours: true, ptmHours: true, otherHours: true, answerScripts: true },
+      }),
     ]);
 
     const workingDays = workingDaysInMonth(year, month);
@@ -642,6 +683,18 @@ export async function reportRoutes(fastify: FastifyInstance) {
     const bonusByEmp: Record<string, number> = {};
     for (const b of bonusPayouts) {
       bonusByEmp[b.employeeId] = (bonusByEmp[b.employeeId] ?? 0) + b.amount;
+    }
+
+    type TimesheetTotals = { lectureHours: number; ptmHours: number; otherHours: number; answerScripts: number };
+    const timesheetByEmp: Record<string, TimesheetTotals> = {};
+    for (const t of timesheetEntries) {
+      const cur = timesheetByEmp[t.employeeId] ?? { lectureHours: 0, ptmHours: 0, otherHours: 0, answerScripts: 0 };
+      timesheetByEmp[t.employeeId] = {
+        lectureHours:  cur.lectureHours  + t.lectureHours,
+        ptmHours:      cur.ptmHours      + t.ptmHours,
+        otherHours:    cur.otherHours    + t.otherHours,
+        answerScripts: cur.answerScripts + t.answerScripts,
+      };
     }
 
     return employees.map((emp) => {
@@ -675,13 +728,20 @@ export async function reportRoutes(fastify: FastifyInstance) {
       const totalDeductions   = tds + pfEmployee + esiEmployee + professionalTax + advanceDeduction + lopAmount;
       const netPayable        = grossEarnings - totalDeductions + claimsAmount + bonusAmount;
 
+      const bank = (emp as any).bankDetails?.[0];
+      const ts   = timesheetByEmp[emp.id];
+
       return {
         employeeCode:    emp.employeeCode,
         name:            `${emp.firstName} ${emp.lastName}`,
         department:      emp.department.name,
         designation:     emp.designation.title,
-        accountNumber:   emp.bankDetails[0]?.accountNumber ?? null,
-        bankName:        emp.bankDetails[0]?.bankName ?? null,
+        employmentType:  (emp as any).employmentType ?? null,
+        accountName:     bank?.accountName    ?? null,
+        accountNumber:   bank?.accountNumber  ?? null,
+        ifscCode:        bank?.ifscCode       ?? null,
+        bankName:        bank?.bankName       ?? null,
+        branchName:      bank?.branchName     ?? null,
         basic, hra, conveyance, medical, specialAllowance,
         pfEmployer, esiEmployer, gratuity, bonusComp, incentive,
         grossEarnings,
@@ -692,6 +752,7 @@ export async function reportRoutes(fastify: FastifyInstance) {
         netPayable,
         ctcMonthly:    emp.salaryStructure ? Math.round(emp.salaryStructure.ctc / 12) : null,
         hasStructure:  !!emp.salaryStructure,
+        timesheet:     ts ?? null,
       };
     });
   }
@@ -1135,13 +1196,16 @@ export async function reportRoutes(fastify: FastifyInstance) {
 
       // ── Column definitions ────────────────────────────────────────────────
       const INFO_COLS = [
-        { key: "sno",           header: "S.No",           width: 6  },
+        { key: "sno",           header: "S.No",            width: 6  },
         { key: "employeeCode",  header: "Emp Code",        width: 13 },
         { key: "name",          header: "Employee Name",   width: 24 },
         { key: "department",    header: "Department",      width: 20 },
         { key: "designation",   header: "Designation",     width: 20 },
-        { key: "accountNumber", header: "Account No",      width: 16 },
-        { key: "bankName",      header: "Bank",            width: 16 },
+        { key: "accountName",   header: "Account Holder",  width: 22 },
+        { key: "accountNumber", header: "Account No",      width: 18 },
+        { key: "ifscCode",      header: "IFSC Code",       width: 14 },
+        { key: "bankName",      header: "Bank",            width: 18 },
+        { key: "branchName",    header: "Branch",          width: 18 },
       ];
       const EARN_COLS = [
         { key: "basic",             header: "Basic",          width: 13 },

@@ -30,6 +30,7 @@ import { announcementRoutes } from "./routes/v1/announcements.js";
 import { reportRoutes } from "./routes/v1/reports.js";
 import { workLocationRoutes } from "./routes/v1/workLocations.js";
 import { directoryRoutes } from "./routes/v1/directory.js";
+import { timesheetRoutes } from "./routes/v1/timesheet.js";
 import fastifyStatic from "@fastify/static";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -105,6 +106,7 @@ await server.register(announcementRoutes, { prefix: "/api/v1/announcements" });
 await server.register(reportRoutes, { prefix: "/api/v1/reports" });
 await server.register(workLocationRoutes, { prefix: "/api/v1/work-locations" });
 await server.register(directoryRoutes,    { prefix: "/api/v1/directory" });
+await server.register(timesheetRoutes,    { prefix: "/api/v1/timesheet" });
 await server.register(fastifyStatic, {
   root: join(__dirname, "../uploads"),
   prefix: "/uploads/",

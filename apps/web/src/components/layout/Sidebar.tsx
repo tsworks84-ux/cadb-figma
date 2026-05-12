@@ -6,11 +6,11 @@ import { cn } from "@/lib/utils";
 import {
   Users, Home, CalendarOff, Receipt, Shield,
   GraduationCap, Settings, LogOut, BarChart3, Building2, User,
-  CalendarDays, UsersRound, ListTodo, Megaphone, BookUser,
+  CalendarDays, UsersRound, ListTodo, Megaphone, BookUser, ClipboardList,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useRouter } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useCallback } from "react";
 import Image from "next/image";
@@ -30,6 +30,15 @@ export function Sidebar() {
   const permissions = usePermissions();
 
   const role = user?.role ?? "EMPLOYEE";
+
+  // Read from cache (populated by DashboardLayout) — no extra network request
+  const { data: profile } = useQuery({
+    queryKey: ["employee", user?.id],
+    queryFn: () => api.get(`/api/v1/employees/${user?.id}`).then((r) => r.data.data),
+    enabled: !!user?.id,
+    staleTime: 5 * 60 * 1000,
+  });
+  const isPartTime = profile?.employmentType === "PART_TIME";
   // Directory access: system roles are hardcoded; custom roles use their EMP_PROFILE.canView permission
   const SYSTEM_DIR_ROLES = ["SUPER_ADMIN", "HR_ADMIN", "DEPT_HEAD"];
   const canViewDirectory = SYSTEM_DIR_ROLES.includes(role)
@@ -50,6 +59,7 @@ export function Sidebar() {
     { name: "My Team", href: "/dashboard/my-team", icon: UsersRound },
     { name: "My To-Do", href: "/dashboard/todos", icon: ListTodo },
     { name: "Leaves", href: "/dashboard/leaves", icon: CalendarOff },
+    ...(isPartTime ? [{ name: "My Timesheet", href: "/dashboard/timesheet", icon: ClipboardList }] : []),
     { name: "Holidays", href: "/dashboard/holidays", icon: CalendarDays },
     { name: "Claims", href: "/dashboard/claims", icon: Receipt },
     { name: "Policies", href: "/dashboard/policies", icon: Shield },

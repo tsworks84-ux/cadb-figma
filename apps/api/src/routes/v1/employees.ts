@@ -855,6 +855,22 @@ export async function employeeRoutes(fastify: FastifyInstance) {
     // Salary config
     const salaryConfig = await prisma.employeeSalaryConfig.findUnique({ where: { employeeId: id } });
 
+    // Part-time timesheet summary for the period
+    const partTimeEntries = salaryConfig?.employmentType === "PART_TIME"
+      ? await prisma.partTimeEntry.findMany({
+          where: { employeeId: id, date: { gte: periodStart, lte: periodEnd } },
+          orderBy: { date: "asc" },
+        })
+      : [];
+
+    const timesheetSummary = {
+      lectureHours:  partTimeEntries.reduce((s, e) => s + e.lectureHours, 0),
+      ptmHours:      partTimeEntries.reduce((s, e) => s + e.ptmHours, 0),
+      otherHours:    partTimeEntries.reduce((s, e) => s + e.otherHours, 0),
+      answerScripts: partTimeEntries.reduce((s, e) => s + e.answerScripts, 0),
+      entries:       partTimeEntries,
+    };
+
     // Bonus payouts scheduled/paid in this period
     const bonusPayouts = await prisma.bonusPayout.findMany({
       where: {
@@ -877,6 +893,7 @@ export async function employeeRoutes(fastify: FastifyInstance) {
           items: bonusPayouts,
           total: bonusPayouts.reduce((s, p) => s + p.amount, 0),
         },
+        timesheet: timesheetSummary,
         miscellaneous: 0,
       },
     });
