@@ -221,14 +221,15 @@ export async function leaveRoutes(fastify: FastifyInstance) {
   fastify.get("/pending", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN", "DEPT_HEAD") }, async (request, reply) => {
     const user = request.user as JwtPayload;
 
-    // DEPT_HEAD sees leaves from every department they head; falls back to home dept if headOfDept is empty.
-    const deptFilter =
+    // SUPER_ADMIN and HR_ADMIN see all pending leaves.
+    // DEPT_HEAD sees only leaves from employees whose reporting manager is them.
+    const employeeFilter =
       user.role === "DEPT_HEAD"
-        ? { departmentId: { in: user.managedDeptIds?.length ? user.managedDeptIds : [user.departmentId] } }
+        ? { reportingToId: user.sub }
         : undefined;
 
     const data = await prisma.leaveApplication.findMany({
-      where: { status: "PENDING", ...(deptFilter && { employee: deptFilter }) },
+      where: { status: "PENDING", ...(employeeFilter && { employee: employeeFilter }) },
       include: {
         employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, department: { select: { name: true } } } },
       },
@@ -275,17 +276,16 @@ export async function leaveRoutes(fastify: FastifyInstance) {
 
     const application = await prisma.leaveApplication.findUnique({
       where: { id },
-      include: { employee: { select: { departmentId: true } } },
+      include: { employee: { select: { departmentId: true, reportingToId: true } } },
     });
     if (!application || application.status !== "PENDING") {
       return reply.status(404).send({ success: false, error: "Application not found or already processed", statusCode: 404 });
     }
 
-    // DEPT_HEAD may only decide leaves for employees in departments they head
+    // DEPT_HEAD may only approve leaves for employees who report directly to them
     if (user.role === "DEPT_HEAD") {
-      const allowedDepts = user.managedDeptIds?.length ? user.managedDeptIds : [user.departmentId];
-      if (!allowedDepts.includes(application.employee.departmentId)) {
-        return reply.status(403).send({ success: false, error: "Forbidden: applicant is not in a department you manage", statusCode: 403 });
+      if (application.employee.reportingToId !== user.sub) {
+        return reply.status(403).send({ success: false, error: "Forbidden: this employee does not report to you", statusCode: 403 });
       }
     }
 
