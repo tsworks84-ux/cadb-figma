@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "LeaveApplication" ADD COLUMN     "lopDays" DOUBLE PRECISION NOT NULL DEFAULT 0;

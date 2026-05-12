@@ -548,6 +548,7 @@ model LeaveApplication {
   rejectedAt   DateTime?
   rejectionNote String?
   documentUrl  String?
+  lopDays      Float       @default(0)
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 

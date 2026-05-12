@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuthStore } from "@/store/auth";
-import { CalendarDays, Plus, Paperclip, XCircle, ChevronRight, ChevronDown, Clock, AlertTriangle, X, FileText, CheckCircle2 } from "lucide-react";
+import { CalendarDays, Plus, Paperclip, XCircle, ChevronRight, ChevronDown, Clock, AlertTriangle, X, FileText, CheckCircle2, Users } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -64,6 +64,11 @@ interface LeaveBalance {
   carried:   number;
 }
 
+interface LeaveBalancesResponse {
+  data:    LeaveBalance[];
+  lopDays: number;
+}
+
 interface LeaveApplication {
   id:           string;
   leaveType:    string;
@@ -112,71 +117,102 @@ function workingDaysBetween(from: Date, to: Date) {
 
 // ── Leave Balance Cards ────────────────────────────────────────────────────────
 
-function BalanceSection({ balances }: { balances: LeaveBalance[] }) {
+function BalanceSection({ balances, lopDays }: { balances: LeaveBalance[]; lopDays: number }) {
+  const [open, setOpen] = useState(true);
   const fy = getFiscalYear();
   const totalAllocated = balances.reduce((s, b) => s + b.allocated, 0);
   const visibleTypes = balances.filter((b) => b.allocated > 0);
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="flex items-center justify-between px-6 py-4">
-        <div>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors"
+      >
+        <div className="text-left">
           <h2 className="font-semibold text-gray-900">Leave Balance</h2>
           <p className="text-xs text-gray-400 mt-0.5">FY {fy}–{fy + 1} · Accrued monthly</p>
         </div>
-        <span className="text-xs text-gray-500">{totalAllocated} days annual entitlement</span>
-      </div>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-gray-500">{totalAllocated} days annual entitlement</span>
+          <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+        </div>
+      </button>
 
-      <div className="px-6 pb-4 grid grid-cols-3 gap-3">
-        {visibleTypes.slice(0, 3).map((b) => {
-          const c = LEAVE_COLORS[b.leaveType] ?? LEAVE_COLORS.UNPAID;
-          const pct = b.accrued > 0 ? Math.min(100, (b.availed / b.accrued) * 100) : 0;
-          return (
-            <div key={b.leaveType} className={`${c.bg} ${c.border} border rounded-xl p-4`}>
-              <p className={`text-xs font-bold uppercase tracking-wider mb-2 ${c.text}`}>
-                {LEAVE_LABEL[b.leaveType] ?? b.leaveType}
-              </p>
-              <p className={`text-4xl font-bold ${c.text} mb-3`}>{b.balance}</p>
+      {open && (
+        <>
+          <div className="px-6 pb-4 grid grid-cols-3 gap-3">
+            {visibleTypes.slice(0, 2).map((b) => {
+              const c = LEAVE_COLORS[b.leaveType] ?? LEAVE_COLORS.UNPAID;
+              const pct = b.accrued > 0 ? Math.min(100, (b.availed / b.accrued) * 100) : 0;
+              return (
+                <div key={b.leaveType} className={`${c.bg} ${c.border} border rounded-xl p-4`}>
+                  <p className={`text-xs font-bold uppercase tracking-wider mb-2 ${c.text}`}>
+                    {LEAVE_LABEL[b.leaveType] ?? b.leaveType}
+                  </p>
+                  <p className={`text-4xl font-bold ${c.text} mb-3`}>{b.balance}</p>
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between text-gray-600">
+                      <span>Accrued</span><span className="font-semibold text-gray-800">{b.accrued}</span>
+                    </div>
+                    <div className="flex justify-between text-gray-600">
+                      <span>Availed</span><span className="font-semibold text-gray-800">{b.availed}</span>
+                    </div>
+                    <div className="flex justify-between text-gray-600">
+                      <span>Pending</span><span className="font-semibold text-gray-800">{b.pending}</span>
+                    </div>
+                  </div>
+                  <div className="mt-3 h-1.5 rounded-full bg-black/10">
+                    <div className={`h-full rounded-full ${c.bar}`} style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Loss of Pay card — always shown as 3rd card */}
+            <div className="bg-rose-50 border border-rose-100 rounded-xl p-4">
+              <p className="text-xs font-bold uppercase tracking-wider mb-2 text-rose-600">Loss of Pay</p>
+              <p className="text-4xl font-bold text-rose-600 mb-3">{lopDays}</p>
               <div className="space-y-1.5 text-xs">
                 <div className="flex justify-between text-gray-600">
-                  <span>Accrued</span><span className="font-semibold text-gray-800">{b.accrued}</span>
+                  <span>This FY</span><span className="font-semibold text-rose-700">{lopDays} {lopDays === 1 ? "day" : "days"}</span>
                 </div>
                 <div className="flex justify-between text-gray-600">
-                  <span>Availed</span><span className="font-semibold text-gray-800">{b.availed}</span>
-                </div>
-                <div className="flex justify-between text-gray-600">
-                  <span>Pending</span><span className="font-semibold text-gray-800">{b.pending}</span>
+                  <span>Status</span>
+                  <span className={`font-semibold ${lopDays > 0 ? "text-rose-600" : "text-green-600"}`}>
+                    {lopDays > 0 ? "Deducted" : "None"}
+                  </span>
                 </div>
               </div>
-              <div className="mt-3 h-1.5 rounded-full bg-black/10">
-                <div className={`h-full rounded-full ${c.bar}`} style={{ width: `${pct}%` }} />
+              <div className="mt-3 h-1.5 rounded-full bg-rose-200">
+                {lopDays > 0 && <div className="h-full rounded-full bg-rose-500 w-full" />}
               </div>
             </div>
-          );
-        })}
-      </div>
+          </div>
 
-      {visibleTypes.length > 3 && (
-        <div className="px-6 pb-4 flex gap-2 flex-wrap">
-          {visibleTypes.slice(3).map((b) => {
-            const c = LEAVE_COLORS[b.leaveType] ?? LEAVE_COLORS.UNPAID;
-            return (
-              <div key={b.leaveType} className={`${c.bg} ${c.border} border rounded-xl px-4 py-2.5 flex items-center gap-3`}>
-                <span className={`text-xs font-bold uppercase tracking-wider ${c.text}`}>
-                  {LEAVE_LABEL[b.leaveType]}
-                </span>
-                <span className={`text-xl font-bold ${c.text}`}>{b.balance}</span>
-                <span className="text-xs text-gray-400">/ {b.allocated}</span>
-              </div>
-            );
-          })}
-        </div>
+          {visibleTypes.length > 2 && (
+            <div className="px-6 pb-4 flex gap-2 flex-wrap">
+              {visibleTypes.slice(2).map((b) => {
+                const c = LEAVE_COLORS[b.leaveType] ?? LEAVE_COLORS.UNPAID;
+                return (
+                  <div key={b.leaveType} className={`${c.bg} ${c.border} border rounded-xl px-4 py-2.5 flex items-center gap-3`}>
+                    <span className={`text-xs font-bold uppercase tracking-wider ${c.text}`}>
+                      {LEAVE_LABEL[b.leaveType]}
+                    </span>
+                    <span className={`text-xl font-bold ${c.text}`}>{b.balance}</span>
+                    <span className="text-xs text-gray-400">/ {b.allocated}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="px-6 py-3 border-t border-gray-50 bg-gray-50/50 flex justify-between text-xs text-gray-500">
+            <span>Next accrual: {nextAccrualDate()}</span>
+            <span>Medical certificate required for sick leave over 2 days</span>
+          </div>
+        </>
       )}
-
-      <div className="px-6 py-3 border-t border-gray-50 bg-gray-50/50 flex justify-between text-xs text-gray-500">
-        <span>Next accrual: {nextAccrualDate()}</span>
-        <span>Medical certificate required for sick leave over 2 days</span>
-      </div>
     </div>
   );
 }
@@ -563,6 +599,7 @@ function LeaveHistory({
   leaves: LeaveApplication[];
   onCancel: (id: string) => void;
 }) {
+  const [open, setOpen] = useState(true);
   const [filter, setFilter] = useState<"ALL" | "PENDING" | "APPROVED">("ALL");
   const [selected, setSelected] = useState<LeaveApplication | null>(null);
 
@@ -584,90 +621,100 @@ function LeaveHistory({
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-50">
-          <div>
-            <h2 className="font-semibold text-gray-900">Leave History</h2>
-            <p className="text-xs text-gray-400 mt-0.5">Recent applications and approval status.</p>
-          </div>
-          <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-            {(["ALL", "PENDING", "APPROVED"] as const).map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors ${
-                  filter === f ? "bg-white text-gray-800 shadow-sm" : "text-gray-500 hover:text-gray-700"
-                }`}
-              >
-                {f.charAt(0) + f.slice(1).toLowerCase()}
-              </button>
-            ))}
-          </div>
+          <button
+            onClick={() => setOpen((o) => !o)}
+            className="flex items-center gap-2 text-left hover:opacity-80 transition-opacity"
+          >
+            <div>
+              <h2 className="font-semibold text-gray-900">Leave History</h2>
+              <p className="text-xs text-gray-400 mt-0.5">Recent applications and approval status.</p>
+            </div>
+            <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ml-2 ${open ? "rotate-180" : ""}`} />
+          </button>
+          {open && (
+            <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+              {(["ALL", "PENDING", "APPROVED"] as const).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setFilter(f)}
+                  className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors ${
+                    filter === f ? "bg-white text-gray-800 shadow-sm" : "text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  {f.charAt(0) + f.slice(1).toLowerCase()}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
-        {filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center px-6">
-            <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center mb-3">
-              <CalendarDays className="h-6 w-6 text-blue-400" />
+        {open && (
+          filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center px-6">
+              <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center mb-3">
+                <CalendarDays className="h-6 w-6 text-blue-400" />
+              </div>
+              <p className="text-sm font-medium text-gray-600">No leave applications yet</p>
+              <p className="text-xs text-gray-400 mt-1">Your submitted leave requests will appear here with approval status and balance impact.</p>
             </div>
-            <p className="text-sm font-medium text-gray-600">No leave applications yet</p>
-            <p className="text-xs text-gray-400 mt-1">Your submitted leave requests will appear here with approval status and balance impact.</p>
-          </div>
-        ) : (
-          <div className="overflow-y-auto max-h-96">
-            <table className="w-full">
-              <thead className="sticky top-0 bg-white z-10">
-                <tr className="border-b border-gray-50">
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Type</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Dates</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Days</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Approver</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Applied</th>
-                  <th className="px-6 py-3" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {filtered.map((l) => {
-                  const sameDay = l.fromDate.slice(0, 10) === l.toDate.slice(0, 10);
-                  const dateStr = sameDay
-                    ? fmtShort(l.fromDate)
-                    : `${fmtShort(l.fromDate)} – ${fmtShort(l.toDate)}`;
-                  const dayStr = sameDay
-                    ? fmtDayName(l.fromDate)
-                    : `${fmtDayName(l.fromDate)} – ${fmtDayName(l.toDate)}`;
+          ) : (
+            <div className="overflow-y-auto max-h-96">
+              <table className="w-full">
+                <thead className="sticky top-0 bg-white z-10">
+                  <tr className="border-b border-gray-50">
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Type</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Dates</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Days</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Status</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Approver</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Applied</th>
+                    <th className="px-6 py-3" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {filtered.map((l) => {
+                    const sameDay = l.fromDate.slice(0, 10) === l.toDate.slice(0, 10);
+                    const dateStr = sameDay
+                      ? fmtShort(l.fromDate)
+                      : `${fmtShort(l.fromDate)} – ${fmtShort(l.toDate)}`;
+                    const dayStr = sameDay
+                      ? fmtDayName(l.fromDate)
+                      : `${fmtDayName(l.fromDate)} – ${fmtDayName(l.toDate)}`;
 
-                  return (
-                    <tr
-                      key={l.id}
-                      onClick={() => setSelected(l)}
-                      className="hover:bg-blue-50/40 transition-colors cursor-pointer"
-                    >
-                      <td className="px-6 py-4">
-                        <p className="text-sm font-semibold text-gray-800">{LEAVE_LABEL[l.leaveType] ?? l.leaveType}</p>
-                        <p className="text-xs text-gray-400 mt-0.5 truncate max-w-[140px]">{l.reason}</p>
-                      </td>
-                      <td className="px-6 py-4">
-                        <p className="text-sm text-gray-700">{dateStr}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">{dayStr}</p>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-700">{l.totalDays}</td>
-                      <td className="px-6 py-4">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[l.status] ?? "bg-gray-100 text-gray-500"}`}>
-                          {l.status.charAt(0) + l.status.slice(1).toLowerCase()}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-600">
-                        {l.approver ? `${l.approver.firstName} ${l.approver.lastName}` : "—"}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-400">{fmtShort(l.createdAt)}</td>
-                      <td className="px-6 py-4 text-right">
-                        <ChevronRight className="h-4 w-4 text-gray-300 inline-block" />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                    return (
+                      <tr
+                        key={l.id}
+                        onClick={() => setSelected(l)}
+                        className="hover:bg-blue-50/40 transition-colors cursor-pointer"
+                      >
+                        <td className="px-6 py-4">
+                          <p className="text-sm font-semibold text-gray-800">{LEAVE_LABEL[l.leaveType] ?? l.leaveType}</p>
+                          <p className="text-xs text-gray-400 mt-0.5 truncate max-w-[140px]">{l.reason}</p>
+                        </td>
+                        <td className="px-6 py-4">
+                          <p className="text-sm text-gray-700">{dateStr}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">{dayStr}</p>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-700">{l.totalDays}</td>
+                        <td className="px-6 py-4">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[l.status] ?? "bg-gray-100 text-gray-500"}`}>
+                            {l.status.charAt(0) + l.status.slice(1).toLowerCase()}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-600">
+                          {l.approver ? `${l.approver.firstName} ${l.approver.lastName}` : "—"}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-400">{fmtShort(l.createdAt)}</td>
+                        <td className="px-6 py-4 text-right">
+                          <ChevronRight className="h-4 w-4 text-gray-300 inline-block" />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )
         )}
       </div>
     </>
@@ -883,24 +930,198 @@ function DecisionHistory() {
   );
 }
 
+// ── Manager Section Divider ───────────────────────────────────────────────────
+
+function ManagerSectionDivider() {
+  const { user } = useAuthStore();
+  if (user?.role === "EMPLOYEE") return null;
+
+  return (
+    <div className="relative flex items-center gap-4 py-2">
+      <div className="flex-1 h-px bg-gradient-to-r from-transparent via-purple-200 to-transparent" />
+      <div className="flex items-center gap-2 px-4 py-1.5 bg-purple-50 border border-purple-100 rounded-full shrink-0">
+        <Users className="h-3.5 w-3.5 text-purple-500" />
+        <span className="text-xs font-semibold text-purple-600 uppercase tracking-wider">Leave Management</span>
+      </div>
+      <div className="flex-1 h-px bg-gradient-to-r from-transparent via-purple-200 to-transparent" />
+    </div>
+  );
+}
+
 // ── Pending Approvals (for managers/HR) ───────────────────────────────────────
+
+type PendingLeave = {
+  id: string;
+  leaveType: string;
+  fromDate: string;
+  toDate: string;
+  totalDays: number;
+  reason: string;
+  documentUrl?: string;
+  employee: { id: string; firstName: string; lastName: string; department: { name: string } };
+};
+
+function LeaveDecisionRow({
+  leave,
+  onDecide,
+  isPending,
+}: {
+  leave: PendingLeave;
+  onDecide: (id: string, action: "APPROVED" | "REJECTED", lopDays?: number, note?: string) => void;
+  isPending: boolean;
+}) {
+  const [mode, setMode] = useState<"idle" | "approve" | "reject">("idle");
+  const [lopEnabled, setLopEnabled] = useState(false);
+  const [lopDays, setLopDays] = useState<number>(leave.totalDays);
+  const [rejectNote, setRejectNote] = useState("");
+
+  function confirmApprove() {
+    onDecide(leave.id, "APPROVED", lopEnabled ? lopDays : 0);
+    setMode("idle");
+  }
+
+  function confirmReject() {
+    if (!rejectNote.trim()) { toast.error("Please enter a rejection reason"); return; }
+    onDecide(leave.id, "REJECTED", 0, rejectNote);
+    setMode("idle");
+  }
+
+  return (
+    <div className="px-6 py-4">
+      {/* Leave summary row */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-gray-800">
+            {leave.employee.firstName} {leave.employee.lastName}
+            <span className="ml-2 text-xs font-normal text-gray-400">{leave.employee.department.name}</span>
+          </p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {LEAVE_LABEL[leave.leaveType] ?? leave.leaveType} · {fmtShort(leave.fromDate)}
+            {leave.fromDate !== leave.toDate ? ` – ${fmtShort(leave.toDate)}` : ""}
+            {" "}({leave.totalDays} {leave.totalDays === 1 ? "day" : "days"})
+          </p>
+          <p className="text-xs text-gray-400 mt-0.5 truncate">{leave.reason}</p>
+          {leave.documentUrl && (
+            <a href={`${API_BASE}${leave.documentUrl}`} target="_blank" rel="noopener noreferrer"
+              className="text-xs text-blue-500 hover:underline">View document</a>
+          )}
+        </div>
+        {mode === "idle" && (
+          <div className="flex gap-2 shrink-0">
+            <button
+              onClick={() => setMode("approve")}
+              disabled={isPending}
+              className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+            >Approve</button>
+            <button
+              onClick={() => setMode("reject")}
+              disabled={isPending}
+              className="px-3 py-1.5 text-xs bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50"
+            >Reject</button>
+          </div>
+        )}
+      </div>
+
+      {/* Approve panel */}
+      {mode === "approve" && (
+        <div className="mt-3 rounded-xl border border-green-100 bg-green-50 p-4 space-y-3">
+          <p className="text-xs font-semibold text-green-800">Approve leave for {leave.employee.firstName}?</p>
+
+          {/* LoP toggle */}
+          <label className="flex items-center gap-3 cursor-pointer select-none">
+            <div
+              onClick={() => setLopEnabled((e) => !e)}
+              className={`w-9 h-5 rounded-full relative transition-colors ${lopEnabled ? "bg-rose-500" : "bg-gray-300"}`}
+            >
+              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${lopEnabled ? "translate-x-4" : "translate-x-0.5"}`} />
+            </div>
+            <span className="text-sm text-gray-700">Approve with <span className="font-semibold text-rose-600">Loss of Pay</span></span>
+          </label>
+
+          {/* LoP days input */}
+          {lopEnabled && (
+            <div className="flex items-center gap-3 pl-1">
+              <label className="text-xs text-gray-600 shrink-0">LoP days:</label>
+              <input
+                type="number"
+                min={0.5}
+                max={leave.totalDays}
+                step={0.5}
+                value={lopDays}
+                onChange={(e) => setLopDays(Math.min(leave.totalDays, Math.max(0, parseFloat(e.target.value) || 0)))}
+                className="w-20 border border-rose-200 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-rose-400 bg-white"
+              />
+              <span className="text-xs text-gray-400">of {leave.totalDays} total days</span>
+              {lopDays > 0 && (
+                <span className="text-xs font-medium text-rose-600 bg-rose-50 border border-rose-100 rounded-lg px-2 py-0.5">
+                  {lopDays} day{lopDays !== 1 ? "s" : ""} salary deducted
+                </span>
+              )}
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-1">
+            <button
+              onClick={confirmApprove}
+              disabled={isPending}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg text-white disabled:opacity-50 ${lopEnabled ? "bg-rose-600 hover:bg-rose-700" : "bg-green-600 hover:bg-green-700"}`}
+            >
+              {lopEnabled ? `Approve with ${lopDays} LoP day${lopDays !== 1 ? "s" : ""}` : "Approve"}
+            </button>
+            <button onClick={() => setMode("idle")} className="px-4 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Reject panel */}
+      {mode === "reject" && (
+        <div className="mt-3 rounded-xl border border-red-100 bg-red-50 p-4 space-y-3">
+          <p className="text-xs font-semibold text-red-800">Reason for rejection:</p>
+          <textarea
+            rows={2}
+            value={rejectNote}
+            onChange={(e) => setRejectNote(e.target.value)}
+            placeholder="Enter reason…"
+            className="w-full border border-red-200 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-red-400 bg-white"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={confirmReject}
+              disabled={isPending}
+              className="px-4 py-1.5 text-xs font-semibold bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+            >
+              Confirm Reject
+            </button>
+            <button onClick={() => setMode("idle")} className="px-4 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function PendingApprovals() {
   const { user } = useAuthStore();
   const queryClient = useQueryClient();
+  const [open, setOpen] = useState(true);
   const isApprover = user?.role !== "EMPLOYEE";
 
-  const { data: pending = [] } = useQuery({
+  const { data: pending = [] } = useQuery<PendingLeave[]>({
     queryKey: ["pending-leaves"],
     queryFn: () => api.get("/api/v1/leaves/pending").then((r) => r.data.data),
     enabled: isApprover,
   });
 
   const decisionMut = useMutation({
-    mutationFn: ({ id, action, note }: { id: string; action: string; note?: string }) =>
-      api.patch(`/api/v1/leaves/${id}/decision`, { action, note }),
-    onSuccess: () => {
-      toast.success("Decision recorded");
+    mutationFn: ({ id, action, lopDays, note }: { id: string; action: string; lopDays?: number; note?: string }) =>
+      api.patch(`/api/v1/leaves/${id}/decision`, { action, lopDays, note }),
+    onSuccess: (_data, variables) => {
+      const isLop = (variables.lopDays ?? 0) > 0;
+      toast.success(isLop ? `Approved with ${variables.lopDays} LoP day${variables.lopDays !== 1 ? "s" : ""}` : "Decision recorded");
       queryClient.invalidateQueries({ queryKey: ["pending-leaves"] });
       queryClient.invalidateQueries({ queryKey: ["decided-leaves"] });
       queryClient.invalidateQueries({ queryKey: ["my-leaves"] });
@@ -909,58 +1130,42 @@ function PendingApprovals() {
     onError: () => toast.error("Failed to record decision"),
   });
 
-  if (!isApprover || pending.length === 0) return null;
+  if (!isApprover) return null;
 
   return (
     <div className="bg-white rounded-2xl border border-orange-100 shadow-sm overflow-hidden">
-      <div className="px-6 py-4 border-b border-orange-50 flex items-center gap-2">
-        <Clock className="h-4 w-4 text-orange-500" />
-        <h2 className="font-semibold text-gray-900">Pending Approvals</h2>
-        <span className="ml-auto text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full font-medium">{pending.length}</span>
-      </div>
-      <div className="divide-y divide-gray-50">
-        {pending.map((leave: {
-          id: string;
-          leaveType: string;
-          fromDate: string;
-          toDate: string;
-          totalDays: number;
-          reason: string;
-          documentUrl?: string;
-          employee: { firstName: string; lastName: string; department: { name: string } };
-        }) => (
-          <div key={leave.id} className="flex items-center justify-between px-6 py-4 gap-4">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-gray-800">
-                {leave.employee.firstName} {leave.employee.lastName}
-                <span className="ml-2 text-xs font-normal text-gray-400">{leave.employee.department.name}</span>
-              </p>
-              <p className="text-xs text-gray-500 mt-0.5">
-                {LEAVE_LABEL[leave.leaveType]} · {fmtShort(leave.fromDate)}
-                {leave.fromDate !== leave.toDate ? ` – ${fmtShort(leave.toDate)}` : ""}
-                {" "}({leave.totalDays} {leave.totalDays === 1 ? "day" : "days"})
-              </p>
-              <p className="text-xs text-gray-400 mt-0.5 truncate">{leave.reason}</p>
-              {leave.documentUrl && (
-                <a href={`${API_BASE}${leave.documentUrl}`} target="_blank" rel="noopener noreferrer"
-                  className="text-xs text-blue-500 hover:underline">View document</a>
-              )}
-            </div>
-            <div className="flex gap-2 shrink-0">
-              <button
-                onClick={() => decisionMut.mutate({ id: leave.id, action: "APPROVED" })}
-                disabled={decisionMut.isPending}
-                className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-              >Approve</button>
-              <button
-                onClick={() => decisionMut.mutate({ id: leave.id, action: "REJECTED", note: "Not approved" })}
-                disabled={decisionMut.isPending}
-                className="px-3 py-1.5 text-xs bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50"
-              >Reject</button>
-            </div>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between px-6 py-4 hover:bg-orange-50/30 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <Clock className="h-4 w-4 text-orange-500" />
+          <h2 className="font-semibold text-gray-900">Pending Approvals</h2>
+          {pending.length > 0 && (
+            <span className="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full font-medium">{pending.length}</span>
+          )}
+        </div>
+        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        pending.length === 0 ? (
+          <div className="px-6 py-8 text-center text-sm text-gray-400 border-t border-orange-50">
+            No pending approvals at this time.
           </div>
-        ))}
-      </div>
+        ) : (
+          <div className="border-t border-orange-50 divide-y divide-gray-50">
+            {pending.map((leave) => (
+              <LeaveDecisionRow
+                key={leave.id}
+                leave={leave}
+                onDecide={(id, action, lopDays, note) => decisionMut.mutate({ id, action, lopDays, note })}
+                isPending={decisionMut.isPending}
+              />
+            ))}
+          </div>
+        )
+      )}
     </div>
   );
 }
@@ -1001,10 +1206,12 @@ function CollapsibleApplyForm({ balances, onSuccess }: { balances: LeaveBalance[
 export default function LeavesPage() {
   const queryClient = useQueryClient();
 
-  const { data: balances = [] } = useQuery<LeaveBalance[]>({
+  const { data: balancesResp } = useQuery<LeaveBalancesResponse>({
     queryKey: ["my-leave-balances"],
-    queryFn: () => api.get("/api/v1/leaves/balances").then((r) => r.data.data),
+    queryFn: () => api.get("/api/v1/leaves/balances").then((r) => ({ data: r.data.data, lopDays: r.data.lopDays ?? 0 })),
   });
+  const balances = balancesResp?.data ?? [];
+  const lopDays  = balancesResp?.lopDays ?? 0;
 
   const { data: leaves = [] } = useQuery<LeaveApplication[]>({
     queryKey: ["my-leaves"],
@@ -1060,13 +1267,19 @@ export default function LeavesPage() {
 
           {/* Left — main content */}
           <div className="flex-1 min-w-0 space-y-5">
-            <BalanceSection balances={balances} />
-            <PendingApprovals />
-            <DecisionHistory />
+
+            {/* ── My Leave section ── */}
+            <BalanceSection balances={balances} lopDays={lopDays} />
             <div id="apply">
               <CollapsibleApplyForm balances={balances} onSuccess={invalidateLeaves} />
             </div>
             <LeaveHistory leaves={leaves} onCancel={(id) => cancelMut.mutate(id)} />
+
+            {/* ── Manager section divider (only for approvers) ── */}
+            <ManagerSectionDivider />
+
+            <PendingApprovals />
+            <DecisionHistory />
           </div>
 
           {/* Right — sidebar */}

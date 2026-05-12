@@ -183,6 +183,35 @@ export async function leaveRoutes(fastify: FastifyInstance) {
       }
     }
 
+    const fyStart = new Date(year, 3, 1);
+    const fyEnd   = new Date(year + 1, 3, 1);
+
+    // Sum LoP days: UNPAID leaves + lopDays from other leave types
+    const [unpaidLeaves, lopMarkedLeaves] = await Promise.all([
+      prisma.leaveApplication.findMany({
+        where: {
+          employeeId: user.sub,
+          leaveType: "UNPAID",
+          status: "APPROVED",
+          fromDate: { gte: fyStart, lt: fyEnd },
+        },
+        select: { totalDays: true },
+      }),
+      prisma.leaveApplication.findMany({
+        where: {
+          employeeId: user.sub,
+          leaveType: { not: "UNPAID" },
+          status: "APPROVED",
+          lopDays: { gt: 0 },
+          fromDate: { gte: fyStart, lt: fyEnd },
+        },
+        select: { lopDays: true },
+      }),
+    ]);
+    const totalLopDays =
+      unpaidLeaves.reduce((s, l) => s + l.totalDays, 0) +
+      lopMarkedLeaves.reduce((s, l) => s + l.lopDays, 0);
+
     const data = balances.map((b) => {
       const accrued = computeAccrued(b.allocated, year);
       const availed = b.used + b.pending;
@@ -198,7 +227,7 @@ export async function leaveRoutes(fastify: FastifyInstance) {
       };
     });
 
-    return reply.send({ success: true, data });
+    return reply.send({ success: true, data, lopDays: totalLopDays });
   });
 
   // Get my leaves
@@ -268,7 +297,7 @@ export async function leaveRoutes(fastify: FastifyInstance) {
   fastify.patch("/:id/decision", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN", "DEPT_HEAD") }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const user = request.user as JwtPayload;
-    const body = request.body as { action: "APPROVED" | "REJECTED"; note?: string };
+    const body = request.body as { action: "APPROVED" | "REJECTED"; note?: string; lopDays?: number };
 
     if (!["APPROVED", "REJECTED"].includes(body.action)) {
       return reply.status(400).send({ success: false, error: "Invalid action", statusCode: 400 });
@@ -289,6 +318,11 @@ export async function leaveRoutes(fastify: FastifyInstance) {
       }
     }
 
+    // Validate lopDays: must be between 0 and totalDays (inclusive)
+    const lopDays = body.action === "APPROVED" && body.lopDays != null
+      ? Math.min(Math.max(0, body.lopDays), application.totalDays)
+      : 0;
+
     const year = getFiscalYear(application.fromDate);
     const updates: any[] = [
       prisma.leaveApplication.update({
@@ -299,6 +333,7 @@ export async function leaveRoutes(fastify: FastifyInstance) {
           approvedAt: body.action === "APPROVED" ? new Date() : null,
           rejectedAt: body.action === "REJECTED" ? new Date() : null,
           rejectionNote: body.action === "REJECTED" ? body.note : null,
+          lopDays,
         },
       }),
     ];
@@ -320,7 +355,7 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     }
 
     const [updated] = await prisma.$transaction(updates);
-    return reply.send({ success: true, data: updated, message: `Leave ${body.action.toLowerCase()}` });
+    return reply.send({ success: true, data: updated, message: `Leave ${body.action.toLowerCase()}${lopDays > 0 ? ` (${lopDays} day${lopDays !== 1 ? "s" : ""} LoP)` : ""}` });
   });
 
   // Get all leaves decided (approved/rejected) by the current manager/HR

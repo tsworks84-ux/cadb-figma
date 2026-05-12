@@ -813,25 +813,44 @@ export async function employeeRoutes(fastify: FastifyInstance) {
     });
 
     // UNPAID (LOP) leaves approved with any day in this period
-    const lopLeaves = await prisma.leaveApplication.findMany({
-      where: {
-        employeeId: id,
-        leaveType: "UNPAID",
-        status: "APPROVED",
-        fromDate: { lte: periodEnd },
-        toDate:   { gte: periodStart },
-      },
-      select: { id: true, fromDate: true, toDate: true, totalDays: true, leaveType: true },
-      orderBy: { fromDate: "asc" },
-    });
+    const [unpaidLeaves, lopMarkedLeaves] = await Promise.all([
+      prisma.leaveApplication.findMany({
+        where: {
+          employeeId: id,
+          leaveType: "UNPAID",
+          status: "APPROVED",
+          fromDate: { lte: periodEnd },
+          toDate:   { gte: periodStart },
+        },
+        select: { id: true, fromDate: true, toDate: true, totalDays: true, leaveType: true, lopDays: true },
+        orderBy: { fromDate: "asc" },
+      }),
+      prisma.leaveApplication.findMany({
+        where: {
+          employeeId: id,
+          leaveType: { not: "UNPAID" },
+          status: "APPROVED",
+          lopDays: { gt: 0 },
+          fromDate: { lte: periodEnd },
+          toDate:   { gte: periodStart },
+        },
+        select: { id: true, fromDate: true, toDate: true, totalDays: true, leaveType: true, lopDays: true },
+        orderBy: { fromDate: "asc" },
+      }),
+    ]);
 
-    // Clamp leave days to the period and sum
-    const lopDays = lopLeaves.reduce((sum, l) => {
+    // Clamp UNPAID leave days to the period
+    const unpaidLopDays = unpaidLeaves.reduce((sum, l) => {
       const from = l.fromDate < periodStart ? periodStart : l.fromDate;
       const to   = l.toDate   > periodEnd   ? periodEnd   : l.toDate;
       const diff = Math.round((to.getTime() - from.getTime()) / 86_400_000) + 1;
       return sum + Math.min(diff, l.totalDays);
     }, 0);
+
+    // Explicitly marked LoP days from other leave types
+    const markedLopDays = lopMarkedLeaves.reduce((sum, l) => sum + l.lopDays, 0);
+    const lopDays = unpaidLopDays + markedLopDays;
+    const lopLeaves = [...unpaidLeaves, ...lopMarkedLeaves];
 
     // Salary config
     const salaryConfig = await prisma.employeeSalaryConfig.findUnique({ where: { employeeId: id } });
