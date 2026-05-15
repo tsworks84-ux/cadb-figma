@@ -174,6 +174,42 @@ enum AnnouncementAudience {
   HR_ONLY
 }
 
+enum StudentStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  GRADUATED
+  DROPPED
+}
+
+enum ScheduleStatus {
+  UPCOMING
+  COMPLETED
+  CANCELLED
+}
+
+enum AssignmentStatus {
+  DUE
+  COMPLETED
+  ARCHIVED
+}
+
+enum ExamStatus {
+  DUE
+  COMPLETED
+  MARKED
+  CANCELLED
+  ARCHIVED
+}
+
+enum SubmissionStatus {
+  NOT_SUBMITTED
+  SUBMITTED
+  IN_PROCESS
+  APPROVED
+  REJECTED
+}
+
 enum ReminderType {
   NONE
   ON_DUE_DATE
@@ -366,6 +402,9 @@ model Employee {
   deptMemberships   EmployeeDepartment[]     @relation("EmpDeptMemberships")
   deptMembershipsAdded EmployeeDepartment[]  @relation("DeptMembershipAddedBy")
   directoryEntry       DirectoryEntry?
+  facultySubjects      BatchSubject[]      @relation("FacultySubjects")
+  schedulesTaught      Schedule[]          @relation("FacultySchedules")
+  assignmentsTaught    Assignment[]        @relation("FacultyAssignments")
 
   @@index([departmentId])
   @@index([designationId])
@@ -1074,6 +1113,334 @@ model EmployeeSalaryConfig {
   @@index([employeeId])
 }
 
+// ─── STUDENTS ────────────────────────────────────────────────────────────────
+
+model Student {
+  id                 String        @id @default(cuid())
+  studentCode        String        @unique
+  email              String        @unique
+  passwordHash       String
+  mustChangePassword Boolean       @default(true)
+
+  firstName          String
+  lastName           String
+  middleName         String?
+  gender             Gender?
+  dateOfBirth        DateTime?
+  photoUrl           String?
+  phone              String?
+  address            Json?
+
+  rollNumber         String?
+
+  parentName         String?
+  parentPhone        String?
+  parentEmail        String?
+  parentRelation     String?
+  parentOccupation   String?
+  parentAddress      Json?
+
+  motherName         String?
+  motherPhone        String?
+  motherEmail        String?
+  motherOccupation   String?
+
+  communicationContact     String?   // FATHER | MOTHER | BOTH | OTHER
+  communicationContactName  String?
+  communicationContactPhone String?
+
+  admissionNumber    String?       @unique
+  admissionDate      DateTime?
+  academicYear       String?
+  schoolId           String?
+  school             School?       @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+  nationality        String?       @default("Indian")
+
+  totalFee           Float?
+  paidFee            Float?
+  discountType       String?   // "PERCENTAGE" | "AMOUNT"
+  discountAmount     Float?
+  paymentDate        DateTime?
+  paymentMode        String?
+  receiptNumber      String?
+  paymentNote        String?
+
+  gradeId            String?
+  grade              Grade?        @relation(fields: [gradeId], references: [id], onDelete: SetNull)
+
+  courseId           String?
+  course             Course?       @relation(fields: [courseId], references: [id], onDelete: SetNull)
+
+  batchId            String?
+  batch              Batch?        @relation(fields: [batchId], references: [id])
+  batchAssignedAt    DateTime?
+  batchHistory       StudentBatchHistory[]
+
+  initialPasswordHash String?
+
+  instalments        StudentInstalment[]
+
+  status             StudentStatus @default(ACTIVE)
+  isArchived         Boolean       @default(false)
+
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  sessions           StudentSession[]
+  submissions        AssignmentSubmission[]
+  examResults        ExamResult[]
+
+  @@index([batchId])
+  @@index([schoolId])
+  @@index([status])
+  @@index([email])
+  @@index([studentCode])
+}
+
+model StudentSession {
+  id           String   @id @default(cuid())
+  studentId    String
+  refreshToken String   @unique
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+  @@index([expiresAt])
+}
+
+// ─── ACADEMIC FOUNDATION ─────────────────────────────────────────────────────
+
+model Location {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  batches   Batch[]
+  schedules Schedule[]
+  centres   Centre[]
+
+  @@index([isActive])
+}
+
+model Centre {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  cityId    String?
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  city      Location? @relation(fields: [cityId], references: [id], onDelete: SetNull)
+
+  @@index([cityId])
+  @@index([isActive])
+}
+
+model Batch {
+  id           String    @id @default(cuid())
+  name         String
+  description  String?
+  locationId   String?
+  academicYear String
+  startDate    DateTime?
+  schoolId     String?
+  gradeId      String?
+  isActive     Boolean   @default(true)
+  isArchived   Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  location        Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  school          School?   @relation(fields: [schoolId],   references: [id], onDelete: SetNull)
+  grade           Grade?    @relation(fields: [gradeId],    references: [id], onDelete: SetNull)
+  students        Student[]
+  batchSubjects   BatchSubject[]
+  batchHistories  StudentBatchHistory[]
+  schedules       ScheduleBatch[]
+  assignments     AssignmentBatch[]
+  examBatches     ExamBatch[]
+
+  @@index([academicYear])
+  @@index([isActive])
+  @@index([locationId])
+  @@index([schoolId])
+  @@index([gradeId])
+}
+
+model StudentBatchHistory {
+  id           String    @id @default(cuid())
+  studentId    String
+  batchId      String?
+  batchName    String
+  academicYear String?
+  assignedAt   DateTime
+  removedAt    DateTime  @default(now())
+
+  student      Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  batch        Batch?    @relation(fields: [batchId], references: [id], onDelete: SetNull)
+
+  @@index([studentId])
+}
+
+model Subject {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  batchSubjects BatchSubject[]
+  schedules     Schedule[]
+  assignments   Assignment[]
+  examSubjects  ExamSubject[]
+
+  @@index([isActive])
+}
+
+model BatchSubject {
+  id         String    @id @default(cuid())
+  batchId    String
+  subjectId  String
+  employeeId String?
+
+  batch      Batch     @relation(fields: [batchId],    references: [id], onDelete: Cascade)
+  subject    Subject   @relation(fields: [subjectId],  references: [id], onDelete: Cascade)
+  employee   Employee? @relation("FacultySubjects",    fields: [employeeId], references: [id], onDelete: SetNull)
+
+  createdAt  DateTime  @default(now())
+
+  @@unique([batchId, subjectId])
+  @@index([batchId])
+  @@index([subjectId])
+  @@index([employeeId])
+}
+
+// ─── ACADEMIC SETTINGS ───────────────────────────────────────────────────────
+
+model AcademicYear {
+  id         String   @id @default(cuid())
+  name       String   @unique
+  isActive   Boolean  @default(true)
+  isArchived Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model TargetExam {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  category  String   @default("BOARD")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([category])
+  @@index([isActive])
+}
+
+model Grade {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  students  Student[]
+  batches   Batch[]
+}
+
+model Course {
+  id          String   @id @default(cuid())
+  name        String
+  code        String?  @unique
+  description String?
+  duration    String?
+  fee         Float?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  students         Student[]
+  instalmentPlans  InstalmentPlan[]
+
+  @@index([isActive])
+}
+
+model InstalmentPlan {
+  id          String               @id @default(cuid())
+  name        String
+  courseId    String?
+  description String?
+  isActive    Boolean              @default(true)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  course      Course?              @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  items       InstalmentPlanItem[]
+
+  @@index([courseId])
+  @@index([isActive])
+}
+
+model InstalmentPlanItem {
+  id                String         @id @default(cuid())
+  planId            String
+  instalmentNo      Int
+  label             String?
+  amount            Float
+  daysFromAdmission Int?
+  dueDate           DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  plan              InstalmentPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId])
+}
+
+model StudentInstalment {
+  id           String    @id @default(cuid())
+  studentId    String
+  instalmentNo Int
+  label        String?
+  amount       Float
+  dueDate      DateTime
+  isPaid       Boolean   @default(false)
+  paidAt       DateTime?
+  paidAmount   Float?
+  paymentMode  String?
+  note         String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  student      Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+}
+
+model School {
+  id        String   @id @default(cuid())
+  name      String
+  city      String?
+  board     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  students  Student[]
+  batches   Batch[]
+
+  @@index([isActive])
+}
+
 // ─── DIRECTORY ───────────────────────────────────────────────────────────────
 
 model DirectoryEntry {
@@ -1087,4 +1454,197 @@ model DirectoryEntry {
   employee     Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([displayOrder])
+}
+
+// ─── SCHEDULE ────────────────────────────────────────────────────────────────
+
+model Schedule {
+  id           String         @id @default(cuid())
+  academicYear String
+  subjectId    String?
+  employeeId   String?
+  locationId   String?
+  date         DateTime       @db.Date
+  startTime    DateTime
+  endTime      DateTime
+  topics       String?
+  notes        String?
+  status       ScheduleStatus @default(UPCOMING)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  subject      Subject?       @relation(fields: [subjectId],  references: [id], onDelete: SetNull)
+  employee     Employee?      @relation("FacultySchedules", fields: [employeeId], references: [id], onDelete: SetNull)
+  location     Location?      @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  batches      ScheduleBatch[]
+
+  @@index([date])
+  @@index([status])
+  @@index([academicYear])
+  @@index([employeeId])
+  @@index([locationId])
+}
+
+model ScheduleBatch {
+  id         String   @id @default(cuid())
+  scheduleId String
+  batchId    String
+
+  schedule   Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  batch      Batch    @relation(fields: [batchId],    references: [id], onDelete: Cascade)
+
+  @@unique([scheduleId, batchId])
+  @@index([scheduleId])
+  @@index([batchId])
+}
+
+// ─── ASSIGNMENTS ──────────────────────────────────────────────────────────────
+
+model Assignment {
+  id             String           @id @default(cuid())
+  academicYear   String
+  name           String
+  assignmentDate DateTime         @db.Date
+  submissionDate DateTime         @db.Date
+  subjectId      String?
+  employeeId     String?
+  topics         String?
+  note           String?
+  attachmentUrl  String?
+  attachmentName String?
+  status         AssignmentStatus @default(DUE)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  subject     Subject?               @relation(fields: [subjectId],  references: [id], onDelete: SetNull)
+  employee    Employee?              @relation("FacultyAssignments", fields: [employeeId], references: [id], onDelete: SetNull)
+  batches     AssignmentBatch[]
+  submissions AssignmentSubmission[]
+
+  @@index([academicYear])
+  @@index([status])
+  @@index([submissionDate])
+  @@index([subjectId])
+  @@index([employeeId])
+}
+
+model AssignmentBatch {
+  id           String     @id @default(cuid())
+  assignmentId String
+  batchId      String
+
+  assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  batch      Batch      @relation(fields: [batchId],      references: [id], onDelete: Cascade)
+
+  @@unique([assignmentId, batchId])
+  @@index([assignmentId])
+  @@index([batchId])
+}
+
+model AssignmentSubmission {
+  id             String           @id @default(cuid())
+  assignmentId   String
+  studentId      String
+  status         SubmissionStatus @default(NOT_SUBMITTED)
+  submittedAt    DateTime?
+  reviewNote     String?
+  attachmentUrl  String?
+  attachmentName String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  student    Student    @relation(fields: [studentId],    references: [id], onDelete: Cascade)
+
+  @@unique([assignmentId, studentId])
+  @@index([assignmentId])
+  @@index([studentId])
+  @@index([status])
+}
+
+// ─── ASSESSMENTS ─────────────────────────────────────────────────────────────
+
+model Exam {
+  id           String     @id @default(cuid())
+  academicYear String
+  name         String
+  numPapers    Int        @default(1)
+  numSubjects  Int        @default(1)
+  examDate     DateTime   @db.Date
+  startTime    String
+  endTime      String
+  totalMarks   Int?
+  status       ExamStatus @default(DUE)
+  note         String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  batches  ExamBatch[]
+  subjects ExamSubject[]
+  results  ExamResult[]
+
+  @@index([academicYear])
+  @@index([status])
+  @@index([examDate])
+}
+
+model ExamSubject {
+  id          String  @id @default(cuid())
+  examId      String
+  paperNum    Int
+  subjectSlot Int
+  subjectId   String?
+  topics      String?
+  maxMarks    Float?
+
+  exam    Exam     @relation(fields: [examId],    references: [id], onDelete: Cascade)
+  subject Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+
+  @@unique([examId, paperNum, subjectSlot])
+  @@index([examId])
+  @@index([subjectId])
+}
+
+model ExamBatch {
+  id      String @id @default(cuid())
+  examId  String
+  batchId String
+
+  exam  Exam  @relation(fields: [examId],  references: [id], onDelete: Cascade)
+  batch Batch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([examId, batchId])
+  @@index([examId])
+  @@index([batchId])
+}
+
+model ExamResult {
+  id         String   @id @default(cuid())
+  examId     String
+  studentId  String
+  attended   Boolean  @default(true)
+  isExcluded Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  exam    Exam    @relation(fields: [examId],    references: [id], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  marks   ExamMark[]
+
+  @@unique([examId, studentId])
+  @@index([examId])
+  @@index([studentId])
+}
+
+model ExamMark {
+  id           String @id @default(cuid())
+  examResultId String
+  paperNum     Int
+  subjectSlot  Int
+  marks        Float?
+
+  result ExamResult @relation(fields: [examResultId], references: [id], onDelete: Cascade)
+
+  @@unique([examResultId, paperNum, subjectSlot])
+  @@index([examResultId])
 }

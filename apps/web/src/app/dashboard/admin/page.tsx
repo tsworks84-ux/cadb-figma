@@ -40,6 +40,15 @@ const MODULE_ROWS: ModuleRow[] = [
   { key: "MIS_LEAVE_RECORDS",  label: "Leave Records",            indent: true },
   { key: "MIS_HOLIDAYS",       label: "Holidays List",            indent: true },
   { key: "MIS_CLAIMS",         label: "Claims Report",            indent: true },
+  { key: "_ACA_HEADER",       label: "Academics",                isHeader: true },
+  { key: "ACA_BATCH",         label: "Batches",                  indent: true },
+  { key: "ACA_SUBJECT",       label: "Subjects",                 indent: true },
+  { key: "STU_PROFILE",       label: "Students",                 indent: true },
+  { key: "STU_ADMISSION",     label: "Admission",                indent: true },
+  { key: "STU_ATTENDANCE",    label: "Attendance",               indent: true },
+  { key: "STU_ASSIGNMENT",    label: "Assignments",              indent: true },
+  { key: "STU_ASSESSMENT",    label: "Assessments",              indent: true },
+  { key: "STU_TIMETABLE",     label: "Timetable",                indent: true },
   { key: "ADMIN",     label: "Admin" },
 ];
 const ROLE_META: Record<string, { label: string; color: string; description: string }> = {

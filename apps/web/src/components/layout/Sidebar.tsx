@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import {
   Users, Home, CalendarOff, Receipt, Shield,
   GraduationCap, Settings, LogOut, BarChart3, Building2, User,
-  CalendarDays, UsersRound, ListTodo, Megaphone, BookUser, ClipboardList,
+  CalendarDays, UsersRound, ListTodo, Megaphone, BookUser, ClipboardList, School,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useRouter } from "next/navigation";
@@ -48,6 +48,10 @@ export function Sidebar() {
   const canViewMIS = Object.keys(permissions)
     .filter((k) => k.startsWith("MIS_"))
     .some((k) => permissions[k]?.canView);
+  const canViewAcademics = canViewAdmin
+    || Object.keys(permissions)
+      .filter((k) => k.startsWith("ACA_") || k.startsWith("STU_"))
+      .some((k) => permissions[k]?.canView);
 
   const profileEntry = canViewDirectory
     ? { name: "Employees", href: "/dashboard/employees", icon: Users }
@@ -70,8 +74,9 @@ export function Sidebar() {
 
   const mgmtNav = [
     profileEntry,
-    ...(canViewAdmin ? [{ name: "Administration", href: "/dashboard/admin", icon: Building2 }] : []),
-    ...(canViewMIS   ? [{ name: "MIS Reports",     href: "/dashboard/mis",   icon: BarChart3 }]  : []),
+    ...(canViewAdmin      ? [{ name: "Administration", href: "/dashboard/admin",      icon: Building2 }] : []),
+    ...(canViewAcademics  ? [{ name: "Academics",      href: "/dashboard/academics",  icon: School    }] : []),
+    ...(canViewMIS        ? [{ name: "MIS Reports",    href: "/dashboard/mis",        icon: BarChart3 }] : []),
   ];
 
   // Fire API prefetches when the user hovers a link — data is ready by the time they click

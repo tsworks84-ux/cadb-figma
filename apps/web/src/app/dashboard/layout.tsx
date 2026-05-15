@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -9,6 +9,8 @@ import { Sidebar } from "@/components/layout/Sidebar";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const isAcademicsHub = pathname.startsWith("/dashboard/academics");
   const { isAuthenticated, user, updateUser } = useAuthStore();
 
   useEffect(() => {
@@ -61,6 +63,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       }
     }
   }, [profile]);
+
+  // Academics hub has its own full-screen layout with its own sidebar
+  if (isAcademicsHub) {
+    return <div className="h-screen overflow-hidden bg-gray-50">{children}</div>;
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">

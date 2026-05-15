@@ -31,6 +31,14 @@ import { reportRoutes } from "./routes/v1/reports.js";
 import { workLocationRoutes } from "./routes/v1/workLocations.js";
 import { directoryRoutes } from "./routes/v1/directory.js";
 import { timesheetRoutes } from "./routes/v1/timesheet.js";
+import { studentAuthRoutes } from "./routes/v1/student-auth.js";
+import { academicsRoutes } from "./routes/v1/academics.js";
+import { academicSettingsRoutes } from "./routes/v1/academicSettings.js";
+import { studentRoutes } from "./routes/v1/students.js";
+import { scheduleRoutes } from "./routes/v1/schedule.js";
+import { assignmentRoutes } from "./routes/v1/assignments.js";
+import { assessmentRoutes } from "./routes/v1/assessments.js";
+import { academicReportsRoutes } from "./routes/v1/academicReports.js";
 import fastifyStatic from "@fastify/static";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -47,7 +55,13 @@ const server = Fastify({
 });
 
 await server.register(cors, {
-  origin: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001",
+  origin: [
+    process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "https://cadb.centumacademy.com",
+    "http://65.0.41.55:3002",
+  ],
   credentials: true,
 });
 
@@ -107,6 +121,14 @@ await server.register(reportRoutes, { prefix: "/api/v1/reports" });
 await server.register(workLocationRoutes, { prefix: "/api/v1/work-locations" });
 await server.register(directoryRoutes,    { prefix: "/api/v1/directory" });
 await server.register(timesheetRoutes,    { prefix: "/api/v1/timesheet" });
+await server.register(studentAuthRoutes,  { prefix: "/api/v1/student/auth" });
+await server.register(academicsRoutes,         { prefix: "/api/v1/academics" });
+await server.register(academicSettingsRoutes,  { prefix: "/api/v1/academics" });
+await server.register(studentRoutes,           { prefix: "/api/v1/academics/students" });
+await server.register(scheduleRoutes,           { prefix: "/api/v1/academics/schedules" });
+await server.register(assignmentRoutes,         { prefix: "/api/v1/academics/assignments" });
+await server.register(assessmentRoutes,         { prefix: "/api/v1/academics/assessments" });
+await server.register(academicReportsRoutes,    { prefix: "/api/v1/academics/reports" });
 await server.register(fastifyStatic, {
   root: join(__dirname, "../uploads"),
   prefix: "/uploads/",

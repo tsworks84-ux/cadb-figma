@@ -121,7 +121,18 @@ function BalanceSection({ balances, lopDays }: { balances: LeaveBalance[]; lopDa
   const [open, setOpen] = useState(true);
   const fy = getFiscalYear();
   const totalAllocated = balances.reduce((s, b) => s + b.allocated, 0);
-  const visibleTypes = balances.filter((b) => b.allocated > 0);
+  // Always show at least Casual and Sick as the first two cards, even with no policy
+  const DEFAULT_CARDS: LeaveBalance[] = [
+    { leaveType: "CASUAL", allocated: 0, accrued: 0, availed: 0, pending: 0, balance: 0, used: 0, carried: 0 },
+    { leaveType: "SICK",   allocated: 0, accrued: 0, availed: 0, pending: 0, balance: 0, used: 0, carried: 0 },
+  ];
+  const cardTypes = balances.length >= 2
+    ? balances.slice(0, 2)
+    : [
+        balances.find((b) => b.leaveType === "CASUAL") ?? DEFAULT_CARDS[0],
+        balances.find((b) => b.leaveType === "SICK")   ?? DEFAULT_CARDS[1],
+      ];
+  const pillTypes = balances.slice(2);
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -142,7 +153,7 @@ function BalanceSection({ balances, lopDays }: { balances: LeaveBalance[]; lopDa
       {open && (
         <>
           <div className="px-6 pb-4 grid grid-cols-3 gap-3">
-            {visibleTypes.slice(0, 2).map((b) => {
+            {cardTypes.map((b) => {
               const c = LEAVE_COLORS[b.leaveType] ?? LEAVE_COLORS.UNPAID;
               const pct = b.accrued > 0 ? Math.min(100, (b.availed / b.accrued) * 100) : 0;
               return (
@@ -190,9 +201,9 @@ function BalanceSection({ balances, lopDays }: { balances: LeaveBalance[]; lopDa
             </div>
           </div>
 
-          {visibleTypes.length > 2 && (
+          {pillTypes.length > 0 && (
             <div className="px-6 pb-4 flex gap-2 flex-wrap">
-              {visibleTypes.slice(2).map((b) => {
+              {pillTypes.map((b) => {
                 const c = LEAVE_COLORS[b.leaveType] ?? LEAVE_COLORS.UNPAID;
                 return (
                   <div key={b.leaveType} className={`${c.bg} ${c.border} border rounded-xl px-4 py-2.5 flex items-center gap-3`}>

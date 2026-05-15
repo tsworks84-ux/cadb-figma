@@ -40,3 +40,28 @@ export interface RefreshRequest {
 export interface RefreshResponse {
   accessToken: string;
 }
+
+// ─── Student Auth ─────────────────────────────────────────────────────────────
+
+export interface StudentJwtPayload {
+  sub: string;
+  studentCode: string;
+  userType: "STUDENT";
+  iat?: number;
+  exp?: number;
+}
+
+export interface StudentLoginResponse {
+  accessToken: string;
+  refreshToken: string;
+  mustChangePassword: boolean;
+  student: {
+    id: string;
+    studentCode: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    photoUrl: string | null;
+    batchId: string | null;
+  };
+}
