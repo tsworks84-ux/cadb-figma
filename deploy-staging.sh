@@ -44,6 +44,9 @@ ssh -i $EC2_KEY $EC2_USER@$EC2_HOST << EOF
   DATABASE_URL='$STAGING_DB_URL' \
     packages/db/node_modules/.bin/prisma migrate deploy \
     --schema packages/db/prisma/schema.prisma
+  DATABASE_URL='$STAGING_DB_URL' \
+    packages/db/node_modules/.bin/prisma generate \
+    --schema packages/db/prisma/schema.prisma
   pm2 restart cadb-staging-api cadb-staging-web 2>/dev/null \
     || pm2 start ecosystem.staging.config.cjs
   pm2 save
