@@ -25,6 +25,12 @@ rsync -az --delete \
   apps/api/dist/ \
   $EC2_USER@$EC2_HOST:$EC2_PATH/apps/api/dist/
 
+echo "▸ Rsyncing Prisma schema and migrations..."
+rsync -az \
+  -e "ssh -i $EC2_KEY" \
+  packages/db/prisma/ \
+  $EC2_USER@$EC2_HOST:$EC2_PATH/packages/db/prisma/
+
 echo "▸ Rsyncing Web .next..."
 rsync -az --delete \
   -e "ssh -i $EC2_KEY" \
