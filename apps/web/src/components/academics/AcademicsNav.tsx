@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
-  Users2, ClipboardList, CalendarDays, School,
+  Users2, CalendarDays, School,
   BookOpen, FileCheck2, SlidersHorizontal, ArrowLeft,
   LayoutDashboard, LogOut, FileBarChart2,
 } from "lucide-react";
@@ -15,7 +15,6 @@ import Image from "next/image";
 const NAV_ITEMS = [
   { name: "Overview",     href: "/dashboard/academics",             icon: LayoutDashboard, permKey: null,              exact: true  },
   { name: "Students",     href: "/dashboard/academics/students",    icon: Users2,          permKey: "STU_PROFILE",     exact: false },
-  { name: "Admission",    href: "/dashboard/academics/admission",   icon: ClipboardList,   permKey: "STU_ADMISSION",   exact: false },
   { name: "Schedule",     href: "/dashboard/academics/schedule",    icon: CalendarDays,    permKey: "STU_TIMETABLE",   exact: false },
   { name: "Batches",      href: "/dashboard/academics/batches",     icon: School,          permKey: "ACA_BATCH",       exact: false },
   { name: "Assignments",  href: "/dashboard/academics/assignments", icon: BookOpen,        permKey: "STU_ASSIGNMENT",  exact: false },
