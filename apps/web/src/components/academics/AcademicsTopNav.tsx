@@ -95,10 +95,10 @@ export function AcademicsTopNav() {
       <div className="flex items-center gap-2.5 shrink-0">
         <Link
           href="/dashboard/home"
-          className="hidden md:flex items-center gap-1.5 text-xs font-bold mr-2 transition-colors hover:text-white"
-          style={{ color: "#94a3b8" }}
+          className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl border text-sm font-extrabold mr-2 transition-colors hover:bg-white/15"
+          style={{ color: "#e2e8f0", borderColor: "rgba(255,255,255,.20)" }}
         >
-          <ArrowLeft className="h-3.5 w-3.5" />
+          <ArrowLeft className="h-4 w-4" />
           Dashboard
         </Link>
 
