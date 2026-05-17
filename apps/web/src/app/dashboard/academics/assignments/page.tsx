@@ -5,40 +5,107 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
-  Plus, X, BookOpen, User, Calendar, ChevronDown, Filter,
-  Download, SlidersHorizontal, Loader2, Pencil, Trash2,
-  Paperclip, CheckCircle2, Archive, Clock, RotateCcw, BarChart2,
+  Plus, X, BookOpen, User, Calendar, ChevronDown,
+  Download, Loader2, Pencil, Trash2, Paperclip,
+  CheckCircle2, Archive, Clock, RotateCcw, BarChart2,
+  SlidersHorizontal, Search,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer, ComposedChart, Area, PieChart, Pie, Cell,
+  ResponsiveContainer, ComposedChart, Area,
 } from "recharts";
 import { useAuthStore } from "@/store/auth";
 import { useRouter } from "next/navigation";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, startOfWeek, endOfWeek } from "date-fns";
 
-// ── Primitives ────────────────────────────────────────────────────────────────
+// ── Design tokens ─────────────────────────────────────────────────────────────
 
-function Input({ className = "", ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
+const D = {
+  line:  "#e6e8ef",
+  muted: "#7c8598",
+  ink:   "#111827",
+  nav2:  "#28245f",
+  bg:    "#f4f6fa",
+};
+
+const inputBase: React.CSSProperties = {
+  width: "100%", minHeight: 42, border: `1px solid ${D.line}`,
+  borderRadius: 12, padding: "9px 12px", background: "white",
+  color: D.ink, font: "inherit", fontSize: 14, outline: "none",
+  boxSizing: "border-box",
+};
+
+function DInput({
+  error, style, ...p
+}: React.InputHTMLAttributes<HTMLInputElement> & { error?: boolean }) {
   return (
-    <input {...props}
-      className={`w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 ${className}`}
+    <input {...p}
+      style={{
+        ...inputBase,
+        ...(error ? { border: "1px solid #ef4444", background: "#fef2f2" } : {}),
+        ...style,
+      }}
     />
   );
 }
 
-function FSelect({ className = "", children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+function DSelect({ style, children, ...p }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return <select {...p} style={{ ...inputBase, ...style }}>{children}</select>;
+}
+
+function DTextarea({ style, ...p }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
-    <select {...props}
-      className={`w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none bg-white text-gray-700 ${className}`}
+    <textarea {...p}
+      style={{ ...inputBase, minHeight: 96, resize: "vertical", ...style }}
+    />
+  );
+}
+
+function DBtn({
+  primary, children, style, ...p
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { primary?: boolean }) {
+  return (
+    <button {...p}
+      style={{
+        minHeight: 42, border: 0, borderRadius: 12, padding: "0 18px",
+        font: "inherit", fontWeight: 850,
+        cursor: p.disabled ? "not-allowed" : "pointer",
+        opacity: p.disabled ? 0.5 : 1,
+        display: "inline-flex", alignItems: "center", gap: 6,
+        color:      primary ? "white"  : "#374151",
+        background: primary ? "linear-gradient(135deg,#28245f,#4f46e5)" : "white",
+        boxShadow:  primary ? "0 12px 24px rgba(79,70,229,.24)" : `inset 0 0 0 1px ${D.line}`,
+        ...style,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function DField({
+  label, required, children,
+}: { label: string; required?: boolean; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "grid", gap: 7 }}>
+      <label style={{ color: "#4b5563", fontSize: 13, fontWeight: 850 }}>
+        {label}{required && <span style={{ color: "#ef4444" }}> *</span>}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+// FSelect kept for StatsPanel
+function FSelect({ className = "", children, ...p }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <select {...p}
+      className={`w-full rounded-lg border border-gray-200 px-3 py-2 text-sm
+                  focus:border-indigo-500 focus:outline-none bg-white text-gray-700 ${className}`}
     >
       {children}
     </select>
   );
-}
-
-function Label({ children }: { children: React.ReactNode }) {
-  return <label className="block text-xs font-medium text-gray-600 mb-1">{children}</label>;
 }
 
 // ── Status badge ──────────────────────────────────────────────────────────────
@@ -59,7 +126,7 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-// ── Date helpers ───────────────────────────────────────────────────────────────
+// ── Date helpers ──────────────────────────────────────────────────────────────
 
 function fmtDate(iso: string) {
   try { return format(parseISO(iso), "dd MMM yyyy"); } catch { return iso; }
@@ -68,11 +135,10 @@ function todayStr() {
   return new Date().toISOString().split("T")[0];
 }
 
-// ── Topic tags input ──────────────────────────────────────────────────────────
+// ── Topics input ──────────────────────────────────────────────────────────────
 
 function TopicsInput({ topics, onChange }: { topics: string[]; onChange: (t: string[]) => void }) {
   const [input, setInput] = useState("");
-
   const add = () => {
     const t = input.trim();
     if (t && !topics.includes(t)) onChange([...topics, t]);
@@ -80,33 +146,47 @@ function TopicsInput({ topics, onChange }: { topics: string[]; onChange: (t: str
   };
 
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap gap-1.5 min-h-[36px] p-2 rounded-lg border border-gray-200 bg-white">
+    <div>
+      {/* Display */}
+      <div style={{
+        ...inputBase, minHeight: 42, display: "flex", flexWrap: "wrap",
+        gap: 6, padding: "8px 12px", alignItems: "center",
+      }}>
+        {topics.length === 0 && (
+          <span style={{ color: D.muted, fontSize: 13 }}>No topics added</span>
+        )}
         {topics.map((t) => (
-          <span key={t} className="flex items-center gap-1 rounded-md bg-indigo-50 border border-indigo-100 px-2 py-0.5 text-xs text-indigo-700">
+          <span key={t} style={{
+            background: "#eef2ff", color: D.nav2, borderRadius: 6,
+            padding: "2px 8px", fontSize: 12, fontWeight: 700,
+            display: "inline-flex", alignItems: "center", gap: 4,
+          }}>
             {t}
-            <button type="button" onClick={() => onChange(topics.filter((x) => x !== t))}
-              className="text-indigo-400 hover:text-indigo-700 ml-0.5">
-              <X className="h-2.5 w-2.5" />
+            <button
+              type="button"
+              onClick={() => onChange(topics.filter((x) => x !== t))}
+              style={{ border: 0, background: "transparent", cursor: "pointer", color: D.nav2, padding: 0, lineHeight: 1 }}
+            >
+              ×
             </button>
           </span>
         ))}
-        {topics.length === 0 && <span className="text-xs text-gray-400 self-center">No topics added</span>}
       </div>
-      <div className="flex gap-2">
-        <Input placeholder="Type a topic and click Add…" value={input}
+      {/* Input + Add */}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: 12, marginTop: 12 }}>
+        <DInput
+          placeholder="Type a topic and click Add…"
+          value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} />
-        <button type="button" onClick={add}
-          className="shrink-0 flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-medium text-indigo-700 hover:bg-indigo-100 transition-colors">
-          <Plus className="h-3.5 w-3.5" /> Add
-        </button>
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+        />
+        <DBtn type="button" onClick={add}>+ Add</DBtn>
       </div>
     </div>
   );
 }
 
-// ── Multi-batch selector ──────────────────────────────────────────────────────
+// ── BatchMultiSelect ──────────────────────────────────────────────────────────
 
 function BatchMultiSelect({ batches, selected, onChange }: {
   batches: any[]; selected: string[]; onChange: (ids: string[]) => void;
@@ -130,27 +210,40 @@ function BatchMultiSelect({ batches, selected, onChange }: {
 
   return (
     <div className="relative" ref={ref}>
-      <button type="button" onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white text-gray-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
-        <span className="truncate text-left flex-1 min-w-0">
-          {selected.length === 0 ? <span className="text-gray-400">Select batches…</span> : selectedNames}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          ...inputBase, display: "flex", alignItems: "center",
+          justifyContent: "space-between", cursor: "pointer", textAlign: "left",
+        }}
+      >
+        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {selected.length === 0
+            ? <span style={{ color: D.muted }}>Select batches…</span>
+            : selectedNames}
         </span>
-        <ChevronDown className={`h-4 w-4 text-gray-400 shrink-0 ml-1 transition-transform ${open ? "rotate-180" : ""}`} />
+        <ChevronDown style={{
+          width: 16, height: 16, color: D.muted, flexShrink: 0, marginLeft: 4,
+          transform: open ? "rotate(180deg)" : "none", transition: "transform .15s",
+        }} />
       </button>
       {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-lg border border-gray-200 bg-white shadow-lg">
+        <div className="absolute z-50 mt-1 w-full rounded-xl bg-white shadow-lg border" style={{ borderColor: D.line }}>
           <div className="max-h-48 overflow-y-auto">
-            {batches.length === 0 && <p className="px-3 py-2 text-xs text-gray-400">No batches for this year</p>}
+            {batches.length === 0 && (
+              <p className="px-3 py-2 text-xs" style={{ color: D.muted }}>No batches for this year</p>
+            )}
             {batches.map((b) => (
               <label key={b.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer">
                 <input type="checkbox" checked={selected.includes(b.id)} onChange={() => toggle(b.id)} className="accent-indigo-600" />
-                <span className="text-sm text-gray-700">{b.name}</span>
-                {b.grade && <span className="text-xs text-gray-400 ml-auto shrink-0">{b.grade.name}</span>}
+                <span className="text-sm" style={{ color: D.ink }}>{b.name}</span>
+                {b.grade && <span className="text-xs ml-auto shrink-0" style={{ color: D.muted }}>{b.grade.name}</span>}
               </label>
             ))}
           </div>
-          <div className="border-t border-gray-100 px-3 py-2 flex items-center justify-between">
-            <span className="text-xs text-gray-400">{selected.length} selected</span>
+          <div className="border-t px-3 py-2 flex items-center justify-between" style={{ borderColor: D.line }}>
+            <span className="text-xs" style={{ color: D.muted }}>{selected.length} selected</span>
             <button type="button" onClick={() => setOpen(false)}
               className="text-xs font-medium text-indigo-600 hover:text-indigo-800 px-2 py-0.5 rounded hover:bg-indigo-50 transition-colors">
               Done
@@ -162,7 +255,7 @@ function BatchMultiSelect({ batches, selected, onChange }: {
   );
 }
 
-// ── Assignment modal ──────────────────────────────────────────────────────────
+// ── Assignment modal (redesigned) ─────────────────────────────────────────────
 
 type AssignmentForm = {
   academicYear: string; name: string; assignmentDate: string; submissionDate: string;
@@ -185,8 +278,8 @@ function AssignmentModal({
     submissionDate: "", batchIds: [], subjectId: "", employeeId: "", topics: [], note: "",
   });
 
-  const [form, setForm]         = useState<AssignmentForm>(initial ?? emptyForm());
-  const [file, setFile]         = useState<File | null>(null);
+  const [form, setForm]           = useState<AssignmentForm>(initial ?? emptyForm());
+  const [file, setFile]           = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
@@ -280,136 +373,188 @@ function AssignmentModal({
 
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto">
+  const sectionStyle: React.CSSProperties = {
+    border: `1px solid ${D.line}`, borderRadius: 16, padding: 18, background: "#fbfcfe",
+  };
+  const sectionHeadStyle: React.CSSProperties = {
+    margin: "0 0 14px", fontSize: 17, fontWeight: 700, color: D.ink,
+  };
 
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-indigo-100 rounded-lg"><BookOpen className="h-4 w-4 text-indigo-600" /></div>
-            <h2 className="text-base font-semibold text-gray-900">
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-7"
+      style={{ background: "linear-gradient(135deg,rgba(20,23,53,.72),rgba(40,36,95,.62))" }}
+    >
+      <div
+        className="w-full bg-white flex flex-col"
+        style={{ maxWidth: 960, borderRadius: 22, boxShadow: "0 32px 90px rgba(0,0,0,.28)", maxHeight: "92vh", overflow: "hidden" }}
+      >
+        {/* head */}
+        <div
+          className="flex items-center justify-between gap-5 border-b shrink-0"
+          style={{ padding: "24px 28px", borderColor: D.line }}
+        >
+          <div className="flex items-center gap-4">
+            <div style={{
+              width: 44, height: 44, borderRadius: 14, display: "grid", placeItems: "center",
+              background: "#eef2ff", color: D.nav2, fontWeight: 900, fontSize: 15, flexShrink: 0,
+            }}>AS</div>
+            <h2 style={{ margin: 0, fontSize: 28, fontWeight: 900, color: D.ink }}>
               {assignmentId ? "Edit Assignment" : "New Assignment"}
             </h2>
           </div>
-          <button onClick={onClose} className="p-1 rounded hover:bg-gray-100 text-gray-400"><X className="h-4 w-4" /></button>
-        </div>
-
-        <div className="px-6 py-5 space-y-4">
-
-          {/* Academic Year */}
-          <div>
-            <Label>Academic Year <span className="text-red-400">*</span></Label>
-            <FSelect value={form.academicYear} onChange={(e) => setForm({ ...form, academicYear: e.target.value, batchIds: [] })}>
-              <option value="">Select academic year</option>
-              {academicYears.filter((y) => !y.isArchived).map((y) => <option key={y.id} value={y.name}>{y.name}</option>)}
-            </FSelect>
-          </div>
-
-          {/* Assignment Name */}
-          <div>
-            <Label>Assignment Name <span className="text-red-400">*</span></Label>
-            <Input placeholder="e.g. Assignment on Calculus" value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          </div>
-
-          {/* Dates */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Assignment Date <span className="text-red-400">*</span></Label>
-              <Input type="date" value={form.assignmentDate}
-                onChange={(e) => setForm({ ...form, assignmentDate: e.target.value })} />
-            </div>
-            <div>
-              <Label>Submission Date <span className="text-red-400">*</span></Label>
-              <input type="date" value={form.submissionDate}
-                onChange={(e) => setForm({ ...form, submissionDate: e.target.value })}
-                className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-1 ${submissionError ? "border-red-400 focus:border-red-400 focus:ring-red-300 bg-red-50" : "border-gray-200 focus:border-indigo-500 focus:ring-indigo-500"}`}
-              />
-              {submissionError && <p className="text-xs text-red-500 mt-1">Can't be before assignment date</p>}
-            </div>
-          </div>
-
-          {/* Batch */}
-          <div>
-            <Label>Batch(es) <span className="text-red-400">*</span></Label>
-            <BatchMultiSelect batches={filteredBatches} selected={form.batchIds}
-              onChange={(ids) => setForm({ ...form, batchIds: ids })} />
-            {form.batchIds.length > 0 && (
-              <p className="text-xs text-indigo-600 mt-1">{form.batchIds.length} batch{form.batchIds.length > 1 ? "es" : ""} selected</p>
-            )}
-          </div>
-
-          {/* Subject + Faculty */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Subject <span className="text-red-400">*</span></Label>
-              <FSelect value={form.subjectId} onChange={(e) => setForm({ ...form, subjectId: e.target.value })}>
-                <option value="">Select subject</option>
-                {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </FSelect>
-            </div>
-            <div>
-              <Label>Faculty <span className="text-red-400">*</span></Label>
-              <FSelect value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })}>
-                <option value="">Select faculty</option>
-                {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
-              </FSelect>
-            </div>
-          </div>
-
-          {/* Topics */}
-          <div>
-            <Label>Topics</Label>
-            <TopicsInput topics={form.topics} onChange={(t) => setForm({ ...form, topics: t })} />
-          </div>
-
-          {/* Attachment */}
-          <div>
-            <Label>Attachment</Label>
-            <div className="flex items-center gap-3">
-              <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.ppt,.pptx,.xls,.xlsx"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                className="hidden" />
-              <button type="button" onClick={() => fileRef.current?.click()}
-                className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors">
-                <Paperclip className="h-3.5 w-3.5" /> Choose file
-              </button>
-              {file
-                ? <span className="text-xs text-indigo-700 truncate max-w-[200px]">{file.name}</span>
-                : initial && (initial as any).attachmentName
-                  ? <span className="text-xs text-gray-500">{(initial as any).attachmentName} (keep or replace)</span>
-                  : <span className="text-xs text-gray-400">No file chosen</span>}
-            </div>
-          </div>
-
-          {/* Note */}
-          <div>
-            <Label>Note</Label>
-            <textarea rows={2} placeholder="Additional instructions or notes…" value={form.note}
-              onChange={(e) => setForm({ ...form, note: e.target.value })}
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none" />
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between gap-2 px-6 pb-5 pt-2 border-t border-gray-100">
-          <button onClick={onClose} disabled={busy}
-            className="px-4 py-2 text-sm text-gray-500 rounded-lg hover:bg-gray-100 transition-colors">
-            Cancel
+          <button
+            onClick={onClose}
+            className="border-0 bg-transparent cursor-pointer leading-none text-3xl"
+            style={{ color: "#9aa3b4" }}
+          >
+            ×
           </button>
-          <div className="flex items-center gap-2">
+        </div>
+
+        {/* body */}
+        <div className="overflow-y-auto flex-1" style={{ padding: "24px 28px" }}>
+          <div style={{ display: "grid", gap: 18 }}>
+
+            {/* Section 1: Assignment Basics */}
+            <section style={sectionStyle}>
+              <h3 style={sectionHeadStyle}>Assignment Basics</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-[14px]">
+                <DField label="Academic Year" required>
+                  <DSelect
+                    value={form.academicYear}
+                    onChange={(e) => setForm({ ...form, academicYear: e.target.value, batchIds: [] })}
+                  >
+                    <option value="">Select academic year</option>
+                    {academicYears.filter((y) => !y.isArchived).map((y) => (
+                      <option key={y.id} value={y.name}>{y.name}</option>
+                    ))}
+                  </DSelect>
+                </DField>
+                <DField label="Assignment Name" required>
+                  <DInput
+                    placeholder="e.g. Assignment on Calculus"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  />
+                </DField>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-[14px]" style={{ marginTop: 14 }}>
+                <DField label="Assignment Date" required>
+                  <DInput
+                    type="date"
+                    value={form.assignmentDate}
+                    onChange={(e) => setForm({ ...form, assignmentDate: e.target.value })}
+                  />
+                </DField>
+                <DField label="Submission Date" required>
+                  <DInput
+                    type="date"
+                    error={submissionError}
+                    value={form.submissionDate}
+                    onChange={(e) => setForm({ ...form, submissionDate: e.target.value })}
+                  />
+                  {submissionError && (
+                    <p style={{ fontSize: 12, color: "#ef4444", margin: 0 }}>
+                      Can&apos;t be before assignment date
+                    </p>
+                  )}
+                </DField>
+              </div>
+            </section>
+
+            {/* Section 2: Audience & Subject */}
+            <section style={sectionStyle}>
+              <h3 style={sectionHeadStyle}>Audience &amp; Subject</h3>
+              <DField label="Batch(es)" required>
+                <BatchMultiSelect
+                  batches={filteredBatches}
+                  selected={form.batchIds}
+                  onChange={(ids) => setForm({ ...form, batchIds: ids })}
+                />
+                {form.batchIds.length > 0 && (
+                  <p style={{ fontSize: 12, color: "#4f46e5", margin: 0 }}>
+                    {form.batchIds.length} batch{form.batchIds.length > 1 ? "es" : ""} selected
+                  </p>
+                )}
+              </DField>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-[14px]" style={{ marginTop: 14 }}>
+                <DField label="Subject" required>
+                  <DSelect value={form.subjectId} onChange={(e) => setForm({ ...form, subjectId: e.target.value })}>
+                    <option value="">Select subject</option>
+                    {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </DSelect>
+                </DField>
+                <DField label="Faculty" required>
+                  <DSelect value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })}>
+                    <option value="">Select faculty</option>
+                    {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+                  </DSelect>
+                </DField>
+              </div>
+            </section>
+
+            {/* Section 3: Topics, Attachment & Notes */}
+            <section style={sectionStyle}>
+              <h3 style={sectionHeadStyle}>Topics, Attachment &amp; Notes</h3>
+              <DField label="Topics">
+                <TopicsInput topics={form.topics} onChange={(t) => setForm({ ...form, topics: t })} />
+              </DField>
+
+              {/* Attachment */}
+              <div style={{ marginTop: 14 }}>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.ppt,.pptx,.xls,.xlsx"
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                  className="hidden"
+                />
+                <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+                  <DBtn type="button" onClick={() => fileRef.current?.click()}>
+                    <Paperclip style={{ width: 15, height: 15 }} />
+                    Choose File
+                  </DBtn>
+                  <span style={{ fontSize: 13, color: file ? D.nav2 : D.muted, fontWeight: file ? 700 : 500 }}>
+                    {file
+                      ? file.name
+                      : initial && (initial as any).attachmentName
+                        ? `${(initial as any).attachmentName} (keep or replace)`
+                        : "No file chosen"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Note */}
+              <div style={{ marginTop: 14 }}>
+                <DField label="Note">
+                  <DTextarea
+                    placeholder="Additional instructions or notes…"
+                    value={form.note}
+                    onChange={(e) => setForm({ ...form, note: e.target.value })}
+                  />
+                </DField>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        {/* foot */}
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 border-t shrink-0"
+          style={{ padding: "18px 28px", borderColor: D.line }}
+        >
+          <DBtn onClick={onClose} disabled={busy}>Cancel</DBtn>
+          <div className="flex flex-wrap items-center gap-3">
             {!assignmentId && (
-              <button onClick={handleSaveAnother} disabled={busy || submissionError}
-                className="px-4 py-2 text-sm text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50 transition-colors disabled:opacity-50">
-                Save & Add Another
-              </button>
+              <DBtn onClick={handleSaveAnother} disabled={busy || submissionError}>
+                Save &amp; Add Another
+              </DBtn>
             )}
-            <button onClick={handleSave} disabled={busy || submissionError}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50">
-              {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            <DBtn primary onClick={handleSave} disabled={busy || submissionError}>
+              {busy && <Loader2 className="h-4 w-4 animate-spin" />}
               {assignmentId ? "Save Changes" : "Save"}
-            </button>
+            </DBtn>
           </div>
         </div>
       </div>
@@ -433,7 +578,9 @@ function AssignmentCard({
 
   useEffect(() => {
     if (!menuOpen) return;
-    const h = (e: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false); };
+    const h = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [menuOpen]);
@@ -441,41 +588,47 @@ function AssignmentCard({
   const batchNames = a.batches?.map((ab: any) => ab.batch?.name).filter(Boolean).join(", ") ?? "—";
 
   return (
-    <div className="group flex items-start gap-3 px-4 py-3.5 border-b border-gray-100 last:border-0 hover:bg-gray-50/60 transition-colors first:rounded-t-2xl last:rounded-b-2xl">
-      {/* Status badge */}
+    <div
+      className="group flex items-start gap-3 px-4 py-3.5 border-b last:border-0 hover:bg-gray-50/60 transition-colors"
+      style={{ borderColor: D.line }}
+    >
       <div className="shrink-0 mt-0.5"><StatusBadge status={a.status} /></div>
 
-      {/* Main content */}
       <div className="flex-1 min-w-0">
-        <button onClick={() => router.push(`/dashboard/academics/assignments/${a.id}`)}
-          className="text-sm font-semibold text-indigo-700 hover:text-indigo-900 hover:underline truncate text-left">
+        <button
+          onClick={() => router.push(`/dashboard/academics/assignments/${a.id}`)}
+          className="text-sm font-semibold hover:underline truncate text-left block max-w-full"
+          style={{ color: D.nav2 }}
+        >
           {a.name}
         </button>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1 text-xs text-gray-500">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1 text-xs" style={{ color: D.muted }}>
           {a.subject && (
             <span className="flex items-center gap-1">
               <BookOpen className="h-3 w-3 shrink-0" />{a.subject.name}
             </span>
           )}
           <span className="flex items-center gap-1">
-            <User className="h-3 w-3 shrink-0 text-gray-400" />
-            {batchNames}
+            <User className="h-3 w-3 shrink-0" />{batchNames}
           </span>
           {a.employee && (
-            <span className="flex items-center gap-1 text-gray-400">
+            <span className="flex items-center gap-1">
               <User className="h-3 w-3 shrink-0" />
               {a.employee.firstName} {a.employee.lastName}
             </span>
           )}
           {a.attachmentUrl && (
-            <a href={a.attachmentUrl} target="_blank" rel="noreferrer"
-              className="flex items-center gap-1 text-indigo-600 hover:underline">
+            <a
+              href={a.attachmentUrl} target="_blank" rel="noreferrer"
+              className="flex items-center gap-1 hover:underline"
+              style={{ color: D.nav2 }}
+            >
               <Paperclip className="h-3 w-3 shrink-0" />
               {a.attachmentName ?? "Attachment"}
             </a>
           )}
         </div>
-        <div className="flex items-center gap-3 mt-1 text-[11px] text-gray-400">
+        <div className="flex items-center gap-3 mt-1 text-[11px]" style={{ color: "#9aa3b4" }}>
           <span className="flex items-center gap-1">
             <Calendar className="h-3 w-3" />
             Given: {fmtDate(a.assignmentDate)}
@@ -488,48 +641,71 @@ function AssignmentCard({
         {a.topics && (
           <div className="flex flex-wrap gap-1 mt-1.5">
             {a.topics.split(",").map((t: string) => t.trim()).filter(Boolean).map((t: string) => (
-              <span key={t} className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">{t}</span>
+              <span
+                key={t}
+                className="rounded-md px-1.5 py-0.5 text-[10px]"
+                style={{ background: "#f1f5f9", color: D.muted }}
+              >
+                {t}
+              </span>
             ))}
           </div>
         )}
       </div>
 
-      {/* Three-dot menu */}
       {canEdit && (
         <div className="relative shrink-0" ref={menuRef}>
-          <button onClick={() => setMenuOpen((v) => !v)}
-            className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 opacity-0 group-hover:opacity-100 transition-all">
+          <button
+            onClick={() => setMenuOpen((v) => !v)}
+            className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all border-0 bg-transparent cursor-pointer"
+            style={{ color: D.muted }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+          >
             <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
               <circle cx="10" cy="4" r="1.5" /><circle cx="10" cy="10" r="1.5" /><circle cx="10" cy="16" r="1.5" />
             </svg>
           </button>
           {menuOpen && (
-            <div className="absolute right-0 top-8 z-30 w-44 rounded-xl border border-gray-100 bg-white shadow-xl py-1">
-              <button onClick={() => { onEdit(a); setMenuOpen(false); }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50">
+            <div
+              className="absolute right-0 top-8 z-30 w-44 rounded-xl bg-white py-1 shadow-xl border"
+              style={{ borderColor: D.line }}
+            >
+              <button
+                onClick={() => { onEdit(a); setMenuOpen(false); }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 border-0 bg-transparent cursor-pointer text-left"
+              >
                 <Pencil className="h-3.5 w-3.5 text-gray-400" /> Edit
               </button>
               {a.status !== "COMPLETED" && (
-                <button onClick={() => { onStatus(a.id, "COMPLETED"); setMenuOpen(false); }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-green-700 hover:bg-green-50">
+                <button
+                  onClick={() => { onStatus(a.id, "COMPLETED"); setMenuOpen(false); }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-green-700 hover:bg-green-50 border-0 bg-transparent cursor-pointer text-left"
+                >
                   <CheckCircle2 className="h-3.5 w-3.5" /> Mark Completed
                 </button>
               )}
               {a.status !== "DUE" && (
-                <button onClick={() => { onStatus(a.id, "DUE"); setMenuOpen(false); }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-amber-700 hover:bg-amber-50">
+                <button
+                  onClick={() => { onStatus(a.id, "DUE"); setMenuOpen(false); }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-amber-700 hover:bg-amber-50 border-0 bg-transparent cursor-pointer text-left"
+                >
                   <RotateCcw className="h-3.5 w-3.5" /> Mark Due
                 </button>
               )}
               {a.status !== "ARCHIVED" && (
-                <button onClick={() => { onStatus(a.id, "ARCHIVED"); setMenuOpen(false); }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-600 hover:bg-gray-50">
+                <button
+                  onClick={() => { onStatus(a.id, "ARCHIVED"); setMenuOpen(false); }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 border-0 bg-transparent cursor-pointer text-left"
+                >
                   <Archive className="h-3.5 w-3.5" /> Archive
                 </button>
               )}
-              <div className="my-1 border-t border-gray-100" />
-              <button onClick={() => { onDelete(a.id); setMenuOpen(false); }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red-600 hover:bg-red-50">
+              <div className="my-1 border-t" style={{ borderColor: D.line }} />
+              <button
+                onClick={() => { onDelete(a.id); setMenuOpen(false); }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red-600 hover:bg-red-50 border-0 bg-transparent cursor-pointer text-left"
+              >
                 <Trash2 className="h-3.5 w-3.5" /> Delete
               </button>
             </div>
@@ -542,9 +718,15 @@ function AssignmentCard({
 
 // ── Stats helpers ─────────────────────────────────────────────────────────────
 
-const CHART_COLORS = ["#6366f1","#8b5cf6","#ec4899","#14b8a6","#f59e0b","#10b981","#3b82f6","#f97316","#a855f7","#06b6d4"];
+const CHART_COLORS = [
+  "#6366f1","#8b5cf6","#ec4899","#14b8a6","#f59e0b",
+  "#10b981","#3b82f6","#f97316","#a855f7","#06b6d4",
+];
 
-function SummaryCard({ label, value, sub, color }: { label: string; value: string | number; sub: string; color: "indigo"|"violet"|"green"|"amber" }) {
+function SummaryCard({ label, value, sub, color }: {
+  label: string; value: string | number; sub: string;
+  color: "indigo" | "violet" | "green" | "amber";
+}) {
   const c = {
     indigo: { wrap: "border-indigo-100 bg-indigo-50", val: "text-indigo-700", sub: "text-indigo-400" },
     violet: { wrap: "border-violet-100 bg-violet-50", val: "text-violet-700", sub: "text-violet-400" },
@@ -573,18 +755,23 @@ function ChartTooltip({ active, payload, label }: any) {
         <div key={i} className="flex items-center gap-2 mb-0.5">
           <span className="h-2 w-2 rounded-full shrink-0" style={{ background: p.color ?? p.fill }} />
           <span className="text-gray-500">{p.name}:</span>
-          <span className="font-medium text-gray-800">{typeof p.value === "number" ? (String(p.value).includes(".") ? p.value.toFixed(1) : p.value) : p.value}</span>
+          <span className="font-medium text-gray-800">
+            {typeof p.value === "number" ? (String(p.value).includes(".") ? p.value.toFixed(1) : p.value) : p.value}
+          </span>
         </div>
       ))}
     </div>
   );
 }
 
-function NSelector({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+function NSelector({ value, onChange, prefix = "Top" }: { value: number; onChange: (n: number) => void; prefix?: string }) {
   return (
-    <select value={value} onChange={(e) => onChange(Number(e.target.value))}
-      className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs focus:outline-none focus:border-indigo-500">
-      {[5, 10, 15, 20].map((n) => <option key={n} value={n}>Top {n}</option>)}
+    <select
+      value={value}
+      onChange={(e) => onChange(Number(e.target.value))}
+      className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs focus:outline-none focus:border-indigo-500"
+    >
+      {[5, 10, 15, 20].map((n) => <option key={n} value={n}>{prefix} {n}</option>)}
     </select>
   );
 }
@@ -596,8 +783,8 @@ function StatsPanel({
   submissionStats: { studentStats: any[]; batchStats: any[]; cityStats: any[]; weeklySubmissions: any[] } | null;
   subjects: any[];
 }) {
-  const [topN,    setTopN]    = useState(10);
-  const [bottomN, setBottomN] = useState(10);
+  const [topN,         setTopN]         = useState(10);
+  const [bottomN,      setBottomN]      = useState(10);
   const [trendSubject, setTrendSubject] = useState("");
 
   const studentStats      = submissionStats?.studentStats      ?? [];
@@ -605,7 +792,6 @@ function StatsPanel({
   const cityStats         = submissionStats?.cityStats         ?? [];
   const weeklySubmissions = submissionStats?.weeklySubmissions ?? [];
 
-  // ── 1. Assignments per subject ─────────────────────────────────────────────
   const subjectMap = new Map<string, { name: string; count: number }>();
   for (const a of assignments) {
     const key  = a.subjectId ?? "__none__";
@@ -615,7 +801,6 @@ function StatsPanel({
   }
   const subjectStats = [...subjectMap.values()].sort((a, b) => b.count - a.count);
 
-  // ── 2. Faculty assignment giving ───────────────────────────────────────────
   const facultyMap = new Map<string, { name: string; count: number }>();
   for (const a of assignments) {
     if (!a.employee) continue;
@@ -625,7 +810,6 @@ function StatsPanel({
   }
   const facultyStats = [...facultyMap.values()].sort((a, b) => b.count - a.count);
 
-  // ── 3. Weekly trend (merge giving + submissions) ───────────────────────────
   const weekGivingMap = new Map<string, { week: string; label: string; given: number; submitted: number }>();
   for (const a of assignments) {
     if (trendSubject && a.subjectId !== trendSubject) continue;
@@ -643,16 +827,14 @@ function StatsPanel({
   }
   const weeklyTrend = [...weekGivingMap.values()].sort((a, b) => a.week.localeCompare(b.week));
 
-  // ── 4. Summary numbers ─────────────────────────────────────────────────────
-  const totalGiven     = assignments.length;
-  const totalSubmitted = studentStats.reduce((s, x) => s + x.submitted, 0);
-  const grandTotal     = studentStats.reduce((s, x) => s + x.total, 0);
-  const totalWeeks     = weeklyTrend.length || 1;
+  const totalGiven          = assignments.length;
+  const totalSubmitted      = studentStats.reduce((s, x) => s + x.submitted, 0);
+  const grandTotal          = studentStats.reduce((s, x) => s + x.total, 0);
+  const totalWeeks          = weeklyTrend.length || 1;
   const avgWeeklyGiving     = (totalGiven / totalWeeks).toFixed(1);
   const avgWeeklySubmission = (totalSubmitted / totalWeeks).toFixed(1);
   const overallRate         = grandTotal > 0 ? Math.round((totalSubmitted / grandTotal) * 100) : 0;
 
-  // ── 5. Top/bottom students ─────────────────────────────────────────────────
   const sortedStudents = [...studentStats]
     .filter((s) => s.total > 0)
     .map((s) => ({ ...s, rate: Math.round((s.submitted / s.total) * 100) }))
@@ -672,20 +854,15 @@ function StatsPanel({
   }
 
   return (
-    <div className="p-4 sm:p-6 space-y-5 overflow-y-auto">
-
-      {/* ── Summary cards ───────────────────────────────────────────────────── */}
+    <div className="p-4 sm:p-6 space-y-5">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <SummaryCard label="Assignments Given"    value={totalGiven}           sub="total across filters"             color="indigo" />
-        <SummaryCard label="Submissions Received" value={totalSubmitted}       sub={`of ${grandTotal} expected`}      color="green"  />
-        <SummaryCard label="Submission Rate"      value={`${overallRate}%`}    sub="across all students"              color="violet" />
-        <SummaryCard label="Avg Weekly Giving"    value={`${avgWeeklyGiving}`} sub={`${avgWeeklySubmission}/wk received`} color="amber" />
+        <SummaryCard label="Assignments Given"    value={totalGiven}           sub="total across filters"              color="indigo" />
+        <SummaryCard label="Submissions Received" value={totalSubmitted}       sub={`of ${grandTotal} expected`}       color="green"  />
+        <SummaryCard label="Submission Rate"      value={`${overallRate}%`}    sub="across all students"               color="violet" />
+        <SummaryCard label="Avg Weekly Giving"    value={avgWeeklyGiving}      sub={`${avgWeeklySubmission}/wk received`} color="amber" />
       </div>
 
-      {/* ── Row: Subject breakdown + Status donut ───────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-
-        {/* Assignments per subject */}
         <div className="lg:col-span-2 bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <p className="text-sm font-semibold text-gray-800">Assignments per Subject</p>
           <p className="text-xs text-gray-400 mb-4">Total assignments given, grouped by subject</p>
@@ -702,7 +879,6 @@ function StatsPanel({
           )}
         </div>
 
-        {/* Batch submission rate donut */}
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <p className="text-sm font-semibold text-gray-800">Submission Rate by Batch</p>
           <p className="text-xs text-gray-400 mb-3">% submitted per batch</p>
@@ -727,7 +903,6 @@ function StatsPanel({
         </div>
       </div>
 
-      {/* ── Weekly trend ─────────────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
         <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
           <div>
@@ -761,7 +936,6 @@ function StatsPanel({
         )}
       </div>
 
-      {/* ── Faculty assignment giving ─────────────────────────────────────────── */}
       {facultyStats.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <div className="flex items-center justify-between mb-1">
@@ -781,14 +955,15 @@ function StatsPanel({
         </div>
       )}
 
-      {/* ── City submission rate ──────────────────────────────────────────────── */}
       {cityStats.length > 1 && (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <p className="text-sm font-semibold text-gray-800">Submission Rate by City</p>
           <p className="text-xs text-gray-400 mb-4">Aggregate submission performance across cities</p>
           <ResponsiveContainer width="100%" height={Math.max(160, cityStats.length * 56 + 48)}>
-            <BarChart data={cityStats.map((c) => ({ ...c, rate: c.total > 0 ? parseFloat(((c.submitted / c.total) * 100).toFixed(1)) : 0 }))}
-              layout="vertical" margin={{ left: 0, right: 48, top: 4, bottom: 4 }}>
+            <BarChart
+              data={cityStats.map((c) => ({ ...c, rate: c.total > 0 ? parseFloat(((c.submitted / c.total) * 100).toFixed(1)) : 0 }))}
+              layout="vertical" margin={{ left: 0, right: 48, top: 4, bottom: 4 }}
+            >
               <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
               <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
               <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 12, fill: "#475569" }} axisLine={false} tickLine={false} />
@@ -799,7 +974,6 @@ function StatsPanel({
         </div>
       )}
 
-      {/* ── Top students (performers) ─────────────────────────────────────────── */}
       {topStudents.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <div className="flex items-center justify-between mb-1">
@@ -829,15 +1003,11 @@ function StatsPanel({
         </div>
       )}
 
-      {/* ── Bottom students (poor performers) ────────────────────────────────── */}
       {bottomStudents.length > 0 && (
         <div className="bg-white rounded-xl border border-red-100 shadow-sm p-5">
           <div className="flex items-center justify-between mb-1">
             <p className="text-sm font-semibold text-gray-800">Poor Performers — Students</p>
-            <select value={bottomN} onChange={(e) => setBottomN(Number(e.target.value))}
-              className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs focus:outline-none focus:border-indigo-500">
-              {[5, 10, 15, 20].map((n) => <option key={n} value={n}>Bottom {n}</option>)}
-            </select>
+            <NSelector value={bottomN} onChange={setBottomN} prefix="Bottom" />
           </div>
           <p className="text-xs text-gray-400 mb-4">Students with lowest assignment submission rate</p>
           <div className="space-y-1.5">
@@ -888,6 +1058,7 @@ export default function AssignmentsPage() {
   const [modalOpen,          setModalOpen]          = useState(false);
   const [editTarget,         setEditTarget]          = useState<any | null>(null);
   const [showStats,          setShowStats]          = useState(false);
+  const [toolbarSearch,      setToolbarSearch]      = useState("");
 
   // Reference data
   const { data: yearsData }    = useQuery({ queryKey: ["academic-years"],   queryFn: () => api.get("/api/v1/academics/academic-years").then((r) => r.data.data) });
@@ -896,13 +1067,12 @@ export default function AssignmentsPage() {
   const { data: batchesData }  = useQuery({ queryKey: ["batches-all"],      queryFn: () => api.get("/api/v1/academics/batches").then((r) => r.data) });
   const { data: empData }      = useQuery({ queryKey: ["employees-select"], queryFn: () => api.get("/api/v1/employees?limit=500").then((r) => r.data) });
 
-  const years     = (yearsData    ?? []) as any[];
+  const years     = (yearsData          ?? []) as any[];
   const grades    = (gradesData?.data   ?? []) as any[];
   const subjects  = (subjectsData?.data ?? []) as any[];
   const batches   = (batchesData?.data  ?? []) as any[];
   const employees = (empData?.data      ?? []) as any[];
 
-  // Auto-set filter to active AY
   useEffect(() => {
     if (filterYear || years.length === 0) return;
     const active = years.find((y) => y.isActive && !y.isArchived) ?? years.find((y) => !y.isArchived);
@@ -911,17 +1081,17 @@ export default function AssignmentsPage() {
 
   const defaultYear = years.find((y) => y.isActive && !y.isArchived)?.name ?? years.find((y) => !y.isArchived)?.name ?? "";
 
-  // Query params
+  // API params
   const params = new URLSearchParams();
-  if (search)              params.set("search",       search);
-  if (filterStatus !== "ALL") params.set("status",    filterStatus);
-  if (filterDateFrom)      params.set("dateFrom",     filterDateFrom);
-  if (filterDateTo)        params.set("dateTo",       filterDateTo);
-  if (filterYear)          params.set("academicYear", filterYear);
-  if (filterBatch)         params.set("batchId",      filterBatch);
-  if (filterGrade)         params.set("gradeId",      filterGrade);
-  if (filterSubject)       params.set("subjectId",    filterSubject);
-  if (filterFaculty)       params.set("employeeId",   filterFaculty);
+  if (search)                  params.set("search",       search);
+  if (filterStatus !== "ALL")  params.set("status",       filterStatus);
+  if (filterDateFrom)          params.set("dateFrom",     filterDateFrom);
+  if (filterDateTo)            params.set("dateTo",       filterDateTo);
+  if (filterYear)              params.set("academicYear", filterYear);
+  if (filterBatch)             params.set("batchId",      filterBatch);
+  if (filterGrade)             params.set("gradeId",      filterGrade);
+  if (filterSubject)           params.set("subjectId",    filterSubject);
+  if (filterFaculty)           params.set("employeeId",   filterFaculty);
   params.set("limit", "200");
 
   const { data: assignmentData, isLoading } = useQuery({
@@ -930,14 +1100,13 @@ export default function AssignmentsPage() {
   });
 
   const assignments: any[] = assignmentData?.data ?? [];
-  const total: number      = assignmentData?.meta?.total ?? 0;
 
-  // Stats queries — skip status filter, raise limit for aggregation
+  // Stats queries
   const statsParams = new URLSearchParams(params);
   statsParams.delete("status");
   statsParams.set("limit", "2000");
 
-  const { data: statsData } = useQuery({
+  const { data: statsData }    = useQuery({
     queryKey: ["assignments-stats-list", statsParams.toString()],
     queryFn:  () => api.get(`/api/v1/academics/assignments?${statsParams.toString()}`).then((r) => r.data),
     enabled: showStats,
@@ -947,6 +1116,37 @@ export default function AssignmentsPage() {
     queryFn:  () => api.get(`/api/v1/academics/assignments/stats?${statsParams.toString()}`).then((r) => r.data),
     enabled: showStats,
   });
+
+  // Stat card values
+  const weekStart   = startOfWeek(new Date(), { weekStartsOn: 1 });
+  const weekEnd     = endOfWeek(new Date(),   { weekStartsOn: 1 });
+  const dueThisWeek = assignments.filter((a) => {
+    try {
+      const d = parseISO(a.submissionDate);
+      return a.status === "DUE" && d >= weekStart && d <= weekEnd;
+    } catch { return false; }
+  }).length;
+  const completedCount  = assignments.filter((a) => a.status === "COMPLETED").length;
+  const activeCount     = assignments.filter((a) => a.status !== "ARCHIVED").length;
+  const submissionPct   = activeCount > 0 ? Math.round((completedCount / activeCount) * 100) : 0;
+  const pendingReview   = assignments.filter((a) => a.status === "DUE").length;
+  const archivedCount   = assignments.filter((a) => a.status === "ARCHIVED").length;
+
+  // Client-side toolbar search
+  const displayedAssignments = toolbarSearch.trim()
+    ? assignments.filter((a) => {
+        const q = toolbarSearch.toLowerCase();
+        const batchNames = a.batches?.map((ab: any) => ab.batch?.name ?? "").join(" ") ?? "";
+        const faculty = a.employee ? `${a.employee.firstName} ${a.employee.lastName}` : "";
+        return (
+          a.name.toLowerCase().includes(q) ||
+          batchNames.toLowerCase().includes(q) ||
+          (a.subject?.name ?? "").toLowerCase().includes(q) ||
+          faculty.toLowerCase().includes(q) ||
+          (a.topics ?? "").toLowerCase().includes(q)
+        );
+      })
+    : assignments;
 
   // Mutations
   const statusMut = useMutation({
@@ -987,59 +1187,74 @@ export default function AssignmentsPage() {
     setModalOpen(true);
   };
 
-  // Export CSV
   const exportCSV = () => {
-    const header = ["Name", "Academic Year", "Batches", "Subject", "Faculty", "Assigned", "Due", "Status", "Topics"];
+    const header = ["Name","Academic Year","Batches","Subject","Faculty","Assigned","Due","Status","Topics"];
     const rows = assignments.map((a) => [
-      a.name,
-      a.academicYear,
+      a.name, a.academicYear,
       a.batches?.map((ab: any) => ab.batch?.name).join(" | ") ?? "",
       a.subject?.name ?? "",
       a.employee ? `${a.employee.firstName} ${a.employee.lastName}` : "",
-      fmtDate(a.assignmentDate),
-      fmtDate(a.submissionDate),
-      a.status,
-      a.topics ?? "",
+      fmtDate(a.assignmentDate), fmtDate(a.submissionDate),
+      a.status, a.topics ?? "",
     ]);
-    const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const csv  = [header, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url  = URL.createObjectURL(blob);
-    const a    = document.createElement("a"); a.href = url; a.download = "assignments.csv"; a.click();
+    const el   = document.createElement("a"); el.href = url; el.download = "assignments.csv"; el.click();
     URL.revokeObjectURL(url);
   };
 
-  // Filter panels (shared desktop/mobile)
-  const STATUS_TABS = ["ALL", "DUE", "COMPLETED", "ARCHIVED"] as const;
-  const STATUS_COLORS: Record<string, string> = {
-    ALL:       "bg-gray-100 text-gray-700 border-gray-200",
-    DUE:       "bg-amber-50 text-amber-700 border-amber-200",
-    COMPLETED: "bg-green-50 text-green-700 border-green-200",
-    ARCHIVED:  "bg-gray-100 text-gray-500 border-gray-200",
+  const hasFilters = search || filterStatus !== "ALL" || filterDateFrom || filterDateTo ||
+    filterBatch || filterGrade || filterSubject || filterFaculty;
+  const clearFilters = () => {
+    setSearch(""); setFilterStatus("ALL"); setFilterDateFrom(""); setFilterDateTo("");
+    setFilterBatch(""); setFilterGrade(""); setFilterSubject(""); setFilterFaculty("");
   };
 
-  const filterPanel = (
-    <div className="flex flex-col gap-5 p-4">
+  const filterLabelStyle: React.CSSProperties = {
+    display: "block", marginBottom: 8, color: "#4b5563", fontSize: 13, fontWeight: 850,
+  };
 
+  const STATUS_CHIPS = [
+    { key: "ALL",       label: "All"       },
+    { key: "DUE",       label: "Due"       },
+    { key: "COMPLETED", label: "Completed" },
+    { key: "ARCHIVED",  label: "Archived"  },
+  ];
+
+  const filterPanel = (
+    <div style={{ display: "grid", gap: 20 }}>
       {/* Search */}
       <div>
-        <Label>Search</Label>
-        <div className="relative">
-          <Input placeholder="Assignment name…" value={search} onChange={(e) => setSearch(e.target.value)}
-            className="pl-8" />
-          <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-300 pointer-events-none" />
+        <label style={filterLabelStyle}>Search</label>
+        <div style={{ position: "relative" }}>
+          <DInput
+            placeholder="Assignment name…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ paddingLeft: 36 }}
+          />
+          <Search style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 15, height: 15, color: D.muted, pointerEvents: "none" }} />
         </div>
       </div>
 
-      {/* Status */}
+      {/* Status chips */}
       <div>
-        <Label>Status</Label>
-        <div className="flex flex-wrap gap-1.5 mt-1">
-          {STATUS_TABS.map((s) => (
-            <button key={s} onClick={() => setFilterStatus(s)}
-              className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
-                filterStatus === s ? STATUS_COLORS[s] + " ring-1 ring-offset-1 ring-current" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
-              }`}>
-              {s === "ALL" ? "All" : s.charAt(0) + s.slice(1).toLowerCase()}
+        <label style={filterLabelStyle}>Status</label>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {STATUS_CHIPS.map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => setFilterStatus(key)}
+              style={{
+                minHeight: 34, borderRadius: 999, padding: "0 13px",
+                border: `1px solid ${filterStatus === key ? D.nav2 : D.line}`,
+                background: filterStatus === key ? D.nav2 : "white",
+                color: filterStatus === key ? "white" : "#4b5563",
+                fontSize: 13, fontWeight: 850, cursor: "pointer", font: "inherit",
+              }}
+            >
+              {label}
             </button>
           ))}
         </div>
@@ -1047,175 +1262,295 @@ export default function AssignmentsPage() {
 
       {/* Due date range */}
       <div>
-        <Label>Due date range</Label>
-        <div className="space-y-1.5">
-          <Input type="date" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} />
-          <Input type="date" value={filterDateTo}   onChange={(e) => setFilterDateTo(e.target.value)}   />
-        </div>
+        <label style={filterLabelStyle}>Due Date Range</label>
+        <DInput type="date" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} />
+        <DInput type="date" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} style={{ marginTop: 8 }} />
       </div>
 
       {/* Academic Year */}
       <div>
-        <Label>Academic Year</Label>
-        <FSelect value={filterYear} onChange={(e) => { setFilterYear(e.target.value); setFilterBatch(""); }}>
+        <label style={filterLabelStyle}>Academic Year</label>
+        <DSelect value={filterYear} onChange={(e) => { setFilterYear(e.target.value); setFilterBatch(""); }}>
           <option value="">All years</option>
           {years.map((y) => <option key={y.id} value={y.name}>{y.name}</option>)}
-        </FSelect>
+        </DSelect>
       </div>
 
       {/* Grade */}
       <div>
-        <Label>Grade</Label>
-        <FSelect value={filterGrade} onChange={(e) => { setFilterGrade(e.target.value); setFilterBatch(""); }}>
+        <label style={filterLabelStyle}>Grade</label>
+        <DSelect value={filterGrade} onChange={(e) => { setFilterGrade(e.target.value); setFilterBatch(""); }}>
           <option value="">All grades</option>
           {grades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-        </FSelect>
+        </DSelect>
       </div>
 
       {/* Batch */}
       <div>
-        <Label>Batch</Label>
-        <FSelect value={filterBatch} onChange={(e) => setFilterBatch(e.target.value)}>
+        <label style={filterLabelStyle}>Batch</label>
+        <DSelect value={filterBatch} onChange={(e) => setFilterBatch(e.target.value)}>
           <option value="">All batches</option>
           {batches
             .filter((b) => (!filterYear || b.academicYear === filterYear) && (!filterGrade || b.gradeId === filterGrade))
             .map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-        </FSelect>
+        </DSelect>
       </div>
 
       {/* Subject */}
       <div>
-        <Label>Subject</Label>
-        <FSelect value={filterSubject} onChange={(e) => setFilterSubject(e.target.value)}>
+        <label style={filterLabelStyle}>Subject</label>
+        <DSelect value={filterSubject} onChange={(e) => setFilterSubject(e.target.value)}>
           <option value="">All subjects</option>
           {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </FSelect>
+        </DSelect>
       </div>
 
       {/* Faculty */}
       <div>
-        <Label>Faculty</Label>
-        <FSelect value={filterFaculty} onChange={(e) => setFilterFaculty(e.target.value)}>
+        <label style={filterLabelStyle}>Faculty</label>
+        <DSelect value={filterFaculty} onChange={(e) => setFilterFaculty(e.target.value)}>
           <option value="">All faculty</option>
           {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
-        </FSelect>
+        </DSelect>
       </div>
 
-      {/* Clear */}
-      {(search || filterStatus !== "ALL" || filterDateFrom || filterDateTo || filterBatch || filterGrade || filterSubject || filterFaculty) && (
-        <button onClick={() => { setSearch(""); setFilterStatus("ALL"); setFilterDateFrom(""); setFilterDateTo(""); setFilterBatch(""); setFilterGrade(""); setFilterSubject(""); setFilterFaculty(""); }}
-          className="w-full rounded-lg border border-gray-200 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-50 transition-colors">
-          Clear filters
+      {hasFilters && (
+        <button
+          onClick={clearFilters}
+          style={{
+            width: "100%", minHeight: 36, borderRadius: 10,
+            border: "1px dashed #fca5a5", background: "white",
+            color: "#ef4444", fontSize: 13, fontWeight: 750,
+            cursor: "pointer", font: "inherit",
+          }}
+        >
+          Clear All Filters
         </button>
       )}
     </div>
   );
 
   return (
-    <div className="flex h-full">
+    <div className="flex flex-col h-full min-h-0" style={{ background: D.bg }}>
 
-      {/* Mobile backdrop */}
-      {mobileFiltersOpen && (
-        <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setMobileFiltersOpen(false)} />
-      )}
-
-      {/* ── Left filter sidebar ──────────────────────────────────────────────── */}
-      <aside className={`
-        shrink-0 border-r border-gray-100 bg-white overflow-y-auto
-        md:relative md:w-52 md:flex md:flex-col md:h-full
-        ${mobileFiltersOpen ? "fixed inset-y-0 left-0 z-40 w-64 shadow-xl h-full flex flex-col" : "hidden md:flex"}
-      `}>
-        {/* Mobile header */}
-        <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-gray-100 md:hidden shrink-0">
-          <div className="flex items-center gap-2">
-            <SlidersHorizontal className="h-4 w-4 text-indigo-500" />
-            <span className="text-sm font-semibold text-gray-800">Filters</span>
+      {/* ── page-head ─────────────────────────────────────────────────────────── */}
+      <div
+        className="bg-white border-b shrink-0 flex flex-wrap items-center justify-between gap-4"
+        style={{ borderColor: D.line, padding: "22px 32px" }}
+      >
+        <div className="flex items-center gap-[14px]">
+          <div style={{
+            width: 44, height: 44, borderRadius: 14, display: "grid", placeItems: "center",
+            background: "#eef2ff", color: D.nav2, fontWeight: 900, fontSize: 15, flexShrink: 0,
+          }}>AS</div>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 28, fontWeight: 900, lineHeight: 1.15, color: D.ink }}>Assignments</h1>
+            <p style={{ margin: "5px 0 0", color: D.muted, fontWeight: 700, fontSize: 14 }}>
+              Create, distribute, and track student submissions
+            </p>
           </div>
-          <button onClick={() => setMobileFiltersOpen(false)} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100">
-            <X className="h-4 w-4" />
+        </div>
+        <div className="flex items-center flex-wrap gap-[10px]">
+          {/* Mobile: filter icon */}
+          <button
+            className="sm:hidden"
+            onClick={() => setMobileFiltersOpen(true)}
+            style={{
+              minHeight: 42, border: 0, borderRadius: 12, padding: "0 14px",
+              background: "white", boxShadow: `inset 0 0 0 1px ${D.line}`,
+              cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6,
+              color: "#374151", font: "inherit", fontWeight: 850,
+            }}
+          >
+            <SlidersHorizontal style={{ width: 16, height: 16 }} />
           </button>
-        </div>
-        {/* Desktop header */}
-        <div className="hidden md:flex items-center gap-2 px-4 py-3.5 border-b border-gray-100 shrink-0">
-          <SlidersHorizontal className="h-4 w-4 text-indigo-500 shrink-0" />
-          <span className="text-sm font-semibold text-gray-800">Filters</span>
-        </div>
-        <div className="flex-1 overflow-y-auto">{filterPanel}</div>
-      </aside>
-
-      {/* ── Main content ──────────────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-
-        {/* Top bar */}
-        <div className="shrink-0 bg-white border-b border-gray-100 px-4 sm:px-6 py-3.5">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              {/* Mobile filter toggle */}
-              <button onClick={() => setMobileFiltersOpen(true)}
-                className="md:hidden flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">
-                <Filter className="h-3.5 w-3.5" />
-              </button>
-              <div>
-                <h1 className="text-base font-bold text-gray-900">Assignments</h1>
-                {total > 0 && <p className="text-xs text-gray-400 mt-0.5">{total} assignment{total !== 1 ? "s" : ""}</p>}
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => setShowStats((v) => !v)}
-                className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                  showStats
-                    ? "bg-violet-600 text-white border-violet-600 hover:bg-violet-700"
-                    : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
-                }`}>
-                <BarChart2 className="h-3.5 w-3.5" /> Stats
-              </button>
-              {!showStats && (
-                <button onClick={exportCSV}
-                  className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors">
-                  <Download className="h-3.5 w-3.5" /> Export
-                </button>
-              )}
-              {canEdit && !showStats && (
-                <button onClick={() => { setEditTarget(null); setModalOpen(true); }}
-                  className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 transition-colors">
-                  <Plus className="h-3.5 w-3.5" /> New Assignment
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Content: stats panel or assignment list */}
-        <div className="flex-1 overflow-y-auto">
-          {showStats ? (
-            <StatsPanel
-              assignments={statsData?.data ?? []}
-              submissionStats={statsSubData?.data ?? null}
-              subjects={subjects}
-            />
-          ) : isLoading ? (
-            <div className="p-6 space-y-3">
-              {[1, 2, 3, 4, 5].map((i) => (
-                <div key={i} className="h-20 rounded-2xl bg-gray-100 animate-pulse" />
-              ))}
-            </div>
-          ) : assignments.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-64 text-center px-8">
-              <BookOpen className="h-10 w-10 text-gray-200 mb-3" />
-              <p className="font-semibold text-gray-400">No assignments found</p>
-              <p className="text-sm text-gray-300 mt-1">Adjust filters or create a new assignment</p>
-            </div>
-          ) : (
-            <div className="m-4 sm:m-6 rounded-2xl border border-gray-100 bg-white shadow-sm">
-              {assignments.map((a) => (
-                <AssignmentCard key={a.id} a={a} canEdit={canEdit}
-                  onEdit={openEdit}
-                  onDelete={(id) => { if (confirm("Delete this assignment?")) deleteMut.mutate(id); }}
-                  onStatus={(id, status) => statusMut.mutate({ id, status })} />
-              ))}
-            </div>
+          <DBtn
+            onClick={() => setShowStats((v) => !v)}
+            style={showStats ? {
+              background: "linear-gradient(135deg,#28245f,#4f46e5)",
+              color: "white", boxShadow: "0 12px 24px rgba(79,70,229,.24)",
+            } : {}}
+          >
+            <BarChart2 style={{ width: 16, height: 16 }} />
+            <span>Stats</span>
+          </DBtn>
+          <DBtn onClick={exportCSV}>
+            <Download style={{ width: 16, height: 16 }} />
+            <span className="hidden sm:inline">Export</span>
+          </DBtn>
+          {canEdit && (
+            <DBtn primary onClick={() => { setEditTarget(null); setModalOpen(true); }}>
+              <Plus style={{ width: 16, height: 16 }} />
+              <span>New Assignment</span>
+            </DBtn>
           )}
         </div>
+      </div>
+
+      {/* ── layout ────────────────────────────────────────────────────────────── */}
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+
+        {/* Desktop filter sidebar */}
+        <aside
+          className="hidden sm:block shrink-0 bg-white border-r overflow-y-auto"
+          style={{ width: 300, borderColor: D.line, padding: "22px 18px" }}
+        >
+          <h2 style={{
+            margin: "0 0 18px", color: "#9aa3b4", fontSize: 13, fontWeight: 900,
+            letterSpacing: ".08em", textTransform: "uppercase",
+          }}>
+            Filters
+          </h2>
+          {filterPanel}
+        </aside>
+
+        {/* Mobile filter drawer */}
+        {mobileFiltersOpen && (
+          <div className="fixed inset-0 z-40 sm:hidden">
+            <div className="absolute inset-0 bg-black/30" onClick={() => setMobileFiltersOpen(false)} />
+            <div
+              className="absolute left-0 top-0 bottom-0 w-72 bg-white shadow-xl overflow-y-auto"
+              style={{ padding: "16px 18px" }}
+            >
+              <div className="flex items-center justify-between" style={{ marginBottom: 18 }}>
+                <h2 style={{
+                  margin: 0, color: "#9aa3b4", fontSize: 13, fontWeight: 900,
+                  letterSpacing: ".08em", textTransform: "uppercase",
+                }}>Filters</h2>
+                <button
+                  onClick={() => setMobileFiltersOpen(false)}
+                  className="p-1 rounded hover:bg-gray-100 border-0 bg-transparent cursor-pointer"
+                >
+                  <X className="h-4 w-4 text-gray-400" />
+                </button>
+              </div>
+              {filterPanel}
+            </div>
+          </div>
+        )}
+
+        {/* Main content */}
+        <main className="flex-1 overflow-y-auto">
+          <div className="px-4 py-5 sm:px-8 sm:py-7 pb-10">
+
+            {showStats ? (
+              <StatsPanel
+                assignments={statsData?.data ?? []}
+                submissionStats={statsSubData?.data ?? null}
+                subjects={subjects}
+              />
+            ) : (
+              <>
+                {/* Toolbar */}
+                <div
+                  className="grid items-center gap-[14px] mb-[18px]"
+                  style={{ gridTemplateColumns: "minmax(0,1fr) auto auto" }}
+                >
+                  <div style={{
+                    minHeight: 48, borderRadius: 14, border: `1px solid ${D.line}`, background: "white",
+                    display: "flex", alignItems: "center", gap: 10, padding: "0 16px",
+                  }}>
+                    <Search style={{ width: 18, height: 18, color: D.muted, flexShrink: 0 }} />
+                    <input
+                      value={toolbarSearch}
+                      onChange={(e) => setToolbarSearch(e.target.value)}
+                      placeholder="Search assignment name, batch, subject, faculty, or topic…"
+                      style={{
+                        flex: 1, border: 0, outline: "none", background: "transparent",
+                        fontSize: 14, fontWeight: 700, color: D.ink, fontFamily: "inherit", minWidth: 0,
+                      }}
+                    />
+                    {toolbarSearch && (
+                      <button onClick={() => setToolbarSearch("")} className="border-0 bg-transparent cursor-pointer p-0 flex items-center">
+                        <X style={{ width: 15, height: 15, color: D.muted }} />
+                      </button>
+                    )}
+                  </div>
+                  <span style={{ color: D.muted, fontWeight: 850, whiteSpace: "nowrap", fontSize: 14 }}>
+                    {displayedAssignments.length} assignment{displayedAssignments.length !== 1 ? "s" : ""}
+                  </span>
+                  {canEdit && (
+                    <DBtn primary onClick={() => { setEditTarget(null); setModalOpen(true); }}>
+                      <Plus style={{ width: 16, height: 16 }} />
+                      <span className="hidden sm:inline">New Assignment</span>
+                    </DBtn>
+                  )}
+                </div>
+
+                {/* Stat grid */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-[14px] mb-[18px]">
+                  {[
+                    { label: "Due This Week",  value: dueThisWeek   },
+                    { label: "Submissions",    value: `${submissionPct}%` },
+                    { label: "Pending Review", value: pendingReview  },
+                    { label: "Archived",       value: archivedCount  },
+                  ].map(({ label, value }) => (
+                    <div
+                      key={label}
+                      style={{
+                        background: "white", border: `1px solid ${D.line}`, borderRadius: 16, padding: 18,
+                        boxShadow: "0 8px 22px rgba(20,23,53,.05)",
+                      }}
+                    >
+                      <span style={{ color: D.muted, fontSize: 12, fontWeight: 850, textTransform: "uppercase", letterSpacing: ".04em" }}>
+                        {label}
+                      </span>
+                      <strong style={{ display: "block", marginTop: 8, fontSize: 28, lineHeight: 1, color: D.ink }}>
+                        {value}
+                      </strong>
+                    </div>
+                  ))}
+                </div>
+
+                {isLoading ? (
+                  <div className="p-6 space-y-3">
+                    {[1, 2, 3, 4, 5].map((i) => (
+                      <div key={i} className="h-20 rounded-2xl bg-gray-100 animate-pulse" />
+                    ))}
+                  </div>
+                ) : displayedAssignments.length === 0 ? (
+                  <div style={{
+                    background: "white", border: "1px dashed #cbd5e1", borderRadius: 18,
+                    minHeight: 360, display: "grid", placeItems: "center",
+                    textAlign: "center", padding: 36,
+                  }}>
+                    <div>
+                      <div style={{
+                        width: 72, height: 72, borderRadius: 22, display: "grid", placeItems: "center",
+                        background: "#eef2ff", color: D.nav2, fontSize: 24, fontWeight: 900,
+                        margin: "0 auto 16px",
+                      }}>AS</div>
+                      <h2 style={{ margin: 0, fontSize: 22, color: D.ink }}>No assignments found</h2>
+                      <p style={{ margin: "8px auto 18px", color: D.muted, maxWidth: 470, lineHeight: 1.5, fontWeight: 600 }}>
+                        Create the first assignment with due date, batch, subject, topics, and attachment. Submission analytics will appear here once students start responding.
+                      </p>
+                      {canEdit && (
+                        <DBtn primary onClick={() => { setEditTarget(null); setModalOpen(true); }} style={{ margin: "0 auto" }}>
+                          <Plus style={{ width: 16, height: 16 }} />
+                          Create Assignment
+                        </DBtn>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{
+                    background: "white", borderRadius: 18, border: `1px solid ${D.line}`,
+                    boxShadow: "0 8px 22px rgba(20,23,53,.05)", overflow: "hidden",
+                  }}>
+                    {displayedAssignments.map((a) => (
+                      <AssignmentCard
+                        key={a.id} a={a} canEdit={canEdit}
+                        onEdit={openEdit}
+                        onDelete={(id) => { if (confirm("Delete this assignment?")) deleteMut.mutate(id); }}
+                        onStatus={(id, status) => statusMut.mutate({ id, status })}
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </main>
       </div>
 
       {/* Modal */}
