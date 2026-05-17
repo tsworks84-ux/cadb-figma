@@ -5,40 +5,106 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
-  Plus, X, Calendar, MapPin, User,
-  ChevronDown, Filter, Download, SlidersHorizontal,
-  CheckCircle2, XCircle, Loader2, Pencil, Trash2,
-  CalendarDays, BarChart2, AlertTriangle,
+  Plus, X, Calendar, MapPin, User, ChevronDown,
+  Download, Loader2, Pencil, Trash2, CalendarDays,
+  BarChart2, AlertTriangle, CheckCircle2, XCircle,
+  Search, SlidersHorizontal,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, startOfWeek, endOfWeek } from "date-fns";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, ComposedChart, Area, PieChart, Pie, Cell,
 } from "recharts";
 
-// ── Primitives ────────────────────────────────────────────────────────────────
+// ── Design tokens ─────────────────────────────────────────────────────────────
 
-function Input({ className = "", ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
+const D = {
+  line:  "#e6e8ef",
+  muted: "#7c8598",
+  ink:   "#111827",
+  nav2:  "#28245f",
+  bg:    "#f4f6fa",
+};
+
+const inputBase: React.CSSProperties = {
+  width: "100%", minHeight: 42, border: `1px solid ${D.line}`,
+  borderRadius: 12, padding: "9px 12px", background: "white",
+  color: D.ink, font: "inherit", fontSize: 14, outline: "none",
+  boxSizing: "border-box",
+};
+
+function DInput({
+  error, style, ...p
+}: React.InputHTMLAttributes<HTMLInputElement> & { error?: boolean }) {
   return (
-    <input {...props}
-      className={`w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 ${className}`}
+    <input {...p}
+      style={{
+        ...inputBase,
+        ...(error ? { border: "1px solid #ef4444", background: "#fef2f2" } : {}),
+        ...style,
+      }}
     />
   );
 }
 
-function FSelect({ className = "", children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+function DSelect({ style, children, ...p }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return <select {...p} style={{ ...inputBase, ...style }}>{children}</select>;
+}
+
+function DTextarea({ style, ...p }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
-    <select {...props}
-      className={`w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none bg-white text-gray-700 ${className}`}
+    <textarea {...p}
+      style={{ ...inputBase, minHeight: 96, resize: "vertical", ...style }}
+    />
+  );
+}
+
+function DBtn({
+  primary, children, style, ...p
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { primary?: boolean }) {
+  return (
+    <button {...p}
+      style={{
+        minHeight: 42, border: 0, borderRadius: 12, padding: "0 18px",
+        font: "inherit", fontWeight: 850,
+        cursor: p.disabled ? "not-allowed" : "pointer",
+        opacity: p.disabled ? 0.5 : 1,
+        display: "inline-flex", alignItems: "center", gap: 6,
+        color:      primary ? "white"  : "#374151",
+        background: primary ? "linear-gradient(135deg,#28245f,#4f46e5)" : "white",
+        boxShadow:  primary ? "0 12px 24px rgba(79,70,229,.24)" : `inset 0 0 0 1px ${D.line}`,
+        ...style,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function DField({
+  label, required, children,
+}: { label: string; required?: boolean; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "grid", gap: 7 }}>
+      <label style={{ color: "#4b5563", fontSize: 13, fontWeight: 850 }}>
+        {label}{required && <span style={{ color: "#ef4444" }}> *</span>}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+// FSelect kept for StatsPanel (uses Tailwind internally)
+function FSelect({ className = "", children, ...p }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <select {...p}
+      className={`w-full rounded-lg border border-gray-200 px-3 py-2 text-sm
+                  focus:border-indigo-500 focus:outline-none bg-white text-gray-700 ${className}`}
     >
       {children}
     </select>
   );
-}
-
-function Label({ children }: { children: React.ReactNode }) {
-  return <label className="block text-xs font-medium text-gray-600 mb-1">{children}</label>;
 }
 
 // ── Status badge ──────────────────────────────────────────────────────────────
@@ -85,15 +151,11 @@ function lectureDurationHours(s: any) {
   } catch { return 0; }
 }
 
-// ── Multi-batch selector ──────────────────────────────────────────────────────
+// ── BatchMultiSelect ──────────────────────────────────────────────────────────
 
 function BatchMultiSelect({
   batches, selected, onChange,
-}: {
-  batches: any[];
-  selected: string[];
-  onChange: (ids: string[]) => void;
-}) {
+}: { batches: any[]; selected: string[]; onChange: (ids: string[]) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -115,31 +177,60 @@ function BatchMultiSelect({
 
   return (
     <div className="relative" ref={ref}>
-      <button type="button" onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white text-gray-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
-        <span className="truncate text-left flex-1 min-w-0">
-          {selected.length === 0 ? <span className="text-gray-400">Select batches…</span> : selectedNames}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          ...inputBase,
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          cursor: "pointer", textAlign: "left",
+        }}
+      >
+        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {selected.length === 0
+            ? <span style={{ color: D.muted }}>Select batches…</span>
+            : selectedNames}
         </span>
-        <ChevronDown className={`h-4 w-4 text-gray-400 shrink-0 ml-1 transition-transform ${open ? "rotate-180" : ""}`} />
+        <ChevronDown
+          style={{
+            width: 16, height: 16, color: D.muted, flexShrink: 0, marginLeft: 4,
+            transform: open ? "rotate(180deg)" : "none", transition: "transform .15s",
+          }}
+        />
       </button>
       {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-lg border border-gray-200 bg-white shadow-lg">
+        <div
+          className="absolute z-50 mt-1 w-full rounded-xl bg-white shadow-lg border"
+          style={{ borderColor: D.line }}
+        >
           <div className="max-h-48 overflow-y-auto">
             {batches.length === 0 && (
-              <p className="px-3 py-2 text-xs text-gray-400">No batches available for this year</p>
+              <p className="px-3 py-2 text-xs" style={{ color: D.muted }}>
+                No batches available for this year
+              </p>
             )}
             {batches.map((b) => (
               <label key={b.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer">
-                <input type="checkbox" checked={selected.includes(b.id)} onChange={() => toggle(b.id)} className="accent-indigo-600" />
-                <span className="text-sm text-gray-700">{b.name}</span>
-                {b.grade && <span className="text-xs text-gray-400 ml-auto shrink-0">{b.grade.name}</span>}
+                <input
+                  type="checkbox"
+                  checked={selected.includes(b.id)}
+                  onChange={() => toggle(b.id)}
+                  className="accent-indigo-600"
+                />
+                <span className="text-sm" style={{ color: D.ink }}>{b.name}</span>
+                {b.grade && (
+                  <span className="text-xs ml-auto shrink-0" style={{ color: D.muted }}>{b.grade.name}</span>
+                )}
               </label>
             ))}
           </div>
-          <div className="border-t border-gray-100 px-3 py-2 flex items-center justify-between">
-            <span className="text-xs text-gray-400">{selected.length} selected</span>
-            <button type="button" onClick={() => setOpen(false)}
-              className="text-xs font-medium text-indigo-600 hover:text-indigo-800 px-2 py-0.5 rounded hover:bg-indigo-50 transition-colors">
+          <div className="border-t px-3 py-2 flex items-center justify-between" style={{ borderColor: D.line }}>
+            <span className="text-xs" style={{ color: D.muted }}>{selected.length} selected</span>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="text-xs font-medium text-indigo-600 hover:text-indigo-800 px-2 py-0.5 rounded hover:bg-indigo-50 transition-colors"
+            >
               Done
             </button>
           </div>
@@ -151,7 +242,10 @@ function BatchMultiSelect({
 
 // ── Stats helpers ─────────────────────────────────────────────────────────────
 
-const CHART_COLORS = ["#6366f1", "#8b5cf6", "#ec4899", "#14b8a6", "#f59e0b", "#10b981", "#3b82f6", "#f97316", "#a855f7", "#06b6d4"];
+const CHART_COLORS = [
+  "#6366f1","#8b5cf6","#ec4899","#14b8a6","#f59e0b",
+  "#10b981","#3b82f6","#f97316","#a855f7","#06b6d4",
+];
 
 function SummaryCard({ label, value, sub, color }: {
   label: string; value: string | number; sub: string;
@@ -190,7 +284,9 @@ function ChartTooltip({ active, payload, label }: any) {
           <span className="h-2 w-2 rounded-full shrink-0" style={{ background: p.color ?? p.fill }} />
           <span className="text-gray-500">{p.name}:</span>
           <span className="font-medium text-gray-800">
-            {typeof p.value === "number" ? (p.name?.toLowerCase().includes("hour") ? p.value.toFixed(1) : p.value) : p.value}
+            {typeof p.value === "number"
+              ? (p.name?.toLowerCase().includes("hour") ? p.value.toFixed(1) : p.value)
+              : p.value}
           </span>
         </div>
       ))}
@@ -204,7 +300,6 @@ function StatsPanel({ schedules, subjects }: { schedules: any[]; subjects: any[]
   const [trendBatch,   setTrendBatch]   = useState("");
   const [trendSubject, setTrendSubject] = useState("");
 
-  // ── 1. Batch stats ──────────────────────────────────────────────────────────
   const batchMap = new Map<string, { id: string; name: string; count: number; hours: number }>();
   for (const s of schedules) {
     const hrs = lectureDurationHours(s);
@@ -218,7 +313,6 @@ function StatsPanel({ schedules, subjects }: { schedules: any[]; subjects: any[]
   }
   const batchStats = [...batchMap.values()].sort((a, b) => b.count - a.count);
 
-  // ── 2. Batch-subject stats ──────────────────────────────────────────────────
   const bsMap = new Map<string, { batchId: string; subjectId: string; subjectName: string; count: number }>();
   for (const s of schedules) {
     const subId   = s.subjectId   ?? "__none__";
@@ -229,12 +323,10 @@ function StatsPanel({ schedules, subjects }: { schedules: any[]; subjects: any[]
       bsMap.get(key)!.count++;
     }
   }
-  // Top 8 subjects by total count
   const subjectTotals: Record<string, number> = {};
   for (const e of bsMap.values()) subjectTotals[e.subjectName] = (subjectTotals[e.subjectName] ?? 0) + e.count;
   const topSubjects = Object.entries(subjectTotals).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([n]) => n);
 
-  // Unique subjectId per subjectName
   const subjectIdByName = new Map<string, string>();
   for (const e of bsMap.values()) {
     if (!subjectIdByName.has(e.subjectName)) subjectIdByName.set(e.subjectName, e.subjectId);
@@ -249,7 +341,6 @@ function StatsPanel({ schedules, subjects }: { schedules: any[]; subjects: any[]
     return row;
   });
 
-  // ── 3. Monthly trend ────────────────────────────────────────────────────────
   const monthMap = new Map<string, { month: string; label: string; count: number; hours: number }>();
   for (const s of schedules) {
     if (trendBatch   && !s.batches?.some((sb: any) => sb.batchId === trendBatch))   continue;
@@ -264,7 +355,6 @@ function StatsPanel({ schedules, subjects }: { schedules: any[]; subjects: any[]
   }
   const monthlyStats = [...monthMap.values()].sort((a, b) => a.month.localeCompare(b.month));
 
-  // ── 4. Status breakdown ─────────────────────────────────────────────────────
   const sc = { UPCOMING: 0, COMPLETED: 0, CANCELLED: 0 };
   for (const s of schedules) if (s.status in sc) sc[s.status as keyof typeof sc]++;
   const statusData = [
@@ -273,7 +363,6 @@ function StatsPanel({ schedules, subjects }: { schedules: any[]; subjects: any[]
     { name: "Cancelled", value: sc.CANCELLED, color: "#ef4444" },
   ];
 
-  // ── 5. Faculty load ─────────────────────────────────────────────────────────
   const facultyMap = new Map<string, { name: string; count: number; hours: number }>();
   for (const s of schedules) {
     if (!s.employee) continue;
@@ -285,11 +374,10 @@ function StatsPanel({ schedules, subjects }: { schedules: any[]; subjects: any[]
   }
   const facultyStats = [...facultyMap.values()].sort((a, b) => b.count - a.count).slice(0, 10);
 
-  // ── Summary numbers ─────────────────────────────────────────────────────────
-  const totalLectures   = schedules.length;
-  const totalHours      = parseFloat(schedules.reduce((s, x) => s + lectureDurationHours(x), 0).toFixed(1));
-  const completionRate  = totalLectures > 0 ? Math.round((sc.COMPLETED / totalLectures) * 100) : 0;
-  const avgHrs          = totalLectures > 0 ? (totalHours / totalLectures).toFixed(1) : "0.0";
+  const totalLectures  = schedules.length;
+  const totalHours     = parseFloat(schedules.reduce((s, x) => s + lectureDurationHours(x), 0).toFixed(1));
+  const completionRate = totalLectures > 0 ? Math.round((sc.COMPLETED / totalLectures) * 100) : 0;
+  const avgHrs         = totalLectures > 0 ? (totalHours / totalLectures).toFixed(1) : "0.0";
 
   if (totalLectures === 0) {
     return (
@@ -303,19 +391,14 @@ function StatsPanel({ schedules, subjects }: { schedules: any[]; subjects: any[]
 
   return (
     <div className="p-4 sm:p-6 space-y-5">
-
-      {/* ── Summary row ──────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <SummaryCard label="Total Lectures"  value={totalLectures}     sub="all statuses"                  color="indigo" />
-        <SummaryCard label="Total Hours"     value={`${totalHours}h`}  sub="teaching time"                 color="violet" />
+        <SummaryCard label="Total Lectures"  value={totalLectures}       sub="all statuses"                  color="indigo" />
+        <SummaryCard label="Total Hours"     value={`${totalHours}h`}    sub="teaching time"                 color="violet" />
         <SummaryCard label="Completion Rate" value={`${completionRate}%`} sub={`${sc.COMPLETED} completed`} color="green"  />
-        <SummaryCard label="Avg Duration"    value={`${avgHrs}h`}      sub="per lecture"                   color="amber"  />
+        <SummaryCard label="Avg Duration"    value={`${avgHrs}h`}        sub="per lecture"                   color="amber"  />
       </div>
 
-      {/* ── Row: Batch overview + Status donut ───────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-
-        {/* Batch overview (2/3) */}
         <div className="lg:col-span-2 bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <p className="text-sm font-semibold text-gray-800">Batch Overview</p>
           <p className="text-xs text-gray-400 mb-4">Lecture count and teaching hours per batch</p>
@@ -334,7 +417,6 @@ function StatsPanel({ schedules, subjects }: { schedules: any[]; subjects: any[]
           )}
         </div>
 
-        {/* Status donut (1/3) */}
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <p className="text-sm font-semibold text-gray-800">Status Breakdown</p>
           <p className="text-xs text-gray-400 mb-3">Distribution across lecture statuses</p>
@@ -361,7 +443,6 @@ function StatsPanel({ schedules, subjects }: { schedules: any[]; subjects: any[]
         </div>
       </div>
 
-      {/* ── Subject distribution ──────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
         <p className="text-sm font-semibold text-gray-800">Subject Distribution by Batch</p>
         <p className="text-xs text-gray-400 mb-4">Lectures per subject stacked across batches (top 8 subjects)</p>
@@ -382,7 +463,6 @@ function StatsPanel({ schedules, subjects }: { schedules: any[]; subjects: any[]
         )}
       </div>
 
-      {/* ── Monthly trend ────────────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
         <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
           <div>
@@ -422,7 +502,6 @@ function StatsPanel({ schedules, subjects }: { schedules: any[]; subjects: any[]
         )}
       </div>
 
-      {/* ── Faculty load ─────────────────────────────────────────────────────── */}
       {facultyStats.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <p className="text-sm font-semibold text-gray-800">Faculty Load</p>
@@ -444,7 +523,7 @@ function StatsPanel({ schedules, subjects }: { schedules: any[]; subjects: any[]
   );
 }
 
-// ── Schedule modal ────────────────────────────────────────────────────────────
+// ── Schedule modal (redesigned) ───────────────────────────────────────────────
 
 type ScheduleForm = {
   academicYear: string; batchIds: string[]; subjectId: string; employeeId: string;
@@ -455,7 +534,8 @@ function ScheduleModal({
   open, onClose, initial, scheduleId, batches, subjects, employees, locations, academicYears, defaultYear,
 }: {
   open: boolean; onClose: () => void; initial?: ScheduleForm; scheduleId?: string;
-  batches: any[]; subjects: any[]; employees: any[]; locations: any[]; academicYears: any[]; defaultYear: string;
+  batches: any[]; subjects: any[]; employees: any[]; locations: any[];
+  academicYears: any[]; defaultYear: string;
 }) {
   const qc = useQueryClient();
   const emptyForm = (): ScheduleForm => ({
@@ -469,14 +549,15 @@ function ScheduleModal({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const filteredBatches = form.academicYear ? batches.filter((b) => b.academicYear === form.academicYear) : batches;
+  const filteredBatches = form.academicYear
+    ? batches.filter((b) => b.academicYear === form.academicYear)
+    : batches;
 
   const endTimeError = Boolean(
     form.date && form.startTime && form.endTime &&
     new Date(`${form.date}T${form.endTime}`) <= new Date(`${form.date}T${form.startTime}`)
   );
 
-  // Faculty conflict detection
   const conflictEnabled = Boolean(form.employeeId && form.date && form.startTime && form.endTime && !endTimeError);
   const { data: conflictData } = useQuery({
     queryKey: ["faculty-conflicts", form.employeeId, form.date],
@@ -506,11 +587,20 @@ function ScheduleModal({
 
   const createMut = useMutation({
     mutationFn: (d: any) => api.post("/api/v1/academics/schedules", d).then((r) => r.data),
-    onSuccess: (res) => { if (!res.success) { toast.error(res.error); return; } qc.invalidateQueries({ queryKey: ["schedules"] }); toast.success("Schedule created"); },
+    onSuccess: (res) => {
+      if (!res.success) { toast.error(res.error); return; }
+      qc.invalidateQueries({ queryKey: ["schedules"] });
+      toast.success("Schedule created");
+    },
   });
   const updateMut = useMutation({
     mutationFn: (d: any) => api.patch(`/api/v1/academics/schedules/${scheduleId}`, d).then((r) => r.data),
-    onSuccess: (res) => { if (!res.success) { toast.error(res.error); return; } qc.invalidateQueries({ queryKey: ["schedules"] }); toast.success("Schedule updated"); onClose(); },
+    onSuccess: (res) => {
+      if (!res.success) { toast.error(res.error); return; }
+      qc.invalidateQueries({ queryKey: ["schedules"] });
+      toast.success("Schedule updated");
+      onClose();
+    },
   });
   const busy = createMut.isPending || updateMut.isPending;
 
@@ -537,119 +627,215 @@ function ScheduleModal({
   };
   const handleSaveAnother = () => {
     const p = buildPayload(); if (!p) return;
-    createMut.mutate(p, { onSuccess: (res) => { if (res.success) setForm({ ...emptyForm(), academicYear: form.academicYear, date: form.date }); } });
+    createMut.mutate(p, {
+      onSuccess: (res) => {
+        if (res.success) setForm({ ...emptyForm(), academicYear: form.academicYear, date: form.date });
+      },
+    });
   };
 
   if (!open) return null;
 
+  const sectionStyle: React.CSSProperties = {
+    border: `1px solid ${D.line}`, borderRadius: 16, padding: 18, background: "#fbfcfe",
+  };
+  const sectionHeadStyle: React.CSSProperties = {
+    margin: "0 0 14px", fontSize: 17, fontWeight: 700, color: D.ink,
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-indigo-100 rounded-lg"><CalendarDays className="h-4 w-4 text-indigo-600" /></div>
-            <h2 className="text-base font-semibold text-gray-900">{scheduleId ? "Edit Schedule" : "New Schedule"}</h2>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-7"
+      style={{ background: "linear-gradient(135deg,rgba(20,23,53,.72),rgba(40,36,95,.62))" }}
+    >
+      <div
+        className="w-full bg-white flex flex-col"
+        style={{ maxWidth: 960, borderRadius: 22, boxShadow: "0 32px 90px rgba(0,0,0,.28)", maxHeight: "92vh", overflow: "hidden" }}
+      >
+        {/* head */}
+        <div
+          className="flex items-center justify-between gap-5 border-b shrink-0"
+          style={{ padding: "24px 28px", borderColor: D.line }}
+        >
+          <div className="flex items-center gap-4">
+            <div style={{
+              width: 44, height: 44, borderRadius: 14, display: "grid", placeItems: "center",
+              background: "#eef2ff", color: D.nav2, fontWeight: 900, fontSize: 15, flexShrink: 0,
+            }}>
+              SC
+            </div>
+            <h2 style={{ margin: 0, fontSize: 28, fontWeight: 900, color: D.ink }}>
+              {scheduleId ? "Edit Schedule" : "New Schedule"}
+            </h2>
           </div>
-          <button onClick={onClose} className="p-1 rounded hover:bg-gray-100 text-gray-400"><X className="h-4 w-4" /></button>
+          <button
+            onClick={onClose}
+            className="border-0 bg-transparent cursor-pointer leading-none text-3xl"
+            style={{ color: "#9aa3b4" }}
+          >
+            ×
+          </button>
         </div>
-        <div className="px-6 py-5 space-y-4">
-          <div>
-            <Label>Academic Year <span className="text-red-400">*</span></Label>
-            <FSelect value={form.academicYear} onChange={(e) => setForm({ ...form, academicYear: e.target.value, batchIds: [] })}>
-              <option value="">Select academic year</option>
-              {academicYears.filter((y) => !y.isArchived).map((y) => <option key={y.id} value={y.name}>{y.name}</option>)}
-            </FSelect>
-          </div>
-          <div>
-            <Label>Batch(es) <span className="text-red-400">*</span></Label>
-            <BatchMultiSelect batches={filteredBatches} selected={form.batchIds} onChange={(ids) => setForm({ ...form, batchIds: ids })} />
-            {form.batchIds.length > 0 && (
-              <p className="text-xs text-indigo-600 mt-1">{form.batchIds.length} batch{form.batchIds.length > 1 ? "es" : ""} selected</p>
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Subject</Label>
-              <FSelect value={form.subjectId} onChange={(e) => setForm({ ...form, subjectId: e.target.value })}>
-                <option value="">Select subject</option>
-                {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </FSelect>
-            </div>
-            <div>
-              <Label>Faculty</Label>
-              <FSelect value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })}>
-                <option value="">Select faculty</option>
-                {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
-              </FSelect>
-            </div>
-          </div>
-          {conflictWarnings.length > 0 && (
-            <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5">
-              <AlertTriangle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-xs font-semibold text-red-700">Faculty conflict detected</p>
-                <p className="text-xs text-red-600 mt-0.5">
-                  {employees.find((e) => e.id === form.employeeId)
-                    ? `${employees.find((e) => e.id === form.employeeId)!.firstName} ${employees.find((e) => e.id === form.employeeId)!.lastName}`
-                    : "This faculty"} already has a class at this time with:{" "}
-                  {conflictWarnings.join("; ")}
-                </p>
+
+        {/* body */}
+        <div className="overflow-y-auto flex-1" style={{ padding: "24px 28px" }}>
+          <div style={{ display: "grid", gap: 18 }}>
+
+            {/* Section 1: Class Context */}
+            <section style={sectionStyle}>
+              <h3 style={sectionHeadStyle}>Class Context</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-[14px]">
+                <DField label="Academic Year" required>
+                  <DSelect
+                    value={form.academicYear}
+                    onChange={(e) => setForm({ ...form, academicYear: e.target.value, batchIds: [] })}
+                  >
+                    <option value="">Select academic year</option>
+                    {academicYears.filter((y) => !y.isArchived).map((y) => (
+                      <option key={y.id} value={y.name}>{y.name}</option>
+                    ))}
+                  </DSelect>
+                </DField>
+                <DField label="Batch(es)" required>
+                  <BatchMultiSelect
+                    batches={filteredBatches}
+                    selected={form.batchIds}
+                    onChange={(ids) => setForm({ ...form, batchIds: ids })}
+                  />
+                  {form.batchIds.length > 0 && (
+                    <p style={{ fontSize: 12, color: "#4f46e5", margin: 0 }}>
+                      {form.batchIds.length} batch{form.batchIds.length > 1 ? "es" : ""} selected
+                    </p>
+                  )}
+                </DField>
               </div>
-            </div>
-          )}
-          <div>
-            <Label>Date <span className="text-red-400">*</span></Label>
-            <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Start Time <span className="text-red-400">*</span></Label>
-              <Input type="time" value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} />
-            </div>
-            <div>
-              <Label>End Time <span className="text-red-400">*</span></Label>
-              <input type="time" value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })}
-                className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-1 ${endTimeError ? "border-red-400 focus:border-red-400 focus:ring-red-300 bg-red-50" : "border-gray-200 focus:border-indigo-500 focus:ring-indigo-500"}`}
-              />
-              {endTimeError && <p className="text-xs text-red-500 mt-1">End time must be after start time</p>}
-            </div>
-          </div>
-          {form.startTime && form.endTime && form.date && !endTimeError && (
-            <p className="text-xs text-gray-400 -mt-2">
-              Duration: {calcDuration(new Date(`${form.date}T${form.startTime}`).toISOString(), new Date(`${form.date}T${form.endTime}`).toISOString())}
-            </p>
-          )}
-          <div>
-            <Label>Location</Label>
-            <FSelect value={form.locationId} onChange={(e) => setForm({ ...form, locationId: e.target.value })}>
-              <option value="">Select location</option>
-              {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-            </FSelect>
-          </div>
-          <div>
-            <Label>Topics</Label>
-            <Input placeholder="e.g. Quadratic Equations, Chapter 5" value={form.topics} onChange={(e) => setForm({ ...form, topics: e.target.value })} />
-          </div>
-          <div>
-            <Label>Notes</Label>
-            <textarea rows={2} placeholder="Additional notes…" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-[14px]" style={{ marginTop: 14 }}>
+                <DField label="Subject">
+                  <DSelect value={form.subjectId} onChange={(e) => setForm({ ...form, subjectId: e.target.value })}>
+                    <option value="">Select subject</option>
+                    {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </DSelect>
+                </DField>
+                <DField label="Faculty">
+                  <DSelect value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })}>
+                    <option value="">Select faculty</option>
+                    {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+                  </DSelect>
+                </DField>
+              </div>
+              {conflictWarnings.length > 0 && (
+                <div
+                  className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50"
+                  style={{ padding: "10px 14px", marginTop: 14 }}
+                >
+                  <AlertTriangle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
+                  <div>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: "#b91c1c", margin: "0 0 2px" }}>
+                      Faculty conflict detected
+                    </p>
+                    <p style={{ fontSize: 12, color: "#ef4444", margin: 0 }}>
+                      {employees.find((e) => e.id === form.employeeId)
+                        ? `${employees.find((e) => e.id === form.employeeId)!.firstName} ${employees.find((e) => e.id === form.employeeId)!.lastName}`
+                        : "This faculty"}{" "}
+                      already has a class at this time with: {conflictWarnings.join("; ")}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </section>
+
+            {/* Section 2: Timing & Location */}
+            <section style={sectionStyle}>
+              <h3 style={sectionHeadStyle}>Timing & Location</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-[14px]">
+                <DField label="Date" required>
+                  <DInput
+                    type="date"
+                    value={form.date}
+                    onChange={(e) => setForm({ ...form, date: e.target.value })}
+                  />
+                </DField>
+                <DField label="Start Time" required>
+                  <DInput
+                    type="time"
+                    value={form.startTime}
+                    onChange={(e) => setForm({ ...form, startTime: e.target.value })}
+                  />
+                </DField>
+                <DField label="End Time" required>
+                  <DInput
+                    type="time"
+                    error={endTimeError}
+                    value={form.endTime}
+                    onChange={(e) => setForm({ ...form, endTime: e.target.value })}
+                  />
+                  {endTimeError && (
+                    <p style={{ fontSize: 12, color: "#ef4444", margin: 0 }}>
+                      End time must be after start time
+                    </p>
+                  )}
+                </DField>
+              </div>
+              {form.startTime && form.endTime && form.date && !endTimeError && (
+                <p style={{ fontSize: 13, color: D.muted, margin: "8px 0 0" }}>
+                  Duration: {calcDuration(
+                    new Date(`${form.date}T${form.startTime}`).toISOString(),
+                    new Date(`${form.date}T${form.endTime}`).toISOString()
+                  )}
+                </p>
+              )}
+              <div style={{ marginTop: 14 }}>
+                <DField label="Location">
+                  <DSelect
+                    value={form.locationId}
+                    onChange={(e) => setForm({ ...form, locationId: e.target.value })}
+                  >
+                    <option value="">Select location</option>
+                    {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                  </DSelect>
+                </DField>
+              </div>
+            </section>
+
+            {/* Section 3: Class Plan */}
+            <section style={sectionStyle}>
+              <h3 style={sectionHeadStyle}>Class Plan</h3>
+              <DField label="Topics">
+                <DInput
+                  placeholder="e.g. Quadratic Equations, Chapter 5"
+                  value={form.topics}
+                  onChange={(e) => setForm({ ...form, topics: e.target.value })}
+                />
+              </DField>
+              <div style={{ marginTop: 14 }}>
+                <DField label="Notes">
+                  <DTextarea
+                    placeholder="Additional notes…"
+                    value={form.notes}
+                    onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                  />
+                </DField>
+              </div>
+            </section>
           </div>
         </div>
-        <div className="flex items-center justify-between gap-2 px-6 pb-5 pt-2 border-t border-gray-100">
-          <button onClick={onClose} disabled={busy} className="px-4 py-2 text-sm text-gray-500 rounded-lg hover:bg-gray-100 transition-colors">Cancel</button>
-          <div className="flex items-center gap-2">
+
+        {/* foot */}
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 border-t shrink-0"
+          style={{ padding: "18px 28px", borderColor: D.line }}
+        >
+          <DBtn onClick={onClose} disabled={busy}>Cancel</DBtn>
+          <div className="flex flex-wrap items-center gap-3">
             {!scheduleId && (
-              <button onClick={handleSaveAnother} disabled={busy || endTimeError}
-                className="px-4 py-2 text-sm text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50 transition-colors disabled:opacity-50">
+              <DBtn onClick={handleSaveAnother} disabled={busy || endTimeError}>
                 Save & Add Another
-              </button>
+              </DBtn>
             )}
-            <button onClick={handleSave} disabled={busy || endTimeError}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50">
-              {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            <DBtn primary onClick={handleSave} disabled={busy || endTimeError}>
+              {busy && <Loader2 className="h-4 w-4 animate-spin" />}
               {scheduleId ? "Save Changes" : "Save"}
-            </button>
+            </DBtn>
           </div>
         </div>
       </div>
@@ -671,7 +857,9 @@ function ScheduleRow({ s, canEdit, onEdit, onDelete, onStatus }: {
         <p className="text-[11px] text-gray-400">{fmtTime(s.endTime)}</p>
       </td>
       <td className="px-3 py-2.5 whitespace-nowrap">
-        <span className="text-xs text-gray-500 bg-indigo-50 rounded px-1.5 py-0.5">{calcDuration(s.startTime, s.endTime)}</span>
+        <span className="text-xs text-gray-500 bg-indigo-50 rounded px-1.5 py-0.5">
+          {calcDuration(s.startTime, s.endTime)}
+        </span>
       </td>
       <td className="px-3 py-2.5 max-w-[160px]">
         <p className="text-xs font-medium text-gray-800 truncate" title={batchNames}>{batchNames}</p>
@@ -690,20 +878,30 @@ function ScheduleRow({ s, canEdit, onEdit, onDelete, onStatus }: {
           : <span className="text-gray-300 text-xs">—</span>}
       </td>
       <td className="px-3 py-2.5 max-w-[140px] hidden lg:table-cell">
-        <p className="text-xs text-gray-500 truncate" title={s.topics ?? ""}>{s.topics || <span className="text-gray-300">—</span>}</p>
+        <p className="text-xs text-gray-500 truncate" title={s.topics ?? ""}>
+          {s.topics || <span className="text-gray-300">—</span>}
+        </p>
       </td>
       <td className="px-3 py-2.5 whitespace-nowrap"><StatusBadge status={s.status} /></td>
       {canEdit && (
         <td className="px-3 py-2.5 whitespace-nowrap">
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button onClick={() => onEdit(s)} className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700" title="Edit"><Pencil className="h-3.5 w-3.5" /></button>
+            <button onClick={() => onEdit(s)} className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700 border-0 bg-transparent cursor-pointer" title="Edit">
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
             {s.status === "UPCOMING" && (
               <>
-                <button onClick={() => onStatus(s.id, "COMPLETED")} className="p-1.5 rounded hover:bg-green-50 text-gray-400 hover:text-green-600" title="Mark Completed"><CheckCircle2 className="h-3.5 w-3.5" /></button>
-                <button onClick={() => onStatus(s.id, "CANCELLED")} className="p-1.5 rounded hover:bg-amber-50 text-gray-400 hover:text-amber-500" title="Cancel"><XCircle className="h-3.5 w-3.5" /></button>
+                <button onClick={() => onStatus(s.id, "COMPLETED")} className="p-1.5 rounded hover:bg-green-50 text-gray-400 hover:text-green-600 border-0 bg-transparent cursor-pointer" title="Mark Completed">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                </button>
+                <button onClick={() => onStatus(s.id, "CANCELLED")} className="p-1.5 rounded hover:bg-amber-50 text-gray-400 hover:text-amber-500 border-0 bg-transparent cursor-pointer" title="Cancel">
+                  <XCircle className="h-3.5 w-3.5" />
+                </button>
               </>
             )}
-            <button onClick={() => onDelete(s.id)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-500" title="Delete"><Trash2 className="h-3.5 w-3.5" /></button>
+            <button onClick={() => onDelete(s.id)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 border-0 bg-transparent cursor-pointer" title="Delete">
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
           </div>
         </td>
       )}
@@ -735,6 +933,7 @@ export default function SchedulePage() {
   const [modalOpen,         setModalOpen]          = useState(false);
   const [editTarget,        setEditTarget]          = useState<any | null>(null);
   const [deleteId,          setDeleteId]            = useState<string | null>(null);
+  const [searchQuery,       setSearchQuery]         = useState("");
 
   // Reference data
   const { data: yearsData }     = useQuery({ queryKey: ["academic-years"],   queryFn: () => api.get("/api/v1/academics/academic-years").then((r) => r.data.data) });
@@ -744,14 +943,13 @@ export default function SchedulePage() {
   const { data: batchesData }   = useQuery({ queryKey: ["batches-all"],      queryFn: () => api.get("/api/v1/academics/batches").then((r) => r.data) });
   const { data: empData }       = useQuery({ queryKey: ["employees-select"], queryFn: () => api.get("/api/v1/employees?limit=500").then((r) => r.data) });
 
-  const years     = (yearsData     ?? []) as any[];
-  const grades    = (gradesData?.data    ?? []) as any[];
-  const locations = (locationsData?.data ?? []) as any[];
-  const subjects  = (subjectsData?.data  ?? []) as any[];
-  const batches   = (batchesData?.data   ?? []) as any[];
-  const employees = (empData?.data       ?? []) as any[];
+  const years     = (yearsData            ?? []) as any[];
+  const grades    = (gradesData?.data     ?? []) as any[];
+  const locations = (locationsData?.data  ?? []) as any[];
+  const subjects  = (subjectsData?.data   ?? []) as any[];
+  const batches   = (batchesData?.data    ?? []) as any[];
+  const employees = (empData?.data        ?? []) as any[];
 
-  // Auto-set filter to active AY
   useEffect(() => {
     if (filterYear || years.length === 0) return;
     const active = years.find((y) => y.isActive && !y.isArchived) ?? years.find((y) => !y.isArchived);
@@ -760,7 +958,7 @@ export default function SchedulePage() {
 
   const defaultYear = years.find((y) => y.isActive && !y.isArchived)?.name ?? years.find((y) => !y.isArchived)?.name ?? "";
 
-  // Schedule list query (paginated)
+  // Schedule query
   const params = new URLSearchParams();
   if (view !== "ALL")         params.set("view",         view);
   if (filterStatus !== "ALL") params.set("status",       filterStatus);
@@ -778,7 +976,6 @@ export default function SchedulePage() {
     queryFn:  () => api.get(`/api/v1/academics/schedules?${params.toString()}`).then((r) => r.data),
   });
 
-  // Stats query — same filters but no view/status limit, higher cap
   const statsParams = new URLSearchParams(params);
   statsParams.delete("view");
   statsParams.set("limit", "2000");
@@ -789,12 +986,35 @@ export default function SchedulePage() {
     enabled:  showStats,
   });
 
-  const schedules: any[] = scheduleData?.data ?? [];
-  const total: number    = scheduleData?.meta?.total ?? 0;
-  const allSchedules: any[] = statsData?.data ?? [];
+  const schedules: any[]    = scheduleData?.data ?? [];
+  const allSchedules: any[] = statsData?.data    ?? [];
 
-  // Group list by date
-  const grouped = schedules.reduce<Record<string, any[]>>((acc, s) => {
+  // Stat card values
+  const todayStr   = format(new Date(), "yyyy-MM-dd");
+  const weekStart  = startOfWeek(new Date(), { weekStartsOn: 1 });
+  const weekEnd    = endOfWeek(new Date(),   { weekStartsOn: 1 });
+  const todayCount    = schedules.filter((s) => format(parseISO(s.date), "yyyy-MM-dd") === todayStr).length;
+  const weekCount     = schedules.filter((s) => { const d = parseISO(s.date); return d >= weekStart && d <= weekEnd; }).length;
+  const facultyCount  = new Set(schedules.map((s: any) => s.employeeId).filter(Boolean)).size;
+  const roomsCount    = new Set(schedules.map((s: any) => s.locationId).filter(Boolean)).size;
+
+  // Client-side search
+  const displayedSchedules = searchQuery.trim()
+    ? schedules.filter((s: any) => {
+        const q = searchQuery.toLowerCase();
+        const batchNames = s.batches?.map((sb: any) => sb.batch?.name ?? "").join(" ") ?? "";
+        const faculty = s.employee ? `${s.employee.firstName} ${s.employee.lastName}` : "";
+        return (
+          batchNames.toLowerCase().includes(q) ||
+          (s.subject?.name ?? "").toLowerCase().includes(q) ||
+          faculty.toLowerCase().includes(q) ||
+          (s.topics ?? "").toLowerCase().includes(q) ||
+          (s.location?.name ?? "").toLowerCase().includes(q)
+        );
+      })
+    : schedules;
+
+  const grouped = displayedSchedules.reduce<Record<string, any[]>>((acc, s) => {
     const k = groupKey(s.date);
     if (!acc[k]) acc[k] = [];
     acc[k].push(s);
@@ -840,7 +1060,7 @@ export default function SchedulePage() {
   };
 
   const exportCSV = () => {
-    const headers = ["Date", "Day", "Start", "End", "Duration", "Batches", "Subject", "Faculty", "Location", "Topics", "Status"];
+    const headers = ["Date","Day","Start","End","Duration","Batches","Subject","Faculty","Location","Topics","Status"];
     const rows = schedules.map((s) => [
       format(parseISO(s.date), "dd/MM/yyyy"), format(parseISO(s.date), "EEEE"),
       fmtTime(s.startTime), fmtTime(s.endTime), calcDuration(s.startTime, s.endTime),
@@ -856,79 +1076,111 @@ export default function SchedulePage() {
     URL.revokeObjectURL(url);
   };
 
-  const hasFilters = view !== "ALL" || filterStatus !== "ALL" || filterDateFrom || filterDateTo || filterYear || filterBatch || filterGrade || filterFaculty || filterLocation;
+  const hasFilters = view !== "ALL" || filterStatus !== "ALL" || filterDateFrom || filterDateTo ||
+    filterYear || filterBatch || filterGrade || filterFaculty || filterLocation;
   const clearFilters = () => {
     setView("ALL"); setFilterStatus("ALL"); setFilterDateFrom(""); setFilterDateTo("");
     setFilterYear(""); setFilterBatch(""); setFilterGrade(""); setFilterFaculty(""); setFilterLocation("");
   };
 
+  const filterLabelStyle: React.CSSProperties = {
+    display: "block", marginBottom: 8, color: "#4b5563", fontSize: 13, fontWeight: 850,
+  };
+
   const filterPanel = (
-    <div className="space-y-4">
+    <div style={{ display: "grid", gap: 20 }}>
+      {/* Show chips */}
       <div>
-        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Show</p>
-        {(["ALL", "UPCOMING", "PAST"] as const).map((v) => (
-          <button key={v} onClick={() => setView(v)}
-            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-sm transition-colors ${view === v ? "bg-indigo-50 text-indigo-700 font-medium" : "text-gray-600 hover:bg-gray-50"}`}>
-            {v === "ALL" ? "All" : v === "UPCOMING" ? "Upcoming" : "Past"}
-          </button>
-        ))}
-      </div>
-      <div>
-        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Status</p>
-        <FSelect value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
-          <option value="ALL">All Statuses</option>
-          <option value="UPCOMING">Upcoming</option>
-          <option value="COMPLETED">Completed</option>
-          <option value="CANCELLED">Cancelled</option>
-        </FSelect>
-      </div>
-      <div>
-        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Date Range</p>
-        <div className="space-y-1.5">
-          <Input type="date" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} />
-          <Input type="date" value={filterDateTo}   onChange={(e) => setFilterDateTo(e.target.value)}   />
+        <p style={filterLabelStyle}>Show</p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {(["ALL", "UPCOMING", "PAST"] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              style={{
+                minHeight: 34, borderRadius: 999, padding: "0 13px",
+                border: `1px solid ${view === v ? D.nav2 : D.line}`,
+                background: view === v ? D.nav2 : "white",
+                color: view === v ? "white" : "#4b5563",
+                fontSize: 13, fontWeight: 850, cursor: "pointer", font: "inherit",
+              }}
+            >
+              {v === "ALL" ? "All" : v === "UPCOMING" ? "Upcoming" : "Past"}
+            </button>
+          ))}
         </div>
       </div>
+
       <div>
-        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Academic Year</p>
-        <FSelect value={filterYear} onChange={(e) => { setFilterYear(e.target.value); setFilterBatch(""); }}>
-          <option value="">All Years</option>
-          {years.filter((y) => !y.isArchived).map((y) => <option key={y.id} value={y.name}>{y.name}</option>)}
-        </FSelect>
+        <label style={filterLabelStyle}>Status</label>
+        <DSelect value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+          <option value="ALL">All statuses</option>
+          <option value="UPCOMING">Scheduled</option>
+          <option value="COMPLETED">Completed</option>
+          <option value="CANCELLED">Cancelled</option>
+        </DSelect>
       </div>
+
       <div>
-        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Batch</p>
-        <FSelect value={filterBatch} onChange={(e) => setFilterBatch(e.target.value)}>
-          <option value="">All Batches</option>
+        <label style={filterLabelStyle}>Date Range</label>
+        <DInput type="date" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} />
+        <DInput type="date" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} style={{ marginTop: 8 }} />
+      </div>
+
+      <div>
+        <label style={filterLabelStyle}>Academic Year</label>
+        <DSelect value={filterYear} onChange={(e) => { setFilterYear(e.target.value); setFilterBatch(""); }}>
+          <option value="">All years</option>
+          {years.filter((y) => !y.isArchived).map((y) => (
+            <option key={y.id} value={y.name}>{y.name}</option>
+          ))}
+        </DSelect>
+      </div>
+
+      <div>
+        <label style={filterLabelStyle}>Batch</label>
+        <DSelect value={filterBatch} onChange={(e) => setFilterBatch(e.target.value)}>
+          <option value="">All batches</option>
           {(filterYear ? batches.filter((b) => b.academicYear === filterYear) : batches).map((b) => (
             <option key={b.id} value={b.id}>{b.name}</option>
           ))}
-        </FSelect>
+        </DSelect>
       </div>
+
       <div>
-        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Grade</p>
-        <FSelect value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)}>
-          <option value="">All Grades</option>
+        <label style={filterLabelStyle}>Grade</label>
+        <DSelect value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)}>
+          <option value="">All grades</option>
           {grades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-        </FSelect>
+        </DSelect>
       </div>
+
       <div>
-        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Faculty</p>
-        <FSelect value={filterFaculty} onChange={(e) => setFilterFaculty(e.target.value)}>
-          <option value="">All Faculty</option>
+        <label style={filterLabelStyle}>Faculty</label>
+        <DSelect value={filterFaculty} onChange={(e) => setFilterFaculty(e.target.value)}>
+          <option value="">All faculty</option>
           {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
-        </FSelect>
+        </DSelect>
       </div>
+
       <div>
-        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Location</p>
-        <FSelect value={filterLocation} onChange={(e) => setFilterLocation(e.target.value)}>
-          <option value="">All Locations</option>
+        <label style={filterLabelStyle}>Location</label>
+        <DSelect value={filterLocation} onChange={(e) => setFilterLocation(e.target.value)}>
+          <option value="">All locations</option>
           {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-        </FSelect>
+        </DSelect>
       </div>
+
       {hasFilters && (
-        <button onClick={clearFilters}
-          className="w-full text-xs text-red-500 hover:text-red-700 py-1.5 border border-dashed border-red-200 rounded-lg hover:bg-red-50 transition-colors">
+        <button
+          onClick={clearFilters}
+          style={{
+            width: "100%", minHeight: 36, borderRadius: 10,
+            border: "1px dashed #fca5a5", background: "white",
+            color: "#ef4444", fontSize: 13, fontWeight: 750,
+            cursor: "pointer", font: "inherit",
+          }}
+        >
           Clear All Filters
         </button>
       )}
@@ -936,55 +1188,76 @@ export default function SchedulePage() {
   );
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-100 px-4 sm:px-6 py-4 flex items-center justify-between gap-3 shrink-0">
-        <div className="flex items-center gap-2.5">
-          <button className="sm:hidden p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50" onClick={() => setMobileFiltersOpen(true)}>
-            <SlidersHorizontal className="h-4 w-4" />
-          </button>
+    <div className="flex flex-col h-full min-h-0" style={{ background: D.bg }}>
+
+      {/* ── page-head ────────────────────────────────────────────────────────── */}
+      <div
+        className="bg-white border-b shrink-0 flex flex-wrap items-center justify-between gap-4"
+        style={{ borderColor: D.line, padding: "22px 32px" }}
+      >
+        <div className="flex items-center gap-[14px]">
+          <div style={{
+            width: 44, height: 44, borderRadius: 14, display: "grid", placeItems: "center",
+            background: "#eef2ff", color: D.nav2, fontWeight: 900, fontSize: 15, flexShrink: 0,
+          }}>SC</div>
           <div>
-            <div className="flex items-center gap-2">
-              <CalendarDays className="h-5 w-5 text-indigo-500" />
-              <h1 className="text-lg font-bold text-gray-900">Schedule</h1>
-              {!showStats && total > 0 && <span className="text-xs bg-indigo-100 text-indigo-700 rounded-full px-2 py-0.5 font-medium">{total}</span>}
-            </div>
-            <p className="text-xs text-gray-400 mt-0.5">Lecture timetables and faculty scheduling</p>
+            <h1 style={{ margin: 0, fontSize: 28, fontWeight: 900, lineHeight: 1.15, color: D.ink }}>Schedule</h1>
+            <p style={{ margin: "5px 0 0", color: D.muted, fontWeight: 700, fontSize: 14 }}>
+              Lecture timetables and faculty scheduling
+            </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {/* Stats toggle */}
-          <button onClick={() => setShowStats((v) => !v)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border transition-colors ${
-              showStats
-                ? "bg-violet-600 text-white border-violet-600 hover:bg-violet-700"
-                : "text-gray-600 border-gray-200 hover:bg-gray-50"
-            }`}>
-            <BarChart2 className="h-4 w-4" />
-            <span className="hidden sm:inline">Stats</span>
+        <div className="flex items-center flex-wrap gap-[10px]">
+          {/* Mobile: filter icon */}
+          <button
+            className="sm:hidden"
+            onClick={() => setMobileFiltersOpen(true)}
+            style={{
+              minHeight: 42, border: 0, borderRadius: 12, padding: "0 14px",
+              background: "white", boxShadow: `inset 0 0 0 1px ${D.line}`,
+              cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6,
+              color: "#374151", font: "inherit", fontWeight: 850,
+            }}
+          >
+            <SlidersHorizontal style={{ width: 16, height: 16 }} />
           </button>
-          <button onClick={exportCSV} className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
-            <Download className="h-4 w-4" /> Export
-          </button>
+          <DBtn
+            onClick={() => setShowStats((v) => !v)}
+            style={showStats ? {
+              background: "linear-gradient(135deg,#28245f,#4f46e5)",
+              color: "white", boxShadow: "0 12px 24px rgba(79,70,229,.24)",
+            } : {}}
+          >
+            <BarChart2 style={{ width: 16, height: 16 }} />
+            <span>Stats</span>
+          </DBtn>
+          <DBtn onClick={exportCSV}>
+            <Download style={{ width: 16, height: 16 }} />
+            <span className="hidden sm:inline">Export</span>
+          </DBtn>
           {canEdit && (
-            <button onClick={() => { setEditTarget(null); setModalOpen(true); }}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-sm">
-              <Plus className="h-4 w-4" />
-              <span className="hidden sm:inline">New Schedule</span>
-              <span className="sm:hidden">Add</span>
-            </button>
+            <DBtn primary onClick={() => { setEditTarget(null); setModalOpen(true); }}>
+              <Plus style={{ width: 16, height: 16 }} />
+              <span>New Schedule</span>
+            </DBtn>
           )}
         </div>
       </div>
 
-      {/* Body */}
+      {/* ── layout ───────────────────────────────────────────────────────────── */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* Desktop sidebar */}
-        <aside className="hidden sm:block w-52 shrink-0 bg-white border-r border-gray-100 overflow-y-auto p-4">
-          <div className="flex items-center gap-1.5 mb-4">
-            <Filter className="h-3.5 w-3.5 text-gray-400" />
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Filters</span>
-          </div>
+
+        {/* Desktop filter sidebar */}
+        <aside
+          className="hidden sm:block shrink-0 bg-white border-r overflow-y-auto"
+          style={{ width: 300, borderColor: D.line, padding: "22px 18px" }}
+        >
+          <h2 style={{
+            margin: "0 0 18px", color: "#9aa3b4", fontSize: 13, fontWeight: 900,
+            letterSpacing: ".08em", textTransform: "uppercase",
+          }}>
+            Filters
+          </h2>
           {filterPanel}
         </aside>
 
@@ -992,116 +1265,260 @@ export default function SchedulePage() {
         {mobileFiltersOpen && (
           <div className="fixed inset-0 z-40 sm:hidden">
             <div className="absolute inset-0 bg-black/30" onClick={() => setMobileFiltersOpen(false)} />
-            <div className="absolute left-0 top-0 bottom-0 w-72 bg-white shadow-xl overflow-y-auto p-4">
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-sm font-semibold text-gray-700">Filters</span>
-                <button onClick={() => setMobileFiltersOpen(false)} className="p-1 rounded hover:bg-gray-100"><X className="h-4 w-4 text-gray-400" /></button>
+            <div
+              className="absolute left-0 top-0 bottom-0 w-72 bg-white shadow-xl overflow-y-auto"
+              style={{ padding: "16px 18px" }}
+            >
+              <div className="flex items-center justify-between" style={{ marginBottom: 18 }}>
+                <h2 style={{
+                  margin: 0, color: "#9aa3b4", fontSize: 13, fontWeight: 900,
+                  letterSpacing: ".08em", textTransform: "uppercase",
+                }}>
+                  Filters
+                </h2>
+                <button
+                  onClick={() => setMobileFiltersOpen(false)}
+                  className="p-1 rounded hover:bg-gray-100 border-0 bg-transparent cursor-pointer"
+                >
+                  <X className="h-4 w-4 text-gray-400" />
+                </button>
               </div>
               {filterPanel}
             </div>
           </div>
         )}
 
-        {/* Main area */}
+        {/* Main content */}
         <main className="flex-1 overflow-y-auto">
-          {showStats ? (
-            statsLoading ? (
-              <div className="flex items-center justify-center h-40">
-                <Loader2 className="h-6 w-6 animate-spin text-violet-400" />
-              </div>
-            ) : (
-              <StatsPanel schedules={allSchedules} subjects={subjects} />
-            )
-          ) : (
-            <div className="p-4 sm:p-6">
-              {isLoading ? (
+          <div className="px-4 py-5 sm:px-8 sm:py-7 pb-10">
+
+            {showStats ? (
+              statsLoading ? (
                 <div className="flex items-center justify-center h-40">
-                  <Loader2 className="h-6 w-6 animate-spin text-indigo-400" />
-                </div>
-              ) : dateKeys.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-64 text-center">
-                  <CalendarDays className="h-10 w-10 text-gray-200 mb-3" />
-                  <p className="font-semibold text-gray-400">No schedules found</p>
-                  <p className="text-sm text-gray-300 mt-1">Adjust your filters or create a new schedule</p>
-                  {canEdit && (
-                    <button onClick={() => { setEditTarget(null); setModalOpen(true); }}
-                      className="mt-4 flex items-center gap-1.5 px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
-                      <Plus className="h-4 w-4" /> New Schedule
-                    </button>
-                  )}
+                  <Loader2 className="h-6 w-6 animate-spin text-violet-400" />
                 </div>
               ) : (
-                <div className="space-y-6">
-                  {dateKeys.map((dateKey) => (
-                    <div key={dateKey}>
-                      <div className="flex items-center gap-3 mb-2">
-                        <div className="h-6 w-6 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
-                          <Calendar className="h-3.5 w-3.5 text-indigo-600" />
-                        </div>
-                        <h3 className="text-sm font-semibold text-gray-800">{fmtDateHeading(dateKey)}</h3>
-                        <span className="text-xs text-gray-400 bg-gray-100 rounded-full px-2 py-0.5 shrink-0">
-                          {grouped[dateKey].length} lecture{grouped[dateKey].length !== 1 ? "s" : ""}
-                        </span>
-                        <div className="flex-1 h-px bg-gray-100" />
-                      </div>
-                      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left">
-                            <thead>
-                              <tr className="border-b border-gray-100 bg-gray-50/60">
-                                <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Time</th>
-                                <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Dur.</th>
-                                <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Batch(es)</th>
-                                <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Subject</th>
-                                <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Faculty</th>
-                                <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Location</th>
-                                <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide hidden lg:table-cell">Topics</th>
-                                <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Status</th>
-                                {canEdit && <th className="px-3 py-2 w-28" />}
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-50">
-                              {grouped[dateKey].map((s) => (
-                                <ScheduleRow key={s.id} s={s} canEdit={canEdit}
-                                  onEdit={openEdit} onDelete={(id) => setDeleteId(id)}
-                                  onStatus={(id, status) => statusMut.mutate({ id, status })}
-                                />
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
+                <StatsPanel schedules={allSchedules} subjects={subjects} />
+              )
+            ) : (
+              <>
+                {/* Toolbar */}
+                <div
+                  className="grid items-center gap-[14px] mb-[18px]"
+                  style={{ gridTemplateColumns: "minmax(0,1fr) auto auto" }}
+                >
+                  <div style={{
+                    minHeight: 48, borderRadius: 14, border: `1px solid ${D.line}`, background: "white",
+                    display: "flex", alignItems: "center", gap: 10, padding: "0 16px",
+                  }}>
+                    <Search style={{ width: 18, height: 18, color: D.muted, flexShrink: 0 }} />
+                    <input
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search by batch, subject, faculty, topic, or location…"
+                      style={{
+                        flex: 1, border: 0, outline: "none", background: "transparent",
+                        fontSize: 14, fontWeight: 700, color: D.ink, fontFamily: "inherit",
+                        minWidth: 0,
+                      }}
+                    />
+                    {searchQuery && (
+                      <button
+                        onClick={() => setSearchQuery("")}
+                        className="border-0 bg-transparent cursor-pointer p-0 flex items-center"
+                      >
+                        <X style={{ width: 15, height: 15, color: D.muted }} />
+                      </button>
+                    )}
+                  </div>
+                  <span style={{ color: D.muted, fontWeight: 850, whiteSpace: "nowrap", fontSize: 14 }}>
+                    {displayedSchedules.length} schedule{displayedSchedules.length !== 1 ? "s" : ""}
+                  </span>
+                  {canEdit && (
+                    <DBtn primary onClick={() => { setEditTarget(null); setModalOpen(true); }}>
+                      <Plus style={{ width: 16, height: 16 }} />
+                      <span className="hidden sm:inline">New Schedule</span>
+                    </DBtn>
+                  )}
+                </div>
+
+                {/* Stat grid */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-[14px] mb-[18px]">
+                  {[
+                    { label: "Today",            value: todayCount   },
+                    { label: "This Week",         value: weekCount    },
+                    { label: "Faculty Assigned",  value: facultyCount },
+                    { label: "Rooms Booked",      value: roomsCount   },
+                  ].map(({ label, value }) => (
+                    <div
+                      key={label}
+                      style={{
+                        background: "white", border: `1px solid ${D.line}`, borderRadius: 16, padding: 18,
+                        boxShadow: "0 8px 22px rgba(20,23,53,.05)",
+                      }}
+                    >
+                      <span style={{ color: D.muted, fontSize: 12, fontWeight: 850, textTransform: "uppercase", letterSpacing: ".04em" }}>
+                        {label}
+                      </span>
+                      <strong style={{ display: "block", marginTop: 8, fontSize: 28, lineHeight: 1, color: D.ink }}>
+                        {value}
+                      </strong>
                     </div>
                   ))}
                 </div>
-              )}
-            </div>
-          )}
+
+                {isLoading ? (
+                  <div className="flex items-center justify-center h-40">
+                    <Loader2 className="h-6 w-6 animate-spin text-indigo-400" />
+                  </div>
+                ) : dateKeys.length === 0 ? (
+                  <>
+                    {/* Empty state */}
+                    <div style={{
+                      background: "white", border: "1px dashed #cbd5e1", borderRadius: 18,
+                      minHeight: 360, display: "grid", placeItems: "center",
+                      textAlign: "center", padding: 36,
+                    }}>
+                      <div>
+                        <div style={{
+                          width: 72, height: 72, borderRadius: 22, display: "grid", placeItems: "center",
+                          background: "#eef2ff", color: D.nav2, fontSize: 24, fontWeight: 900,
+                          margin: "0 auto 16px",
+                        }}>SC</div>
+                        <h2 style={{ margin: 0, fontSize: 22, color: D.ink }}>No schedules found</h2>
+                        <p style={{ margin: "8px auto 18px", color: D.muted, maxWidth: 470, lineHeight: 1.5, fontWeight: 600 }}>
+                          Create a lecture schedule, assign faculty, select a batch and location, and track upcoming classes from this workspace.
+                        </p>
+                        {canEdit && (
+                          <DBtn primary onClick={() => { setEditTarget(null); setModalOpen(true); }} style={{ margin: "0 auto" }}>
+                            <Plus style={{ width: 16, height: 16 }} />
+                            Create Schedule
+                          </DBtn>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Quick grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-[14px]" style={{ marginTop: 18 }}>
+                      {[
+                        { title: "Calendar View",    desc: "Switch to day, week, or month planning." },
+                        { title: "Faculty Load",      desc: "Check conflicts before assigning classes." },
+                        { title: "Room Availability", desc: "View location usage before saving." },
+                      ].map(({ title, desc }) => (
+                        <div
+                          key={title}
+                          style={{ background: "white", border: `1px solid ${D.line}`, borderRadius: 16, padding: 18 }}
+                        >
+                          <strong style={{ display: "block", fontSize: 15, color: D.ink }}>{title}</strong>
+                          <span style={{ display: "block", color: D.muted, marginTop: 5, fontSize: 13, fontWeight: 700 }}>
+                            {desc}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+                    {dateKeys.map((dateKey) => (
+                      <div key={dateKey}>
+                        <div className="flex items-center gap-3" style={{ marginBottom: 8 }}>
+                          <div style={{
+                            width: 24, height: 24, borderRadius: "50%", background: "#eef2ff",
+                            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                          }}>
+                            <Calendar style={{ width: 14, height: 14, color: "#4f46e5" }} />
+                          </div>
+                          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: D.ink }}>
+                            {fmtDateHeading(dateKey)}
+                          </h3>
+                          <span style={{
+                            fontSize: 12, color: D.muted, background: "#f1f5f9",
+                            borderRadius: 999, padding: "2px 10px", flexShrink: 0,
+                          }}>
+                            {grouped[dateKey].length} lecture{grouped[dateKey].length !== 1 ? "s" : ""}
+                          </span>
+                          <div style={{ flex: 1, height: 1, background: "#e5e7eb" }} />
+                        </div>
+                        <div style={{
+                          background: "white", borderRadius: 18, border: `1px solid ${D.line}`,
+                          boxShadow: "0 8px 22px rgba(20,23,53,.05)", overflow: "hidden",
+                        }}>
+                          <div style={{ overflowX: "auto" }}>
+                            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                              <thead>
+                                <tr style={{ borderBottom: `1px solid ${D.line}`, background: "#f8fafc" }}>
+                                  <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">Time</th>
+                                  <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">Dur.</th>
+                                  <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">Batch(es)</th>
+                                  <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">Subject</th>
+                                  <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">Faculty</th>
+                                  <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">Location</th>
+                                  <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left hidden lg:table-cell">Topics</th>
+                                  <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">Status</th>
+                                  {canEdit && <th className="px-3 py-2 w-28" />}
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-50">
+                                {grouped[dateKey].map((s) => (
+                                  <ScheduleRow
+                                    key={s.id} s={s} canEdit={canEdit}
+                                    onEdit={openEdit}
+                                    onDelete={(id) => setDeleteId(id)}
+                                    onStatus={(id, status) => statusMut.mutate({ id, status })}
+                                  />
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </main>
       </div>
 
-      {/* Modals */}
+      {/* ── Modals ───────────────────────────────────────────────────────────── */}
       <ScheduleModal
         key={editTarget?.id ?? "new"}
         open={modalOpen}
         onClose={() => { setModalOpen(false); setEditTarget(null); }}
         initial={editTarget?.form} scheduleId={editTarget?.id} defaultYear={defaultYear}
-        batches={batches} subjects={subjects} employees={employees} locations={locations} academicYears={years}
+        batches={batches} subjects={subjects} employees={employees}
+        locations={locations} academicYears={years}
       />
 
       {deleteId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
-            <div className="h-12 w-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3">
-              <Trash2 className="h-5 w-5 text-red-500" />
+          <div style={{
+            background: "white", borderRadius: 22, boxShadow: "0 32px 90px rgba(0,0,0,.28)",
+            width: "100%", maxWidth: 380, padding: 28, textAlign: "center",
+          }}>
+            <div style={{
+              width: 48, height: 48, background: "#fef2f2", borderRadius: "50%",
+              display: "grid", placeItems: "center", margin: "0 auto 14px",
+            }}>
+              <Trash2 style={{ width: 20, height: 20, color: "#ef4444" }} />
             </div>
-            <h3 className="text-base font-semibold text-gray-900 mb-1">Delete Schedule?</h3>
-            <p className="text-sm text-gray-500 mb-5">This action cannot be undone.</p>
-            <div className="flex gap-3 justify-center">
-              <button onClick={() => setDeleteId(null)} className="px-4 py-2 text-sm text-gray-500 rounded-lg hover:bg-gray-100 transition-colors">Cancel</button>
-              <button onClick={() => deleteMut.mutate(deleteId!)} disabled={deleteMut.isPending}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50">
-                {deleteMut.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            <h3 style={{ margin: "0 0 6px", fontSize: 16, fontWeight: 700, color: D.ink }}>Delete Schedule?</h3>
+            <p style={{ margin: "0 0 22px", fontSize: 14, color: D.muted }}>This action cannot be undone.</p>
+            <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+              <DBtn onClick={() => setDeleteId(null)}>Cancel</DBtn>
+              <button
+                onClick={() => deleteMut.mutate(deleteId!)}
+                disabled={deleteMut.isPending}
+                style={{
+                  minHeight: 42, border: 0, borderRadius: 12, padding: "0 18px",
+                  background: "#dc2626", color: "white", fontWeight: 850, font: "inherit",
+                  cursor: deleteMut.isPending ? "not-allowed" : "pointer",
+                  opacity: deleteMut.isPending ? 0.5 : 1,
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                }}
+              >
+                {deleteMut.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
                 Delete
               </button>
             </div>
