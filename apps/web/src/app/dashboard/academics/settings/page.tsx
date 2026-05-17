@@ -697,7 +697,8 @@ function CentreTab({ canEdit }: { canEdit: boolean }) {
 
 // ── Instalment Plans Tab ───────────────────────────────────────────────────────
 type PlanItem = { _id: string; instalmentNo: number; label: string; amount: string; daysFromAdmission: string; dueDate: string; dueDateMode: "days" | "date" };
-const mkItem = (no: number): PlanItem => ({ _id: crypto.randomUUID(), instalmentNo: no, label: `Instalment ${no}`, amount: "", daysFromAdmission: "", dueDate: "", dueDateMode: "days" });
+const genId = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const mkItem = (no: number): PlanItem => ({ _id: genId(), instalmentNo: no, label: `Instalment ${no}`, amount: "", daysFromAdmission: "", dueDate: "", dueDateMode: "days" });
 
 function PlanItemsEditor({ items, setItems }: { items: PlanItem[]; setItems: (items: PlanItem[]) => void }) {
   const add = () => setItems([...items, mkItem(items.length + 1)]);
@@ -833,7 +834,7 @@ function InstalmentPlansTab({ canEdit }: { canEdit: boolean }) {
                   {editId === plan.id
                     ? <SaveCancel onSave={() => updateMut.mutate(plan.id)} onCancel={() => setEditId(null)} disabled={!editForm.name || updateMut.isPending} />
                     : <ActionButtons canEdit={canEdit}
-                        onEdit={() => { setEditId(plan.id); setExpandedId(plan.id); setEditForm({ name: plan.name, courseId: plan.courseId ?? "", description: plan.description ?? "", items: (plan.items ?? []).map((i: any) => ({ _id: crypto.randomUUID(), instalmentNo: i.instalmentNo, label: i.label ?? `Instalment ${i.instalmentNo}`, amount: String(i.amount), daysFromAdmission: i.daysFromAdmission != null ? String(i.daysFromAdmission) : "", dueDate: i.dueDate ? new Date(i.dueDate).toISOString().split("T")[0] : "", dueDateMode: i.dueDate ? "date" : "days" })) }); }}
+                        onEdit={() => { setEditId(plan.id); setExpandedId(plan.id); setEditForm({ name: plan.name, courseId: plan.courseId ?? "", description: plan.description ?? "", items: (plan.items ?? []).map((i: any) => ({ _id: genId(), instalmentNo: i.instalmentNo, label: i.label ?? `Instalment ${i.instalmentNo}`, amount: String(i.amount), daysFromAdmission: i.daysFromAdmission != null ? String(i.daysFromAdmission) : "", dueDate: i.dueDate ? new Date(i.dueDate).toISOString().split("T")[0] : "", dueDateMode: i.dueDate ? "date" : "days" })) }); }}
                         onDelete={() => { if (confirm(`Delete plan "${plan.name}"?`)) deleteMut.mutate(plan.id); }} />}
                 </div>
               </div>
