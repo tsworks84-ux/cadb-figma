@@ -32,6 +32,7 @@ import { workLocationRoutes } from "./routes/v1/workLocations.js";
 import { directoryRoutes } from "./routes/v1/directory.js";
 import { timesheetRoutes } from "./routes/v1/timesheet.js";
 import { studentAuthRoutes } from "./routes/v1/student-auth.js";
+import { studentAnnouncementRoutes } from "./routes/v1/studentAnnouncements.js";
 import { academicsRoutes } from "./routes/v1/academics.js";
 import { academicSettingsRoutes } from "./routes/v1/academicSettings.js";
 import { studentRoutes } from "./routes/v1/students.js";
@@ -39,8 +40,8 @@ import { scheduleRoutes } from "./routes/v1/schedule.js";
 import { assignmentRoutes } from "./routes/v1/assignments.js";
 import { assessmentRoutes } from "./routes/v1/assessments.js";
 import { academicReportsRoutes } from "./routes/v1/academicReports.js";
-import fastifyStatic from "@fastify/static";
-import { join, dirname } from "path";
+import { createReadStream, existsSync } from "fs";
+import { join, dirname, extname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -121,7 +122,8 @@ await server.register(reportRoutes, { prefix: "/api/v1/reports" });
 await server.register(workLocationRoutes, { prefix: "/api/v1/work-locations" });
 await server.register(directoryRoutes,    { prefix: "/api/v1/directory" });
 await server.register(timesheetRoutes,    { prefix: "/api/v1/timesheet" });
-await server.register(studentAuthRoutes,  { prefix: "/api/v1/student/auth" });
+await server.register(studentAuthRoutes,           { prefix: "/api/v1/student/auth" });
+await server.register(studentAnnouncementRoutes,  { prefix: "/api/v1/student/announcements" });
 await server.register(academicsRoutes,         { prefix: "/api/v1/academics" });
 await server.register(academicSettingsRoutes,  { prefix: "/api/v1/academics" });
 await server.register(studentRoutes,           { prefix: "/api/v1/academics/students" });
@@ -129,10 +131,26 @@ await server.register(scheduleRoutes,           { prefix: "/api/v1/academics/sch
 await server.register(assignmentRoutes,         { prefix: "/api/v1/academics/assignments" });
 await server.register(assessmentRoutes,         { prefix: "/api/v1/academics/assessments" });
 await server.register(academicReportsRoutes,    { prefix: "/api/v1/academics/reports" });
-await server.register(fastifyStatic, {
-  root: join(__dirname, "../uploads"),
-  prefix: "/uploads/",
-  decorateReply: false,
+const MIME: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".pdf": "application/pdf",
+};
+
+server.get("/uploads/*", async (request, reply) => {
+  const filePath = (request.params as Record<string, string>)["*"];
+  const fullPath = join(__dirname, "../uploads", filePath);
+  if (!existsSync(fullPath)) {
+    return reply.status(404).send({ success: false, error: "File not found" });
+  }
+  const mime = MIME[extname(fullPath).toLowerCase()] ?? "application/octet-stream";
+  reply.header("Content-Type", mime);
+  reply.header("Cache-Control", "public, max-age=31536000, immutable");
+  return reply.send(createReadStream(fullPath));
 });
 
 // Global error handler
