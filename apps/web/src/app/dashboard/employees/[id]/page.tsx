@@ -1,17 +1,18 @@
 "use client";
 
-import { useState, useRef } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
-import { formatDate, formatCurrency, getInitials } from "@/lib/utils";
+import { formatDate, formatCurrency, getInitials, resolvePhotoUrl } from "@/lib/utils";
 import {
   ArrowLeft, User, GraduationCap, Award, Wallet, CalendarOff,
   Receipt, Shield, BookOpen, Phone, Mail, MapPin, AlertCircle,
   KeyRound, X, Copy, Plus, Trash2, FileText, Upload, Eye,
-  CreditCard, Building2, Camera, Pencil, Check,
+  CreditCard, Building2, Camera, Pencil, Check, Briefcase,
   ChevronLeft, ChevronRight, ChevronDown, TrendingUp, MinusCircle,
   Star, Calendar, BadgeCheck, UsersRound, Search, ListTodo, CheckCircle2,
+  Download,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -22,33 +23,17 @@ import { z } from "zod";
 
 // ─── Tab config ─────────────────────────────────────────────────────────────
 
-const NAV_GROUPS = [
-  {
-    label: "Profile",
-    items: [
-      { id: "personal",  label: "Personal",      icon: User     },
-      { id: "documents", label: "Documents",     icon: FileText },
-    ],
-  },
-  {
-    label: "Employment",
-    items: [
-      { id: "education", label: "Education",     icon: GraduationCap },
-      { id: "salary",    label: "Salary",         icon: Wallet        },
-      { id: "bank",      label: "Bank",           icon: CreditCard    },
-      { id: "payout",    label: "Monthly Payout", icon: TrendingUp    },
-      { id: "leaves",    label: "Leaves",         icon: CalendarOff   },
-      { id: "claims",    label: "Claims",        icon: Receipt       },
-    ],
-  },
-  {
-    label: "Learning",
-    items: [
-      { id: "training",  label: "Training",      icon: BookOpen },
-      { id: "policies",  label: "Policies",      icon: Shield   },
-    ],
-  },
-];
+const PROFILE_TABS = [
+  { id: "personal",  label: "Personal",   icon: User        },
+  { id: "documents", label: "Documents",  icon: FileText    },
+  { id: "position",  label: "Position",   icon: Briefcase   },
+  { id: "salary",    label: "Salary",     icon: Wallet,     module: "EMP_SALARY"  },
+  { id: "leaves",    label: "Leaves",     icon: CalendarOff, module: "EMP_LEAVES" },
+  { id: "claims",    label: "Claims",     icon: Receipt,    module: "EMP_LEAVES"  },
+  { id: "training",  label: "Training",   icon: BookOpen,   module: "TRAINING"    },
+  { id: "policies",  label: "Policies",   icon: Shield,     module: "POLICIES"    },
+  { id: "team",      label: "Team",       icon: UsersRound  },
+] as const;
 
 const STATUS_COLOR: Record<string, string> = {
   DRAFT: "bg-amber-100 text-amber-700",
@@ -60,6 +45,19 @@ const STATUS_COLOR: Record<string, string> = {
   RESIGNED: "bg-gray-100 text-gray-700",
   RETIRED: "bg-purple-100 text-purple-700",
   EXITED: "bg-red-50 text-red-500",
+};
+
+const POLICY_CATEGORIES = ["HR", "FINANCE", "IT", "OPERATIONS", "COMPLIANCE", "ACADEMIC", "OTHER"] as const;
+type PolicyCategory = typeof POLICY_CATEGORIES[number];
+
+const POLICY_CATEGORY_COLOR: Record<PolicyCategory, string> = {
+  HR: "bg-blue-100 text-blue-700",
+  FINANCE: "bg-green-100 text-green-700",
+  IT: "bg-purple-100 text-purple-700",
+  OPERATIONS: "bg-orange-100 text-orange-700",
+  COMPLIANCE: "bg-red-100 text-red-700",
+  ACADEMIC: "bg-yellow-100 text-yellow-700",
+  OTHER: "bg-gray-100 text-gray-700",
 };
 
 // ─── Shared UI ───────────────────────────────────────────────────────────────
@@ -95,20 +93,22 @@ function CollapsibleCard({
   );
 }
 
-function Field({ label, value }: { label: string; value?: string | null }) {
+function Field({ label, value }: { label: string; value?: React.ReactNode | null }) {
   return (
     <div>
-      <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-0.5">{label}</p>
-      <p className="text-sm text-gray-900">{value || <span className="text-gray-300 italic">—</span>}</p>
+      <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">{label}</label>
+      <p className="text-sm text-gray-900">{value || "—"}</p>
     </div>
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children, cols = 3, first = false }: {
+  title: string; children: React.ReactNode; cols?: 2 | 3; first?: boolean;
+}) {
   return (
-    <div className="rounded-xl border border-gray-100 bg-gray-50 p-5">
-      <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">{title}</h3>
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-4">{children}</div>
+    <div className={first ? "" : "pt-6 border-t border-gray-200"}>
+      <h3 className="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wide">{title}</h3>
+      <div className={`grid grid-cols-1 gap-6 ${cols === 2 ? "md:grid-cols-2" : "md:grid-cols-3"}`}>{children}</div>
     </div>
   );
 }
@@ -186,104 +186,190 @@ function AddQualificationModal({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
+  const [certFile, setCertFile] = React.useState<File | null>(null);
   const { register, handleSubmit, watch, formState: { errors } } = useForm<QualForm>({
     resolver: zodResolver(qualSchema),
     defaultValues: { level: "UG", yearOfPassing: new Date().getFullYear() },
   });
   const level = watch("level");
+  const isMandatoryLevel = level === "UG" || level === "PG";
 
   const mutation = useMutation({
-    mutationFn: (data: QualForm) => api.post(`/api/v1/employees/${employeeId}/qualifications`, {
-      ...data,
-      percentage: data.percentage === "" ? undefined : data.percentage,
-      cgpa: data.cgpa === "" ? undefined : data.cgpa,
-    }),
+    mutationFn: async (data: QualForm) => {
+      const token = localStorage.getItem("cadb_access_token");
+      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+      if (certFile) {
+        const fd = new FormData();
+        fd.append("level", data.level);
+        fd.append("degreeName", data.degreeName);
+        if (data.specialization) fd.append("specialization", data.specialization);
+        fd.append("institution", data.institution);
+        fd.append("boardUniversity", data.boardUniversity);
+        fd.append("yearOfPassing", String(data.yearOfPassing));
+        if (data.percentage !== "" && data.percentage != null) fd.append("percentage", String(data.percentage));
+        if (data.cgpa !== "" && data.cgpa != null) fd.append("cgpa", String(data.cgpa));
+        fd.append("file", certFile);
+        const res = await fetch(`${apiBase}/api/v1/employees/${employeeId}/qualifications`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: fd,
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error ?? "Failed");
+        }
+        return res.json();
+      }
+      return api.post(`/api/v1/employees/${employeeId}/qualifications`, {
+        ...data,
+        percentage: data.percentage === "" ? undefined : data.percentage,
+        cgpa: data.cgpa === "" ? undefined : data.cgpa,
+      });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["qualifications", employeeId] });
       toast.success("Qualification added");
       onClose();
     },
-    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
+    onError: (e: any) => toast.error(e.message ?? e.response?.data?.error ?? "Failed"),
   });
 
   return (
-    <Modal title="Add Qualification" onClose={onClose}>
-      <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
-        <Select label="Education Level" {...register("level")} error={errors.level?.message}>
-          {Object.entries(LEVEL_LABELS).map(([v, l]) => (
-            <option key={v} value={v}>{l}</option>
-          ))}
-        </Select>
-
-        <div className="grid grid-cols-2 gap-3">
-          <Input
-            label={level === "SCHOOL" ? "Board / Stream" : "Degree Name"}
-            placeholder={level === "SCHOOL" ? "e.g. Science / Commerce" : "e.g. B.Tech"}
-            {...register("degreeName")}
-            error={errors.degreeName?.message}
-          />
-          {level !== "SCHOOL" && (
-            <Input label="Specialization" placeholder="e.g. Computer Science" {...register("specialization")} />
-          )}
-        </div>
-
-        <Input
-          label="Institution / School"
-          placeholder="Name of school / college / university"
-          {...register("institution")}
-          error={errors.institution?.message}
-        />
-
-        <Input
-          label={level === "SCHOOL" ? "Board (CBSE / State / ICSE)" : "University / Board"}
-          placeholder="e.g. CBSE, Anna University"
-          {...register("boardUniversity")}
-          error={errors.boardUniversity?.message}
-        />
-
-        <div className="grid grid-cols-3 gap-3">
-          <Input
-            label="Year of Passing"
-            type="number"
-            min={1950}
-            max={new Date().getFullYear()}
-            {...register("yearOfPassing")}
-            error={errors.yearOfPassing?.message}
-          />
-          <Input
-            label="Percentage %"
-            type="number"
-            step="0.01"
-            min={0}
-            max={100}
-            placeholder="Optional"
-            {...register("percentage")}
-          />
-          <Input
-            label="CGPA"
-            type="number"
-            step="0.01"
-            min={0}
-            max={10}
-            placeholder="Optional"
-            {...register("cgpa")}
-          />
-        </div>
-
-        <div className="flex justify-end gap-2 pt-2">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={mutation.isPending}
-            className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60"
-          >
-            {mutation.isPending ? "Saving..." : "Add Qualification"}
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: "#2C3E7C" }}>
+              <GraduationCap className="text-white h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900">Add Qualification</h2>
+              <p className="text-sm text-gray-500">Add academic qualification details</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+            <X className="h-5 w-5 text-gray-500" />
           </button>
         </div>
-      </form>
-    </Modal>
+
+        <form onSubmit={handleSubmit((d) => mutation.mutate(d))}>
+          <div className="p-6 space-y-5">
+            {/* Level */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Level <span className="text-red-500">*</span></label>
+              <select {...register("level")} className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                {Object.entries(LEVEL_LABELS).map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+              {errors.level && <p className="mt-1 text-xs text-red-500">{errors.level.message}</p>}
+            </div>
+
+            {/* Degree + Specialization */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {level === "SCHOOL" ? "Board / Stream" : "Degree"} <span className="text-red-500">*</span>
+                </label>
+                <input
+                  {...register("degreeName")}
+                  placeholder={level === "SCHOOL" ? "e.g. Science / Commerce" : "e.g. B.Tech, M.A"}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {errors.degreeName && <p className="mt-1 text-xs text-red-500">{errors.degreeName.message}</p>}
+              </div>
+              {level !== "SCHOOL" && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Specialization</label>
+                  <input {...register("specialization")} placeholder="e.g. Computer Science" className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              )}
+            </div>
+
+            {/* Institution + University */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Institution <span className="text-red-500">*</span></label>
+                <input {...register("institution")} placeholder="Name of college / school" className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                {errors.institution && <p className="mt-1 text-xs text-red-500">{errors.institution.message}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{level === "SCHOOL" ? "Board" : "University / Board"}</label>
+                <input {...register("boardUniversity")} placeholder="e.g. CBSE, Anna University" className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </div>
+
+            {/* Year + Percentage + CGPA */}
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Year of Passing <span className="text-red-500">*</span></label>
+                <input type="number" {...register("yearOfPassing")} min={1950} max={new Date().getFullYear()} className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                {errors.yearOfPassing && <p className="mt-1 text-xs text-red-500">{errors.yearOfPassing.message}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Percentage %</label>
+                <input type="number" step="0.01" min={0} max={100} {...register("percentage")} placeholder="Optional" className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">CGPA</label>
+                <input type="number" step="0.01" min={0} max={10} {...register("cgpa")} placeholder="Optional" className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </div>
+
+            {/* Certificate upload */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Certificate {isMandatoryLevel && <span className="text-red-500">*</span>}
+                {isMandatoryLevel && <span className="text-xs text-red-500 font-normal ml-1">(Mandatory for UG/PG)</span>}
+              </label>
+              {!certFile ? (
+                <label className="block cursor-pointer">
+                  <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(e) => e.target.files?.[0] && setCertFile(e.target.files[0])} className="hidden" />
+                  <div className="flex flex-col items-center justify-center gap-2 py-8 border-2 border-dashed border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+                    <Upload className="h-8 w-8 text-gray-400" />
+                    <p className="text-sm font-medium text-gray-700">Click to upload certificate</p>
+                    <p className="text-xs text-gray-500">PDF, JPG, or PNG (Max 5MB)</p>
+                  </div>
+                </label>
+              ) : (
+                <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <FileText className="h-6 w-6 text-gray-400 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{certFile.name}</p>
+                      <p className="text-xs text-gray-500">{(certFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                    </div>
+                  </div>
+                  <button type="button" onClick={() => setCertFile(null)} className="p-1.5 hover:bg-gray-200 rounded text-gray-400 hover:text-red-600">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {isMandatoryLevel && (
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 text-orange-600 shrink-0 mt-0.5" />
+                <p className="text-xs text-orange-900">Certificate upload is mandatory for UG and PG qualifications.</p>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200">
+            <button type="button" onClick={onClose} className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
+            <button
+              type="submit"
+              disabled={mutation.isPending || (isMandatoryLevel && !certFile)}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+              style={{ backgroundColor: "#2C3E7C" }}
+            >
+              {mutation.isPending ? "Saving..." : "Add Qualification"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 
@@ -307,6 +393,7 @@ function AddCertificationModal({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
+  const [certFile, setCertFile] = React.useState<File | null>(null);
   const { register, handleSubmit, formState: { errors } } = useForm<CertForm>({
     resolver: zodResolver(certSchema),
   });
@@ -323,23 +410,113 @@ function AddCertificationModal({
   });
 
   return (
-    <Modal title="Add Certification" onClose={onClose}>
-      <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
-        <Input label="Certification Name" placeholder="e.g. AWS Certified Solutions Architect" {...register("name")} error={errors.name?.message} />
-        <Input label="Issuing Body" placeholder="e.g. Amazon Web Services" {...register("issuingBody")} error={errors.issuingBody?.message} />
-        <Input label="Credential ID" placeholder="Optional" {...register("credentialId")} />
-        <div className="grid grid-cols-2 gap-3">
-          <Input label="Issue Date" type="date" {...register("issueDate")} error={errors.issueDate?.message} />
-          <Input label="Expiry Date" type="date" {...register("expiryDate")} />
-        </div>
-        <div className="flex justify-end gap-2 pt-2">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">Cancel</button>
-          <button type="submit" disabled={mutation.isPending} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60">
-            {mutation.isPending ? "Saving..." : "Add Certification"}
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: "#2C3E7C" }}>
+              <Award className="text-white h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900">Add Certification</h2>
+              <p className="text-sm text-gray-500">Add professional certification details</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+            <X className="h-5 w-5 text-gray-500" />
           </button>
         </div>
-      </form>
-    </Modal>
+
+        <form onSubmit={handleSubmit((d) => mutation.mutate(d))}>
+          <div className="p-6 space-y-5">
+            {/* Certification Name */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Certification Name <span className="text-red-500">*</span></label>
+              <input {...register("name")} placeholder="e.g. Certified Teacher, Google Educator Level 1" className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              {errors.name && <p className="mt-1 text-xs text-red-500">{errors.name.message}</p>}
+            </div>
+
+            {/* Issuing Body */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Issuing Organization <span className="text-red-500">*</span></label>
+              <input {...register("issuingBody")} placeholder="e.g. NCTE, Google, Microsoft" className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              {errors.issuingBody && <p className="mt-1 text-xs text-red-500">{errors.issuingBody.message}</p>}
+            </div>
+
+            {/* Issue Date + Expiry Date */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Issue Date <span className="text-red-500">*</span></label>
+                <input type="date" {...register("issueDate")} className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                {errors.issueDate && <p className="mt-1 text-xs text-red-500">{errors.issueDate.message}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Expiry Date <span className="text-xs text-gray-400 font-normal">(Optional)</span>
+                </label>
+                <input type="date" {...register("expiryDate")} className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </div>
+
+            {/* Credential ID */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Credential ID <span className="text-xs text-gray-400 font-normal">(Optional)</span>
+              </label>
+              <input {...register("credentialId")} placeholder="Certificate or credential ID" className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+
+            {/* Certificate upload */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Certificate <span className="text-xs text-gray-400 font-normal">(Optional)</span>
+              </label>
+              {!certFile ? (
+                <label className="block cursor-pointer">
+                  <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(e) => e.target.files?.[0] && setCertFile(e.target.files[0])} className="hidden" />
+                  <div className="flex flex-col items-center justify-center gap-2 py-8 border-2 border-dashed border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+                    <Upload className="h-8 w-8 text-gray-400" />
+                    <p className="text-sm font-medium text-gray-700">Click to upload certificate</p>
+                    <p className="text-xs text-gray-500">PDF, JPG, or PNG (Max 5MB)</p>
+                  </div>
+                </label>
+              ) : (
+                <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <FileText className="h-6 w-6 text-gray-400 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{certFile.name}</p>
+                      <p className="text-xs text-gray-500">{(certFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                    </div>
+                  </div>
+                  <button type="button" onClick={() => setCertFile(null)} className="p-1.5 hover:bg-gray-200 rounded text-gray-400 hover:text-red-600">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
+              <p className="text-xs text-blue-900">Professional certifications help showcase expertise and credentials.</p>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200">
+            <button type="button" onClick={onClose} className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
+            <button
+              type="submit"
+              disabled={mutation.isPending}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+              style={{ backgroundColor: "#2C3E7C" }}
+            >
+              {mutation.isPending ? "Saving..." : "Add Certification"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 
@@ -429,6 +606,12 @@ const addrSchema = z.object({
 const personalEditSchema = z.object({
   panEncrypted: z.string()
     .refine((v) => v === "" || /^[A-Za-z]{5}[0-9]{4}[A-Za-z]$/.test(v), "Invalid PAN (e.g. ABCDE1234F)"),
+  aadhaarEncrypted: z.string()
+    .refine((v) => v === "" || /^\d{12}$/.test(v.replace(/\s/g, "")), "Aadhaar must be 12 digits")
+    .optional().or(z.literal("")),
+  uanNumber: z.string()
+    .refine((v) => v === "" || /^\d{12}$/.test(v), "UAN must be 12 digits")
+    .optional().or(z.literal("")),
   personalPhone: z.string().length(10, "Must be 10 digits").optional().or(z.literal("")),
   officialPhone: z.string().length(10).optional().or(z.literal("")),
   personalEmail: z.string().email().optional().or(z.literal("")),
@@ -461,6 +644,8 @@ function EditPersonalForm({
     resolver: zodResolver(personalEditSchema),
     defaultValues: {
       panEncrypted: "",
+      aadhaarEncrypted: "",
+      uanNumber: emp.uanNumber ?? "",
       personalPhone: emp.personalPhone ?? "",
       officialPhone: emp.officialPhone ?? "",
       personalEmail: emp.personalEmail ?? "",
@@ -475,14 +660,14 @@ function EditPersonalForm({
         pincode: addr.pincode ?? "",
         country: addr.country ?? "India",
       },
-      permanentAddress: perm ? {
-        line1: perm.line1 ?? "",
-        line2: perm.line2 ?? "",
-        city: perm.city ?? "",
-        state: perm.state ?? "",
-        pincode: perm.pincode ?? "",
-        country: perm.country ?? "India",
-      } : undefined,
+      permanentAddress: {
+        line1: perm?.line1 ?? "",
+        line2: perm?.line2 ?? "",
+        city: perm?.city ?? "",
+        state: perm?.state ?? "",
+        pincode: perm?.pincode ?? "",
+        country: perm?.country ?? "India",
+      },
       emergencyContactName: emp.emergencyContactName ?? "",
       emergencyContactPhone: emp.emergencyContactPhone ?? "",
       emergencyRelation: emp.emergencyRelation ?? "",
@@ -494,6 +679,9 @@ function EditPersonalForm({
       const payload: Record<string, any> = { ...data };
       if (!payload.panEncrypted) delete payload.panEncrypted;
       else payload.panEncrypted = payload.panEncrypted.toUpperCase();
+      if (!payload.aadhaarEncrypted) delete payload.aadhaarEncrypted;
+      else payload.aadhaarEncrypted = payload.aadhaarEncrypted.replace(/\s/g, "");
+      if (!payload.uanNumber) delete payload.uanNumber;
       if (!payload.personalPhone) delete payload.personalPhone;
       if (!payload.officialPhone) delete payload.officialPhone;
       if (!payload.personalEmail) delete payload.personalEmail;
@@ -566,90 +754,118 @@ function EditPersonalForm({
     );
   }
 
+  function ESection({ title, children, cols = 3, first = false }: {
+    title: string; children: React.ReactNode; cols?: 2 | 3; first?: boolean;
+  }) {
+    return (
+      <div className={first ? "" : "pt-6 border-t border-gray-200"}>
+        <h3 className="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wide">{title}</h3>
+        <div className={`grid grid-cols-1 gap-4 ${cols === 2 ? "md:grid-cols-2" : "md:grid-cols-3"}`}>{children}</div>
+      </div>
+    );
+  }
+
+  function ReadField({ label, value }: { label: string; value?: string | null }) {
+    return (
+      <div>
+        <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">{label}</label>
+        <p className="text-sm text-gray-900">{value || "—"}</p>
+      </div>
+    );
+  }
+
   return (
     <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-6">
 
-      {/* Contact */}
-      <div className="rounded-xl border border-gray-100 bg-gray-50 p-5">
-        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Contact</h3>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          <div>
-            <FInput label="Personal Phone" maxLength={10} {...register("personalPhone")} />
-            <ErrMsg err={errors.personalPhone} />
-          </div>
-          <FInput label="Official Phone" maxLength={10} {...register("officialPhone")} />
-          <FInput label="Personal Email" type="email" {...register("personalEmail")} />
-        </div>
-      </div>
-
-      {/* PAN */}
-      <div className="rounded-xl border border-amber-100 bg-amber-50 p-5">
-        <h3 className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-1">PAN Number <span className="text-red-500">*</span></h3>
-        {emp.pan
-          ? <p className="text-xs text-amber-600 mb-3">PAN on file: <span className="font-mono font-semibold">{emp.pan}</span> — enter below only if updating</p>
-          : <p className="text-xs text-red-600 font-medium mb-3">PAN not on file — please enter your PAN number</p>
-        }
-        <div className="max-w-xs">
+      {/* Personal Information — mirrors view layout: 3-col, read-only for admin-managed fields */}
+      <ESection title="Personal Information" first>
+        <ReadField label="First Name" value={emp.firstName} />
+        <ReadField label="Middle Name" value={emp.middleName} />
+        <ReadField label="Last Name" value={emp.lastName} />
+        <ReadField label="Gender" value={emp.gender} />
+        <ReadField label="Date of Birth" value={emp.dateOfBirth ? emp.dateOfBirth.split("T")[0] : null} />
+        <FSelect label="Marital Status" {...register("maritalStatus")}>
+          <option value="">— Not specified —</option>
+          {["SINGLE", "MARRIED", "DIVORCED", "WIDOWED"].map((v) => (
+            <option key={v} value={v}>{v}</option>
+          ))}
+        </FSelect>
+        <ReadField label="Nationality" value={emp.nationality} />
+        <FSelect label="Blood Group" {...register("bloodGroup")}>
+          <option value="">— Not specified —</option>
+          {["A_POS", "A_NEG", "B_POS", "B_NEG", "AB_POS", "AB_NEG", "O_POS", "O_NEG"].map((v) => (
+            <option key={v} value={v}>{v.replace("_", " ")}</option>
+          ))}
+        </FSelect>
+        <FInput label="Religion" {...register("religion")} />
+        <div>
           <FInput
-            label=""
-            placeholder={emp.pan ? "Enter new PAN to update" : "e.g. ABCDE1234F (required)"}
+            label={`PAN Number${!emp.pan ? " *" : ""}`}
+            placeholder={emp.pan ? `On file: ${emp.pan} — enter to update` : "e.g. ABCDE1234F"}
             maxLength={10}
+            style={{ textTransform: "uppercase" }}
             {...register("panEncrypted")}
           />
           <ErrMsg err={errors.panEncrypted} />
         </div>
-      </div>
-
-      {/* Personal details */}
-      <div className="rounded-xl border border-gray-100 bg-gray-50 p-5">
-        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Personal Details</h3>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          <FSelect label="Marital Status" {...register("maritalStatus")}>
-            <option value="">— Not specified —</option>
-            {["SINGLE", "MARRIED", "DIVORCED", "WIDOWED"].map((v) => (
-              <option key={v} value={v}>{v}</option>
-            ))}
-          </FSelect>
-          <FSelect label="Blood Group" {...register("bloodGroup")}>
-            <option value="">— Not specified —</option>
-            {["A_POS", "A_NEG", "B_POS", "B_NEG", "AB_POS", "AB_NEG", "O_POS", "O_NEG"].map((v) => (
-              <option key={v} value={v}>{v.replace("_", " ")}</option>
-            ))}
-          </FSelect>
-          <FInput label="Religion" {...register("religion")} />
+        <div>
+          <FInput
+            label={`Aadhaar Number${!emp.aadhaar ? " *" : ""}`}
+            placeholder={emp.aadhaar ? `On file: ${emp.aadhaar} — enter to update` : "12-digit Aadhaar"}
+            maxLength={12}
+            {...register("aadhaarEncrypted")}
+          />
+          <ErrMsg err={errors.aadhaarEncrypted} />
         </div>
-      </div>
+        <div>
+          <FInput
+            label="UAN Number"
+            placeholder={emp.uanNumber ? `On file: ${emp.uanNumber}` : "12-digit UAN (if PF enrolled)"}
+            maxLength={12}
+            {...register("uanNumber")}
+          />
+          <ErrMsg err={errors.uanNumber} />
+        </div>
+      </ESection>
+
+      {/* Contact — mirrors view 2-col layout */}
+      <ESection title="Contact" cols={2}>
+        <div>
+          <FInput label="Personal Phone" maxLength={10} {...register("personalPhone")} />
+          <ErrMsg err={errors.personalPhone} />
+        </div>
+        <FInput label="Official Phone" maxLength={10} {...register("officialPhone")} />
+        <ReadField label="Official Email" value={emp.email} />
+        <FInput label="Personal Email" type="email" {...register("personalEmail")} />
+      </ESection>
 
       {/* Current Address */}
-      <div className="rounded-xl border border-gray-100 bg-gray-50 p-5">
-        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Current Address</h3>
+      <div className="pt-6 border-t border-gray-200">
+        <h3 className="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wide">Current Address</h3>
         <AddressFields prefix="currentAddress" />
       </div>
 
       {/* Permanent Address */}
-      <div className="rounded-xl border border-gray-100 bg-gray-50 p-5">
-        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Permanent Address <span className="font-normal text-gray-400 normal-case">(optional)</span></h3>
+      <div className="pt-6 border-t border-gray-200">
+        <h3 className="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wide">Permanent Address</h3>
         <AddressFields prefix="permanentAddress" />
       </div>
 
       {/* Emergency Contact */}
-      <div className="rounded-xl border border-gray-100 bg-gray-50 p-5">
-        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Emergency Contact</h3>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          <div>
-            <FInput label="Name" {...register("emergencyContactName")} />
-            <ErrMsg err={errors.emergencyContactName} />
-          </div>
-          <div>
-            <FInput label="Phone" maxLength={10} {...register("emergencyContactPhone")} />
-            <ErrMsg err={errors.emergencyContactPhone} />
-          </div>
-          <div>
-            <FInput label="Relation" {...register("emergencyRelation")} />
-            <ErrMsg err={errors.emergencyRelation} />
-          </div>
+      <ESection title="Emergency Contact">
+        <div>
+          <FInput label="Name" {...register("emergencyContactName")} />
+          <ErrMsg err={errors.emergencyContactName} />
         </div>
-      </div>
+        <div>
+          <FInput label="Phone" maxLength={10} {...register("emergencyContactPhone")} />
+          <ErrMsg err={errors.emergencyContactPhone} />
+        </div>
+        <div>
+          <FInput label="Relation" {...register("emergencyRelation")} />
+          <ErrMsg err={errors.emergencyRelation} />
+        </div>
+      </ESection>
 
       <div className="flex gap-3 justify-end sticky bottom-0 bg-white border-t border-gray-100 py-4 -mx-1 px-1">
         <button type="button" onClick={onClose} className="px-5 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">
@@ -658,7 +874,8 @@ function EditPersonalForm({
         <button
           type="submit"
           disabled={mutation.isPending}
-          className="inline-flex items-center gap-2 px-5 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60"
+          className="inline-flex items-center gap-2 px-5 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-60"
+          style={{ backgroundColor: "#2C3E7C" }}
         >
           <Check className="h-4 w-4" />
           {mutation.isPending ? "Saving..." : "Save Changes"}
@@ -1190,10 +1407,14 @@ function BonusPlansCard({
   const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
+  const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ title: "", totalAmount: "", effectiveFrom: "", effectiveTo: "", notes: "" });
   const [form, setForm] = useState({
     title: "", totalAmount: "", frequency: "YEARLY" as string,
     effectiveFrom: "", effectiveTo: "", notes: "",
   });
+  // Initial payout entries for CUSTOM frequency plans (added during creation)
+  const [initPayouts, setInitPayouts] = useState<{ date: string; amount: string }[]>([]);
   const [customPayout, setCustomPayout] = useState<{ planId: string; amount: string; scheduledDate: string; notes: string } | null>(null);
 
   const { data: plans, isLoading } = useQuery({
@@ -1202,18 +1423,45 @@ function BonusPlansCard({
   });
 
   const createMut = useMutation({
-    mutationFn: () => api.post(`/api/v1/employees/${employeeId}/bonus-plans`, {
-      title: form.title, totalAmount: parseFloat(form.totalAmount), frequency: form.frequency,
-      effectiveFrom: form.effectiveFrom ? new Date(form.effectiveFrom).toISOString() : undefined,
-      effectiveTo: form.effectiveTo ? new Date(form.effectiveTo).toISOString() : undefined,
-      notes: form.notes || undefined,
-    }),
+    mutationFn: async () => {
+      const res = await api.post(`/api/v1/employees/${employeeId}/bonus-plans`, {
+        title: form.title, totalAmount: parseFloat(form.totalAmount), frequency: form.frequency,
+        effectiveFrom: form.effectiveFrom ? new Date(form.effectiveFrom).toISOString() : undefined,
+        effectiveTo: form.effectiveTo ? new Date(form.effectiveTo).toISOString() : undefined,
+        notes: form.notes || undefined,
+      });
+      const planId = res.data.data.id;
+      // For CUSTOM plans with initial payout entries, create them sequentially
+      if (form.frequency === "CUSTOM" && initPayouts.length > 0) {
+        for (const p of initPayouts) {
+          if (p.date && p.amount) {
+            await api.post(`/api/v1/bonus-plans/${planId}/payouts`, {
+              amount: parseFloat(p.amount),
+              scheduledDate: new Date(p.date).toISOString(),
+            });
+          }
+        }
+      }
+      return res;
+    },
     onSuccess: () => {
       toast.success("Bonus plan created");
       setShowForm(false);
       setForm({ title: "", totalAmount: "", frequency: "YEARLY", effectiveFrom: "", effectiveTo: "", notes: "" });
+      setInitPayouts([]);
       qc.invalidateQueries({ queryKey: ["bonus-plans", employeeId] });
       qc.invalidateQueries({ queryKey: ["monthly-receivables", employeeId] });
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
+  });
+
+  const updatePlanMut = useMutation({
+    mutationFn: ({ planId, ...data }: { planId: string; title: string; totalAmount: number; effectiveFrom?: string; effectiveTo?: string; notes?: string }) =>
+      api.patch(`/api/v1/bonus-plans/${planId}`, data),
+    onSuccess: () => {
+      toast.success("Plan updated");
+      setEditingPlanId(null);
+      qc.invalidateQueries({ queryKey: ["bonus-plans", employeeId] });
     },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
   });
@@ -1330,6 +1578,42 @@ function BonusPlansCard({
               />
             </div>
           </div>
+          {/* Initial payout entries for CUSTOM plans */}
+          {form.frequency === "CUSTOM" && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-amber-800">Payout Schedule</p>
+                <button
+                  type="button"
+                  onClick={() => setInitPayouts((prev) => [...prev, { date: "", amount: "" }])}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                >
+                  <Plus className="h-3 w-3" /> Add entry
+                </button>
+              </div>
+              {initPayouts.length === 0 && (
+                <p className="text-xs text-gray-400 italic">No entries yet — click "Add entry" to schedule payouts.</p>
+              )}
+              {initPayouts.map((p, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input
+                    type="date" value={p.date}
+                    onChange={(e) => setInitPayouts((prev) => prev.map((x, j) => j === i ? { ...x, date: e.target.value } : x))}
+                    className="flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:border-amber-400 focus:outline-none"
+                  />
+                  <input
+                    type="number" placeholder="Amount (₹)" value={p.amount}
+                    onChange={(e) => setInitPayouts((prev) => prev.map((x, j) => j === i ? { ...x, amount: e.target.value } : x))}
+                    className="w-32 rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:border-amber-400 focus:outline-none"
+                  />
+                  <button type="button" onClick={() => setInitPayouts((prev) => prev.filter((_, j) => j !== i))} className="text-gray-400 hover:text-red-500">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="flex gap-2">
             <button
               onClick={() => createMut.mutate()}
@@ -1338,7 +1622,7 @@ function BonusPlansCard({
             >
               {createMut.isPending ? "Creating…" : "Create Plan"}
             </button>
-            <button onClick={() => setShowForm(false)} className="text-sm text-gray-500 hover:text-gray-700 px-2">Cancel</button>
+            <button onClick={() => { setShowForm(false); setInitPayouts([]); }} className="text-sm text-gray-500 hover:text-gray-700 px-2">Cancel</button>
           </div>
           {form.frequency !== "CUSTOM" && form.totalAmount && form.effectiveFrom && (
             <p className="text-xs text-amber-700 bg-amber-100 rounded px-3 py-1.5">
@@ -1401,7 +1685,87 @@ function BonusPlansCard({
 
                 {isExpanded && (
                   <div className="border-t border-gray-50 bg-gray-50 px-5 py-4 space-y-3">
-                    {plan.notes && <p className="text-xs text-gray-500 italic">{plan.notes}</p>}
+                    {/* Edit plan inline */}
+                    {canAppraise && editingPlanId === plan.id ? (
+                      <div className="space-y-2 pb-3 border-b border-gray-100">
+                        <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Edit Plan</p>
+                        <input
+                          value={editForm.title}
+                          onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                          placeholder="Plan title"
+                          className="w-full rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:border-amber-400 focus:outline-none"
+                        />
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            type="number" value={editForm.totalAmount}
+                            onChange={(e) => setEditForm({ ...editForm, totalAmount: e.target.value })}
+                            placeholder="Total amount (₹)"
+                            className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:border-amber-400 focus:outline-none"
+                          />
+                          <div>
+                            <label className="text-xs text-gray-500 mb-0.5 block">Effective From</label>
+                            <input
+                              type="date" value={editForm.effectiveFrom}
+                              onChange={(e) => setEditForm({ ...editForm, effectiveFrom: e.target.value })}
+                              className="w-full rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:border-amber-400 focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-gray-500 mb-0.5 block">Effective To (optional)</label>
+                            <input
+                              type="date" value={editForm.effectiveTo}
+                              onChange={(e) => setEditForm({ ...editForm, effectiveTo: e.target.value })}
+                              className="w-full rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:border-amber-400 focus:outline-none"
+                            />
+                          </div>
+                        </div>
+                        <textarea
+                          value={editForm.notes}
+                          onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                          placeholder="Notes (optional)"
+                          rows={2}
+                          className="w-full rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:border-amber-400 focus:outline-none resize-none"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => updatePlanMut.mutate({
+                              planId: plan.id,
+                              title: editForm.title,
+                              totalAmount: parseFloat(editForm.totalAmount),
+                              effectiveFrom: editForm.effectiveFrom ? new Date(editForm.effectiveFrom).toISOString() : undefined,
+                              effectiveTo: editForm.effectiveTo ? new Date(editForm.effectiveTo).toISOString() : undefined,
+                              notes: editForm.notes || undefined,
+                            })}
+                            disabled={updatePlanMut.isPending || !editForm.title || !editForm.totalAmount}
+                            className="rounded-lg bg-amber-500 text-white px-3 py-1 text-xs font-semibold hover:bg-amber-600 disabled:opacity-50"
+                          >
+                            {updatePlanMut.isPending ? "Saving…" : "Save"}
+                          </button>
+                          <button onClick={() => setEditingPlanId(null)} className="text-xs text-gray-500 hover:text-gray-700 px-2">Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {plan.notes && <p className="text-xs text-gray-500 italic">{plan.notes}</p>}
+                        {canAppraise && (
+                          <button
+                            onClick={() => {
+                              setEditingPlanId(plan.id);
+                              setEditForm({
+                                title: plan.title,
+                                totalAmount: String(plan.totalAmount),
+                                effectiveFrom: plan.effectiveFrom ? plan.effectiveFrom.slice(0, 10) : "",
+                                effectiveTo: plan.effectiveTo ? plan.effectiveTo.slice(0, 10) : "",
+                                notes: plan.notes ?? "",
+                              });
+                            }}
+                            className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                          >
+                            <Pencil className="h-3 w-3" /> Edit plan details
+                          </button>
+                        )}
+                      </>
+                    )}
 
                     {/* Payout schedule */}
                     {plan.payouts?.length > 0 ? (
@@ -2551,6 +2915,389 @@ function MonthlySalarySlip({ employeeId, salaryConfig }: { employeeId: string; s
   );
 }
 
+// ─── Policies tab: PDF Viewer Modal ──────────────────────────────────────────
+
+function EmpPdfViewerModal({ policy, onClose }: { policy: any; onClose: () => void }) {
+  const src = policy.fileUrl?.startsWith("http")
+    ? policy.fileUrl
+    : `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}${policy.fileUrl}`;
+  const [loadError, setLoadError] = useState(false);
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-black/70" onClick={onClose}>
+      <div
+        className="relative flex flex-col bg-white rounded-t-xl mt-12 flex-1 overflow-hidden shadow-2xl mx-4 mb-0"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-3 px-5 py-3 border-b border-gray-200 bg-gray-50 shrink-0">
+          <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${POLICY_CATEGORY_COLOR[policy.category as PolicyCategory] ?? "bg-gray-100 text-gray-700"}`}>
+            {policy.category}
+          </span>
+          <span className="font-semibold text-gray-900 text-sm flex-1 truncate">{policy.title}</span>
+          <span className="text-xs text-gray-400 shrink-0">v{policy.version}</span>
+          <a
+            href={src}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="ml-2 rounded-lg border border-gray-200 px-2.5 py-1 text-xs text-blue-600 hover:bg-blue-50 shrink-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            Open in new tab ↗
+          </a>
+          <button
+            onClick={onClose}
+            className="rounded-full p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-700 transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        {loadError ? (
+          <div className="flex flex-col items-center justify-center flex-1 gap-4 text-gray-500">
+            <FileText className="h-12 w-12 text-gray-300" />
+            <p className="text-sm">Could not load PDF preview.</p>
+            <a
+              href={src}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+              style={{ backgroundColor: "#2C3E7C" }}
+            >
+              Open PDF directly ↗
+            </a>
+          </div>
+        ) : (
+          <iframe
+            src={src}
+            title={policy.title}
+            className="flex-1 w-full border-0"
+            onError={() => setLoadError(true)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Leaves tab: Balance Section ─────────────────────────────────────────────
+
+const EMP_LEAVE_COLORS: Record<string, { bg: string; text: string; bar: string; border: string }> = {
+  CASUAL:       { bg: "bg-blue-50",   text: "text-blue-600",   bar: "bg-blue-500",   border: "border-blue-100" },
+  SICK:         { bg: "bg-red-50",    text: "text-red-500",    bar: "bg-red-400",    border: "border-red-100" },
+  EARNED:       { bg: "bg-green-50",  text: "text-green-600",  bar: "bg-green-500",  border: "border-green-100" },
+  MATERNITY:    { bg: "bg-pink-50",   text: "text-pink-600",   bar: "bg-pink-400",   border: "border-pink-100" },
+  PATERNITY:    { bg: "bg-indigo-50", text: "text-indigo-600", bar: "bg-indigo-500", border: "border-indigo-100" },
+  COMPENSATORY: { bg: "bg-orange-50", text: "text-orange-600", bar: "bg-orange-400", border: "border-orange-100" },
+  UNPAID:       { bg: "bg-gray-50",   text: "text-gray-500",   bar: "bg-gray-400",   border: "border-gray-100" },
+  SPECIAL:      { bg: "bg-purple-50", text: "text-purple-600", bar: "bg-purple-500", border: "border-purple-100" },
+};
+const EMP_LEAVE_LABEL: Record<string, string> = {
+  CASUAL: "Casual", SICK: "Sick", EARNED: "Earned",
+  MATERNITY: "Maternity", PATERNITY: "Paternity",
+  COMPENSATORY: "Comp-off", UNPAID: "Unpaid", SPECIAL: "Special",
+};
+const EMP_STATUS_STYLES: Record<string, string> = {
+  PENDING:   "bg-yellow-100 text-yellow-700",
+  APPROVED:  "bg-green-100 text-green-700",
+  REJECTED:  "bg-red-100 text-red-600",
+  CANCELLED: "bg-gray-100 text-gray-400",
+};
+
+function EmpBalanceSection({ balances, lopTotal }: { balances: any[]; lopTotal: number }) {
+  const [open, setOpen] = useState(true);
+  const fy = new Date().getMonth() >= 3 ? new Date().getFullYear() : new Date().getFullYear() - 1;
+  const totalAllocated = balances.reduce((s, b) => s + b.allocated, 0);
+  const cardTypes = balances.slice(0, 2);
+  const pillTypes = balances.slice(2);
+  const now = new Date();
+  const nextFirst = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+    .toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors"
+      >
+        <div className="text-left">
+          <h2 className="font-semibold text-gray-900">Leave Balance</h2>
+          <p className="text-xs text-gray-400 mt-0.5">FY {fy}–{fy + 1} · Accrued monthly</p>
+        </div>
+        <div className="flex items-center gap-3">
+          {totalAllocated > 0 && <span className="text-xs text-gray-500">{totalAllocated} days annual entitlement</span>}
+          <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+        </div>
+      </button>
+
+      {open && (
+        <>
+          <div className={`px-6 pb-4 grid gap-3 ${cardTypes.length === 0 ? "grid-cols-1" : "grid-cols-3"}`}>
+            {cardTypes.map((b) => {
+              const c = EMP_LEAVE_COLORS[b.leaveType] ?? EMP_LEAVE_COLORS.UNPAID;
+              const pct = b.accrued > 0 ? Math.min(100, (b.availed / b.accrued) * 100) : 0;
+              return (
+                <div key={b.leaveType} className={`${c.bg} ${c.border} border rounded-xl p-4`}>
+                  <p className={`text-xs font-bold uppercase tracking-wider mb-2 ${c.text}`}>
+                    {EMP_LEAVE_LABEL[b.leaveType] ?? b.leaveType}
+                  </p>
+                  <p className={`text-4xl font-bold ${c.text} mb-3`}>{b.balance}</p>
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between text-gray-600"><span>Accrued</span><span className="font-semibold text-gray-800">{b.accrued}</span></div>
+                    <div className="flex justify-between text-gray-600"><span>Availed</span><span className="font-semibold text-gray-800">{b.availed}</span></div>
+                    <div className="flex justify-between text-gray-600"><span>Pending</span><span className="font-semibold text-gray-800">{b.pending}</span></div>
+                  </div>
+                  <div className="mt-3 h-1.5 rounded-full bg-black/10">
+                    <div className={`h-full rounded-full ${c.bar}`} style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* LoP card — always 3rd */}
+            <div className="bg-rose-50 border border-rose-100 rounded-xl p-4">
+              <p className="text-xs font-bold uppercase tracking-wider mb-2 text-rose-600">Loss of Pay</p>
+              <p className="text-4xl font-bold text-rose-600 mb-3">{lopTotal}</p>
+              <div className="space-y-1.5 text-xs">
+                <div className="flex justify-between text-gray-600">
+                  <span>This FY</span>
+                  <span className={`font-semibold ${lopTotal > 0 ? "text-rose-700" : "text-green-600"}`}>
+                    {lopTotal} {lopTotal === 1 ? "day" : "days"}
+                  </span>
+                </div>
+                <div className="flex justify-between text-gray-600">
+                  <span>Status</span>
+                  <span className={`font-semibold ${lopTotal > 0 ? "text-rose-600" : "text-green-600"}`}>
+                    {lopTotal > 0 ? "Deducted" : "None"}
+                  </span>
+                </div>
+              </div>
+              <div className="mt-3 h-1.5 rounded-full bg-rose-200">
+                {lopTotal > 0 && <div className="h-full rounded-full bg-rose-500 w-full" />}
+              </div>
+            </div>
+          </div>
+
+          {pillTypes.length > 0 && (
+            <div className="px-6 pb-4 flex gap-2 flex-wrap">
+              {pillTypes.map((b) => {
+                const c = EMP_LEAVE_COLORS[b.leaveType] ?? EMP_LEAVE_COLORS.UNPAID;
+                return (
+                  <div key={b.leaveType} className={`${c.bg} ${c.border} border rounded-xl px-4 py-2.5 flex items-center gap-3`}>
+                    <span className={`text-xs font-bold uppercase tracking-wider ${c.text}`}>{EMP_LEAVE_LABEL[b.leaveType] ?? b.leaveType}</span>
+                    <span className={`text-xl font-bold ${c.text}`}>{b.balance}</span>
+                    <span className="text-xs text-gray-400">/ {b.allocated}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="px-6 py-3 border-t border-gray-50 bg-gray-50/50 text-xs text-gray-500">
+            Next accrual: {nextFirst}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Leaves tab: Leave History ────────────────────────────────────────────────
+
+function EmpLeaveHistory({ leaves }: { leaves: any[] }) {
+  const [open, setOpen] = useState(true);
+  const [filter, setFilter] = useState<"ALL" | "PENDING" | "APPROVED">("ALL");
+
+  const filtered = leaves.filter((l) => {
+    if (filter === "PENDING")  return l.status === "PENDING";
+    if (filter === "APPROVED") return l.status === "APPROVED";
+    return true;
+  });
+
+  function fmtShort(iso: string) {
+    return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-50">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="flex items-center gap-2 text-left hover:opacity-80 transition-opacity"
+        >
+          <div>
+            <h2 className="font-semibold text-gray-900">Leave History</h2>
+            <p className="text-xs text-gray-400 mt-0.5">All submitted leave applications and their status.</p>
+          </div>
+          <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ml-2 ${open ? "rotate-180" : ""}`} />
+        </button>
+        {open && (
+          <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+            {(["ALL", "PENDING", "APPROVED"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors ${filter === f ? "bg-white text-gray-800 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+              >
+                {f.charAt(0) + f.slice(1).toLowerCase()}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {open && (
+        filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-center px-6">
+            <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center mb-3">
+              <CalendarOff className="h-5 w-5 text-blue-400" />
+            </div>
+            <p className="text-sm font-medium text-gray-600">No leave applications</p>
+            <p className="text-xs text-gray-400 mt-1">Leave requests will appear here with approval status.</p>
+          </div>
+        ) : (
+          <div className="overflow-y-auto max-h-96">
+            <table className="w-full">
+              <thead className="sticky top-0 bg-white z-10">
+                <tr className="border-b border-gray-50">
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Type</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Dates</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Days</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">LoP</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Approver</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Applied</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {filtered.map((l) => {
+                  const sameDay = l.fromDate.slice(0, 10) === l.toDate.slice(0, 10);
+                  const dateStr = sameDay ? fmtShort(l.fromDate) : `${fmtShort(l.fromDate)} – ${fmtShort(l.toDate)}`;
+                  return (
+                    <tr key={l.id} className="hover:bg-blue-50/30 transition-colors">
+                      <td className="px-6 py-4">
+                        <p className="text-sm font-semibold text-gray-800">{EMP_LEAVE_LABEL[l.leaveType] ?? l.leaveType}</p>
+                        {l.reason && <p className="text-xs text-gray-400 mt-0.5 truncate max-w-[140px]">{l.reason}</p>}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-700">{dateStr}</td>
+                      <td className="px-6 py-4 text-sm text-gray-700">{l.totalDays}</td>
+                      <td className="px-6 py-4 text-sm">
+                        {l.lopDays > 0
+                          ? <span className="text-rose-600 font-semibold">{l.lopDays}d</span>
+                          : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${EMP_STATUS_STYLES[l.status] ?? "bg-gray-100 text-gray-500"}`}>
+                          {l.status.charAt(0) + l.status.slice(1).toLowerCase()}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-600">
+                        {l.approver ? `${l.approver.firstName} ${l.approver.lastName}` : "—"}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-400">{fmtShort(l.createdAt)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+// ─── Leaves tab: LoP History ──────────────────────────────────────────────────
+
+function EmpLopHistory({ leaves, salaryConfig }: { leaves: any[]; salaryConfig: any }) {
+  const [open, setOpen] = useState(true);
+  const { dailyRate } = computeNetMonthly(salaryConfig);
+
+  // Derive LoP history from approved leave applications — group by month/year
+  const lopByMonth = useMemo(() => {
+    const map = new Map<string, { month: number; year: number; days: number; leaves: any[] }>();
+    leaves.forEach((l) => {
+      if (!l.lopDays || l.lopDays <= 0) return;
+      const d = new Date(l.fromDate);
+      const key = `${d.getFullYear()}-${d.getMonth() + 1}`;
+      const existing = map.get(key) ?? { month: d.getMonth() + 1, year: d.getFullYear(), days: 0, leaves: [] };
+      existing.days += l.lopDays;
+      existing.leaves.push(l);
+      map.set(key, existing);
+    });
+    return Array.from(map.values()).sort((a, b) => b.year !== a.year ? b.year - a.year : b.month - a.month);
+  }, [leaves]);
+
+  const totalLop = lopByMonth.reduce((s, m) => s + m.days, 0);
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors"
+      >
+        <div className="text-left">
+          <h2 className="font-semibold text-gray-900">LoP History</h2>
+          <p className="text-xs text-gray-400 mt-0.5">Loss of Pay deductions by month.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          {totalLop > 0 && (
+            <span className="text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-100 rounded-full px-2.5 py-0.5">
+              {totalLop} day{totalLop !== 1 ? "s" : ""} total
+            </span>
+          )}
+          <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+        </div>
+      </button>
+
+      {open && (
+        lopByMonth.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-10 text-center px-6">
+            <div className="w-10 h-10 bg-green-50 rounded-full flex items-center justify-center mb-3">
+              <BadgeCheck className="h-5 w-5 text-green-500" />
+            </div>
+            <p className="text-sm font-medium text-gray-600">No LoP recorded</p>
+            <p className="text-xs text-gray-400 mt-1">No loss-of-pay deductions on this account.</p>
+          </div>
+        ) : (
+          <div className="overflow-y-auto max-h-72">
+            <table className="w-full">
+              <thead className="sticky top-0 bg-white z-10">
+                <tr className="border-b border-gray-50">
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Month</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">LoP Days</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Est. Deduction</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Leaves</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {lopByMonth.map((m) => {
+                  const deduction = salaryConfig && dailyRate > 0 ? Math.round(m.days * dailyRate) : null;
+                  return (
+                    <tr key={`${m.year}-${m.month}`} className="hover:bg-rose-50/20 transition-colors">
+                      <td className="px-6 py-3 text-sm font-medium text-gray-800">
+                        {MONTH_NAMES[m.month - 1]} {m.year}
+                      </td>
+                      <td className="px-6 py-3">
+                        <span className="text-sm font-bold text-rose-600">{m.days}</span>
+                        <span className="text-xs text-gray-400 ml-1">day{m.days !== 1 ? "s" : ""}</span>
+                      </td>
+                      <td className="px-6 py-3 text-sm text-gray-700">
+                        {deduction != null ? <span className="text-rose-600 font-semibold">−{formatCurrency(deduction)}</span> : "—"}
+                      </td>
+                      <td className="px-6 py-3 text-xs text-gray-500">
+                        {m.leaves.map((l: any) => `${EMP_LEAVE_LABEL[l.leaveType] ?? l.leaveType} (${l.lopDays}d)`).join(", ")}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 // ─── LoP Section (for Leaves tab) ────────────────────────────────────────────
 
 function LopSection({ employeeId, salaryConfig }: { employeeId: string; salaryConfig: any }) {
@@ -2677,6 +3424,83 @@ function EmpFSelect({ label, children, ...props }: { label: string } & React.Sel
   );
 }
 
+function SearchableEmployee({
+  employees,
+  value,
+  onChange,
+  excludeId,
+}: {
+  employees: any[];
+  value: string;
+  onChange: (id: string) => void;
+  excludeId: string;
+}) {
+  const [search, setSearch] = useState("");
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const filtered = employees
+    .filter((e) => e.id !== excludeId)
+    .filter((e) => {
+      if (!search) return true;
+      return `${e.firstName} ${e.lastName} ${e.employeeCode}`.toLowerCase().includes(search.toLowerCase());
+    });
+
+  const selected = employees.find((e) => e.id === value);
+
+  useEffect(() => {
+    function handler(ev: MouseEvent) {
+      if (ref.current && !ref.current.contains(ev.target as Node)) {
+        setOpen(false);
+        setSearch("");
+      }
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative">
+      <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-blue-500">
+        <Search className="h-3.5 w-3.5 text-gray-400 ml-3 shrink-0" />
+        <input
+          type="text"
+          value={open ? search : (selected ? `${selected.firstName} ${selected.lastName} (${selected.employeeCode})` : "")}
+          placeholder={selected ? `${selected.firstName} ${selected.lastName}` : "— None —"}
+          onFocus={() => { setOpen(true); setSearch(""); }}
+          onChange={(e) => { setSearch(e.target.value); setOpen(true); }}
+          className="flex-1 px-2 py-2 text-sm outline-none bg-white"
+        />
+      </div>
+      {open && (
+        <div className="absolute z-50 top-full left-0 right-0 mt-0.5 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+          <button
+            type="button"
+            onMouseDown={() => { onChange(""); setOpen(false); setSearch(""); }}
+            className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:bg-gray-50 border-b border-gray-100"
+          >
+            — None —
+          </button>
+          {filtered.map((e) => (
+            <button
+              key={e.id}
+              type="button"
+              onMouseDown={() => { onChange(e.id); setOpen(false); setSearch(""); }}
+              className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 ${e.id === value ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-800"}`}
+            >
+              {e.firstName} {e.lastName}
+              <span className="text-xs text-gray-400 ml-1.5">({e.employeeCode})</span>
+            </button>
+          ))}
+          {filtered.length === 0 && (
+            <p className="px-3 py-2 text-sm text-gray-400 italic">No employees found</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EditEmploymentInlineForm({
   emp, employeeId, designations, departments, employees, workLocations, onClose,
 }: {
@@ -2728,7 +3552,18 @@ function EditEmploymentInlineForm({
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Read-only fields — same positions as view mode */}
+        <div>
+          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Employee Code</label>
+          <p className="text-sm text-gray-700 font-mono bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">{emp.employeeCode ?? "—"}</p>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Access Role</label>
+          <p className="text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+            {{ EMPLOYEE: "Employee", DEPT_HEAD: "Manager", HR_ADMIN: "HR Admin", SUPER_ADMIN: "Super Admin" }[(emp as any).role as string] ?? (emp as any).role ?? "—"}
+          </p>
+        </div>
         <EmpFSelect label="Status" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
           {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, " ")}</option>)}
         </EmpFSelect>
@@ -2745,24 +3580,28 @@ function EditEmploymentInlineForm({
           <option value="">— Select department —</option>
           {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
         </EmpFSelect>
-        <EmpFSelect label="Reporting To" value={form.reportingToId} onChange={(e) => setForm({ ...form, reportingToId: e.target.value })}>
-          <option value="">— None —</option>
-          {employees.filter((e) => e.id !== employeeId).map((e) => (
-            <option key={e.id} value={e.id}>{e.firstName} {e.lastName} ({e.employeeCode})</option>
-          ))}
-        </EmpFSelect>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Reporting To</label>
+          <SearchableEmployee
+            employees={employees}
+            value={form.reportingToId}
+            onChange={(id) => setForm({ ...form, reportingToId: id })}
+            excludeId={employeeId}
+          />
+        </div>
         <EmpFSelect label="Work Location" value={form.workLocation} onChange={(e) => setForm({ ...form, workLocation: e.target.value })}>
           <option value="">— None —</option>
           {workLocations.map((l) => <option key={l.id} value={l.name}>{l.name}</option>)}
         </EmpFSelect>
       </div>
       <div className="flex gap-3 pt-2 border-t border-gray-100">
-        <button type="button" onClick={onClose} className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">Cancel</button>
+        <button type="button" onClick={onClose} className="px-4 py-2 text-sm border border-gray-200 rounded-md hover:bg-gray-50">Cancel</button>
         <button
           type="button"
           onClick={() => mutation.mutate()}
           disabled={mutation.isPending}
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-60"
+          style={{ backgroundColor: "#2C3E7C" }}
         >
           <Check className="h-4 w-4" />
           {mutation.isPending ? "Saving..." : "Save Changes"}
@@ -2787,51 +3626,13 @@ export default function EmployeeDetailPage() {
   const canEditPhoto = isAdmin || isSelfView;
   const permissions = usePermissions();
 
-  // Map each profile tab to its controlling permission module
-  const TAB_MODULE: Record<string, string> = {
-    personal:  "EMP_PROFILE",
-    education: "EMP_PROFILE",
-    documents: "EMP_DOCUMENTS",
-    salary:    "EMP_SALARY",
-    bank:      "EMP_BANK",
-    payout:    "EMP_PAYOUT",
-    leaves:    "EMP_LEAVES",
-    claims:    "EMP_LEAVES",
-    training:  "TRAINING",
-    policies:  "POLICIES",
-  };
-
-  const canViewTab = (tabId: string) => {
-    const module = TAB_MODULE[tabId];
-    if (!module) return true;
-    return permissions[module]?.canView ?? false;
-  };
-
-  const effectiveNavGroups = isAdmin
-    ? NAV_GROUPS
-        .map((group) => ({
-          ...group,
-          items: group.items.filter((item) => canViewTab(item.id)),
-        }))
-        .filter((group) => group.items.length > 0)
-    : [
-        {
-          label: "Profile",
-          items: [
-            { id: "personal",  label: "Personal",      icon: User     },
-            { id: "documents", label: "Documents",     icon: FileText },
-          ],
-        },
-        {
-          label: "Employment",
-          items: [
-            { id: "education", label: "Education",      icon: GraduationCap },
-            { id: "salary",    label: "Salary",         icon: Wallet        },
-            { id: "bank",      label: "Bank",            icon: CreditCard    },
-            { id: "payout",    label: "Monthly Payout",  icon: TrendingUp    },
-          ],
-        },
-      ];
+  // Employee self-view: only Personal, Documents, Position, Salary
+  const SELF_VIEW_TABS = new Set(["personal", "documents", "position", "salary"]);
+  const visibleTabs = PROFILE_TABS.filter((tab) => {
+    if (isSelfView && !isAdmin) return SELF_VIEW_TABS.has(tab.id);
+    if (!(tab as any).module) return true;
+    return permissions[(tab as any).module]?.canView ?? false;
+  });
   const photoRef = useRef<HTMLInputElement>(null);
   const [photoUploading, setPhotoUploading] = useState(false);
 
@@ -2910,23 +3711,30 @@ export default function EmployeeDetailPage() {
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
   });
 
+  const policyAckMutation = useMutation({
+    mutationFn: (policyId: string) => api.post(`/api/v1/policies/${policyId}/acknowledge`),
+    onSuccess: () => { toast.success("Policy acknowledged"); qc.invalidateQueries({ queryKey: ["policies"] }); },
+    onError: (err: any) => toast.error(err.response?.data?.error ?? "Failed"),
+  });
+
   // Queries
-  const { data: emp, isLoading } = useQuery({
+  const { data: emp, isLoading, isError, refetch } = useQuery({
     queryKey: ["employee", id],
     queryFn: () => api.get(`/api/v1/employees/${id}`).then((r) => r.data.data),
     enabled: !!id,
+    retry: 2,
   });
 
   const { data: qualifications } = useQuery({
     queryKey: ["qualifications", id],
     queryFn: () => api.get(`/api/v1/employees/${id}/qualifications`).then((r) => r.data.data),
-    enabled: activeTab === "education",
+    enabled: activeTab === "documents",
   });
 
   const { data: certifications } = useQuery({
     queryKey: ["certifications", id],
     queryFn: () => api.get(`/api/v1/employees/${id}/certifications`).then((r) => r.data.data),
-    enabled: activeTab === "education",
+    enabled: activeTab === "documents",
   });
 
   const { data: documents } = useQuery({
@@ -2938,13 +3746,13 @@ export default function EmployeeDetailPage() {
   const { data: bankDetails } = useQuery({
     queryKey: ["bank-details", id],
     queryFn: () => api.get(`/api/v1/employees/${id}/bank-details`).then((r) => r.data.data),
-    enabled: activeTab === "bank",
+    enabled: activeTab === "salary",
   });
 
   const { data: salaryConfig } = useQuery({
     queryKey: ["salary-config", id],
     queryFn: () => api.get(`/api/v1/employees/${id}/salary-config`).then((r) => r.data.data),
-    enabled: activeTab === "salary" || activeTab === "payout" || activeTab === "leaves",
+    enabled: activeTab === "salary" || activeTab === "leaves",
   });
 
   const { data: bonusPlans } = useQuery({
@@ -2967,7 +3775,9 @@ export default function EmployeeDetailPage() {
 
   const { data: myLeaves } = useQuery({
     queryKey: ["leaves", id],
-    queryFn: () => api.get(`/api/v1/leaves/my`).then((r) => r.data.data),
+    queryFn: () => isAdmin
+      ? api.get(`/api/v1/leaves/employee/${id}`).then((r) => r.data.data)
+      : api.get(`/api/v1/leaves/my`).then((r) => r.data.data),
     enabled: activeTab === "leaves",
   });
 
@@ -3034,6 +3844,9 @@ export default function EmployeeDetailPage() {
   });
 
   const [showAddDept, setShowAddDept] = useState(false);
+  const [policySearch, setPolicySearch] = useState("");
+  const [policyCategoryFilter, setPolicyCategoryFilter] = useState<"ALL" | PolicyCategory>("ALL");
+  const [viewingPolicy, setViewingPolicy] = useState<any>(null);
   const [addDeptId, setAddDeptId] = useState("");
   const [addDeptIsHead, setAddDeptIsHead] = useState(false);
   const [addDeptLoading, setAddDeptLoading] = useState(false);
@@ -3142,12 +3955,15 @@ export default function EmployeeDetailPage() {
     );
   }
 
-  if (!emp) {
+  if (!emp && !isLoading) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-gray-400">
         <AlertCircle className="h-10 w-10 mb-3" />
-        <p>Employee not found.</p>
-        <button onClick={() => router.back()} className="mt-4 text-sm text-blue-600 hover:underline">Go back</button>
+        <p>{isError ? "Failed to load profile." : "Employee not found."}</p>
+        {isError && (
+          <button onClick={() => refetch()} className="mt-3 text-sm text-blue-600 hover:underline">Try again</button>
+        )}
+        <button onClick={() => router.back()} className="mt-2 text-sm text-blue-600 hover:underline">Go back</button>
       </div>
     );
   }
@@ -3178,196 +3994,169 @@ export default function EmployeeDetailPage() {
         </button>
       )}
 
-      {/* Profile header */}
-      <div className="rounded-xl border border-gray-200 bg-white p-6">
-        <div className="flex items-start gap-5">
-          {/* Avatar or passport photo — click to upload */}
-          <div
-            className={`relative flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white text-2xl font-bold overflow-hidden ${canEditPhoto ? "cursor-pointer group" : ""}`}
-            onClick={() => canEditPhoto && photoRef.current?.click()}
-            title={canEditPhoto ? "Click to change profile photo" : undefined}
-          >
-            {emp.photoUrl ? (
-              <img src={`${API_BASE}${emp.photoUrl}`} alt="photo" className="h-full w-full object-cover" />
-            ) : (
-              getInitials(emp.firstName, emp.lastName)
-            )}
-            {canEditPhoto && (
-              <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                {photoUploading
-                  ? <div className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  : <Camera className="h-6 w-6 text-white" />
-                }
-              </div>
-            )}
-          </div>
-          <input
-            ref={photoRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) handlePhotoUpload(f);
-              e.target.value = "";
-            }}
-          />
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-xl font-bold text-gray-900">
-                {emp.firstName} {emp.middleName ? emp.middleName + " " : ""}{emp.lastName}
-              </h1>
-              <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_COLOR[emp.status] ?? "bg-gray-100 text-gray-700"}`}>
-                {emp.status?.replace("_", " ")}
-              </span>
-            </div>
-            <p className="text-sm text-gray-500 mt-0.5">{emp.designation?.title} · {emp.department?.name}</p>
-            <p className="text-xs font-mono text-gray-400 mt-1">{emp.employeeCode}</p>
-          </div>
-          <div className="hidden sm:flex flex-col gap-1.5 text-xs text-gray-500 shrink-0">
-            {adminCanEdit("EMP_PROFILE") && (
-              <button
-                onClick={() => { setResetResult(null); setShowResetModal(true); }}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-medium text-orange-700 hover:bg-orange-100 transition-colors mb-1"
+      {/* Profile header — navy banner */}
+      <div className="rounded-xl overflow-hidden" style={{ backgroundColor: "#2C3E7C" }}>
+        <div className="px-6 py-6">
+          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+            {/* Left: avatar + info */}
+            <div className="flex items-start gap-4">
+              <div
+                className={`relative flex h-20 w-20 shrink-0 items-center justify-center rounded-xl border-4 border-white/30 text-white text-2xl font-bold overflow-hidden ${canEditPhoto ? "cursor-pointer group" : ""}`}
+                style={{ backgroundColor: "#1a2d5a" }}
+                onClick={() => canEditPhoto && photoRef.current?.click()}
+                title={canEditPhoto ? "Click to change profile photo" : undefined}
               >
-                <KeyRound className="h-3.5 w-3.5" /> Reset Password
-              </button>
-            )}
-            <span className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5" />{emp.email}</span>
-            <span className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5" />{emp.personalPhone}</span>
-            {addr && <span className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5" />{addr.city}, {addr.state}</span>}
-          </div>
-        </div>
-      </div>
-
-      {/* Nav + content */}
-      <div className={isAdmin ? "flex gap-6 items-start" : "space-y-4"}>
-
-        {/* ── Admin: sidebar nav ── */}
-        {isAdmin && (
-          <nav className="w-44 shrink-0 space-y-5 sticky top-6">
-            {effectiveNavGroups.map((group) => (
-              <div key={group.label}>
-                <p className="px-3 mb-1 text-[10px] font-bold uppercase tracking-widest text-gray-400">{group.label}</p>
-                <div className="space-y-0.5">
-                  {group.items.map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <button
-                        key={item.id}
-                        onClick={() => setActiveTab(item.id)}
-                        className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                          activeTab === item.id
-                            ? "bg-blue-600 text-white shadow-sm"
-                            : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                        }`}
-                      >
-                        <Icon className="h-4 w-4 shrink-0" />
-                        {item.label}
-                      </button>
-                    );
-                  })}
+                {emp.photoUrl ? (
+                  <img src={resolvePhotoUrl(emp.photoUrl)!} alt="photo" className="h-full w-full object-cover" />
+                ) : (
+                  getInitials(emp.firstName, emp.lastName)
+                )}
+                {canEditPhoto && (
+                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    {photoUploading
+                      ? <div className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      : <Camera className="h-6 w-6 text-white" />
+                    }
+                  </div>
+                )}
+              </div>
+              <input
+                ref={photoRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handlePhotoUpload(f);
+                  e.target.value = "";
+                }}
+              />
+              <div>
+                <div className="flex items-center gap-3 flex-wrap mb-1">
+                  <h1 className="text-xl font-bold text-white">
+                    {emp.firstName} {emp.middleName ? emp.middleName + " " : ""}{emp.lastName}
+                  </h1>
+                  <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold bg-white/15 text-white border border-white/30`}>
+                    {emp.status?.replace(/_/g, " ")}
+                  </span>
+                </div>
+                <p className="text-white/80 text-sm mb-1">{emp.designation?.title} · {emp.department?.name}</p>
+                <p className="text-white/50 text-xs font-mono mb-2">{emp.employeeCode}</p>
+                <div className="flex flex-wrap items-center gap-4 text-xs text-white/70">
+                  <span className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5" />{emp.email}</span>
+                  {emp.personalPhone && <span className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5" />{emp.personalPhone}</span>}
+                  {addr?.city && <span className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5" />{addr.city}{addr.state ? `, ${addr.state}` : ""}</span>}
                 </div>
               </div>
-            ))}
-            <div>
-              <p className="px-3 mb-1 text-[10px] font-bold uppercase tracking-widest text-gray-400">Admin</p>
-              <div className="space-y-0.5">
-                <button
-                  onClick={() => setActiveTab("team")}
-                  className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                    activeTab === "team"
-                      ? "bg-purple-600 text-white shadow-sm"
-                      : "text-purple-600 hover:bg-purple-50 hover:text-purple-800"
-                  }`}
-                >
-                  <UsersRound className="h-4 w-4 shrink-0" />
-                  Team
-                </button>
-              </div>
             </div>
-          </nav>
-        )}
 
-        {/* ── Employee: tab bar ── */}
-        {!isAdmin && (
-          <div className="flex gap-1 border-b border-gray-200 pb-px">
-            {effectiveNavGroups.flatMap((g) => g.items).map((item) => {
-              const Icon = item.icon;
-              return (
+            {/* Right: action buttons */}
+            <div className="flex flex-wrap gap-2 shrink-0">
+              {adminCanEdit("EMP_PROFILE") && (
                 <button
-                  key={item.id}
-                  onClick={() => setActiveTab(item.id)}
-                  className={`inline-flex items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                    activeTab === item.id
-                      ? "border-blue-600 text-blue-600"
-                      : "border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300"
-                  }`}
+                  onClick={() => { setResetResult(null); setShowResetModal(true); }}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-white/30 px-3 py-2 text-xs font-medium text-white hover:bg-white/10 transition-colors"
                 >
-                  <Icon className="h-4 w-4" />
-                  {item.label}
+                  <KeyRound className="h-3.5 w-3.5" /> Reset Password
                 </button>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Content */}
-        <div className={isAdmin ? "flex-1 min-w-0 space-y-4" : "space-y-4"}>
-
-        {/* ── Personal ── */}
-        {activeTab === "personal" && (
-          <div className="space-y-4">
-            {/* Edit / View toggle bar */}
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-gray-400">
-                {editingPersonal
-                  ? "Edit your contact, address and emergency details below."
-                  : "View your personal profile information."}
-              </p>
-              {canEdit && !editingPersonal && (
+              )}
+              <button
+                onClick={() => {}}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-white/30 px-3 py-2 text-xs font-medium text-white hover:bg-white/10 transition-colors"
+              >
+                <Download className="h-3.5 w-3.5" /> Export
+              </button>
+              {canEdit && (
                 <button
                   onClick={() => setEditingPersonal(true)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-xs font-medium hover:bg-white/90 transition-colors"
+                  style={{ color: "#2C3E7C" }}
                 >
                   <Pencil className="h-3.5 w-3.5" /> Edit Profile
                 </button>
               )}
             </div>
+          </div>
+        </div>
+      </div>
 
+      {/* Unified horizontal tab bar + content */}
+      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+        {/* Tab bar */}
+        <div className="border-b border-gray-200 overflow-x-auto">
+          <div className="flex px-2 min-w-max">
+            {visibleTabs.map((tab) => {
+              const Icon = tab.icon;
+              const active = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`inline-flex items-center gap-1.5 whitespace-nowrap px-4 py-3.5 text-sm font-medium border-b-2 transition-colors ${
+                    active ? "font-semibold" : "border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300"
+                  }`}
+                  style={active ? { borderColor: "#2C3E7C", color: "#2C3E7C" } : {}}
+                >
+                  <Icon className="h-4 w-4 shrink-0" />
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="p-6 space-y-4">
+
+        {/* ── Personal ── */}
+        {activeTab === "personal" && (
+          <>
             {editingPersonal ? (
               <EditPersonalForm emp={emp} employeeId={id} onClose={() => setEditingPersonal(false)} />
             ) : (
-            <><Section title="Personal Information">
-              <Field label="First Name" value={emp.firstName} />
-              <Field label="Middle Name" value={emp.middleName} />
-              <Field label="Last Name" value={emp.lastName} />
-              <Field label="Gender" value={emp.gender} />
-              <Field label="Date of Birth" value={emp.dateOfBirth ? formatDate(emp.dateOfBirth) : null} />
-              <Field label="Marital Status" value={emp.maritalStatus} />
-              <Field label="Blood Group" value={emp.bloodGroup?.replace("_", " ")} />
-              <Field label="Nationality" value={emp.nationality} />
-              <Field label="Religion" value={emp.religion} />
-              <Field
-                label="PAN Number"
-                value={emp.pan ?? <span className="text-red-500 text-xs font-medium">Not on file — please update</span>}
-              />
-            </Section>
-            <Section title="Contact">
-              <Field label="Personal Phone" value={emp.personalPhone} />
-              <Field label="Official Phone" value={emp.officialPhone} />
-              <Field label="Official Email" value={emp.email} />
-              <Field label="Personal Email" value={emp.personalEmail} />
-            </Section>
-            <Section title="Current Address">
-              <Field label="Line 1" value={addr?.line1} />
-              <Field label="Line 2" value={addr?.line2} />
-              <Field label="City" value={addr?.city} />
-              <Field label="State" value={addr?.state} />
-              <Field label="Pincode" value={addr?.pincode} />
-              <Field label="Country" value={addr?.country} />
-            </Section>
-            {permAddr && (
+            <div className="space-y-6">
+              {/* Header row */}
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-gray-600">View your personal profile information.</p>
+                {canEdit && (
+                  <button
+                    onClick={() => setEditingPersonal(true)}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium text-white"
+                    style={{ backgroundColor: "#2C3E7C" }}
+                  >
+                    <Pencil className="h-4 w-4" /> Edit Profile
+                  </button>
+                )}
+              </div>
+
+              <Section title="Personal Information" first>
+                <Field label="First Name" value={emp.firstName} />
+                <Field label="Middle Name" value={emp.middleName} />
+                <Field label="Last Name" value={emp.lastName} />
+                <Field label="Gender" value={emp.gender} />
+                <Field label="Date of Birth" value={emp.dateOfBirth ? formatDate(emp.dateOfBirth) : null} />
+                <Field label="Marital Status" value={emp.maritalStatus} />
+                <Field label="Nationality" value={emp.nationality} />
+                <Field label="Blood Group" value={emp.bloodGroup?.replace("_", " ")} />
+                <Field label="Religion" value={emp.religion} />
+                <Field label="PAN Number" value={emp.pan ?? null} />
+                <Field label="Aadhaar Number" value={emp.aadhaar ?? null} />
+                <Field label="UAN Number" value={emp.uanNumber ?? null} />
+              </Section>
+              <Section title="Contact" cols={2}>
+                <Field label="Personal Phone" value={emp.personalPhone} />
+                <Field label="Official Phone" value={emp.officialPhone} />
+                <Field label="Official Email" value={emp.email} />
+                <Field label="Personal Email" value={emp.personalEmail} />
+              </Section>
+              <Section title="Current Address">
+                <Field label="Line 1" value={addr?.line1} />
+                <Field label="Line 2" value={addr?.line2} />
+                <Field label="City" value={addr?.city} />
+                <Field label="State" value={addr?.state} />
+                <Field label="Pincode" value={addr?.pincode} />
+                <Field label="Country" value={addr?.country} />
+              </Section>
               <Section title="Permanent Address">
                 <Field label="Line 1" value={permAddr?.line1} />
                 <Field label="Line 2" value={permAddr?.line2} />
@@ -3376,13 +4165,17 @@ export default function EmployeeDetailPage() {
                 <Field label="Pincode" value={permAddr?.pincode} />
                 <Field label="Country" value={permAddr?.country} />
               </Section>
-            )}
-            <Section title="Emergency Contact">
-              <Field label="Name" value={emp.emergencyContactName} />
-              <Field label="Phone" value={emp.emergencyContactPhone} />
-              <Field label="Relation" value={emp.emergencyRelation} />
-            </Section>
-            <div className="rounded-xl border border-gray-100 bg-gray-50 p-5">
+              <Section title="Emergency Contact">
+                <Field label="Name" value={emp.emergencyContactName} />
+                <Field label="Phone" value={emp.emergencyContactPhone} />
+                <Field label="Relation" value={emp.emergencyRelation} />
+              </Section>
+            {/* Employment & Dept Memberships moved to Position tab */}
+            <div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
+              <p className="text-xs text-amber-700">Employment details and department memberships are available under the <strong>Position</strong> tab.</p>
+            </div>
+            <div className="rounded-xl border border-gray-100 bg-gray-50 p-5 hidden">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Employment</h3>
                 <div className="flex items-center gap-2">
@@ -3490,7 +4283,7 @@ export default function EmployeeDetailPage() {
             </div>
 
             {/* ── Department Memberships ── */}
-            <div className="rounded-xl border border-gray-100 bg-gray-50 p-5">
+            <div className="rounded-xl border border-gray-100 bg-gray-50 p-5 hidden">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Department Memberships</h3>
                 {adminCanCreate("EMP_PROFILE") && (
@@ -3647,32 +4440,55 @@ export default function EmployeeDetailPage() {
                 </div>
               )}
             </div>
-            </>
+            </div>
             )}
-          </div>
+          </>
         )}
 
-        {/* ── Qualifications ── */}
-        {/* ── Education (Qualifications + Certifications) ── */}
-        {activeTab === "education" && (
+        {/* ── Documents (KYC + educational + other + quals + certs) ── */}
+        {activeTab === "documents" && (
           <div className="space-y-6">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-700 mb-1">Identity & KYC Documents</h2>
+              <p className="text-xs text-gray-400 mb-4">Upload official documents for identity verification and records. Accepted: JPG, PNG, PDF (max 5 MB each).</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {KYC_DOC_TYPES.map((docType) => (
+                  <DocumentCard key={docType} docType={docType} employeeId={id} existing={docByType[docType] ?? null} canWrite={adminCanCreate("EMP_DOCUMENTS") || adminCanDelete("EMP_DOCUMENTS") || isSelfView} />
+                ))}
+              </div>
+            </div>
+
+            <hr className="border-gray-100" />
+
             {/* Academic Qualifications */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-gray-700">Academic Qualifications</h2>
+                <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  <GraduationCap className="h-4 w-4" style={{ color: "#2C3E7C" }} />
+                  Academic Qualifications
+                </h2>
                 {(adminCanCreate("EMP_PROFILE") || isSelfView) && (
                   <button
                     onClick={() => setShowAddQual(true)}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                    className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-white"
+                    style={{ backgroundColor: "#2C3E7C" }}
                   >
                     <Plus className="h-3.5 w-3.5" /> Add Qualification
                   </button>
                 )}
               </div>
 
+              {qualifications && qualifications.length === 0 && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
+                  <p className="text-xs text-red-700 font-medium">At least one educational qualification is required. Please add your highest qualification.</p>
+                </div>
+              )}
+
               {["SCHOOL", "UG", "PG", "PHD", "DIPLOMA", "CERTIFICATION", "OTHER"].map((level) => {
                 const items = qualifications?.filter((q: any) => q.level === level) ?? [];
                 if (!items.length) return null;
+                const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
                 return (
                   <div key={level}>
                     <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">{LEVEL_LABELS[level]}</p>
@@ -3685,6 +4501,16 @@ export default function EmployeeDetailPage() {
                               {q.specialization && <p className="text-sm text-blue-600">{q.specialization}</p>}
                               <p className="text-sm text-gray-600">{q.institution}</p>
                               <p className="text-xs text-gray-400">{q.boardUniversity}</p>
+                              {q.documentUrl && (
+                                <a
+                                  href={`${apiBase}${q.documentUrl}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline mt-1"
+                                >
+                                  <Eye className="h-3 w-3" /> View Certificate
+                                </a>
+                              )}
                             </div>
                             <div className="flex items-start gap-3 shrink-0">
                               <div className="text-right">
@@ -3693,11 +4519,7 @@ export default function EmployeeDetailPage() {
                                 {q.cgpa != null && <p className="text-xs text-gray-500">CGPA {q.cgpa}</p>}
                               </div>
                               {(adminCanDelete("EMP_PROFILE") || isSelfView) && (
-                                <button
-                                  onClick={() => deleteQualMutation.mutate(q.id)}
-                                  disabled={deleteQualMutation.isPending}
-                                  className="text-gray-300 hover:text-red-500 transition-colors disabled:opacity-50 mt-0.5"
-                                >
+                                <button onClick={() => deleteQualMutation.mutate(q.id)} disabled={deleteQualMutation.isPending} className="text-gray-300 hover:text-red-500 transition-colors disabled:opacity-50 mt-0.5">
                                   <Trash2 className="h-4 w-4" />
                                 </button>
                               )}
@@ -3709,8 +4531,7 @@ export default function EmployeeDetailPage() {
                   </div>
                 );
               })}
-
-              {!qualifications?.length && <Empty label="No qualifications added yet. Click 'Add Qualification' to get started." />}
+              {!qualifications?.length && qualifications !== undefined && null}
             </div>
 
             <hr className="border-gray-100" />
@@ -3718,17 +4539,20 @@ export default function EmployeeDetailPage() {
             {/* Professional Certifications */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-gray-700">Professional Certifications</h2>
+                <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  <Award className="h-4 w-4" style={{ color: "#2C3E7C" }} />
+                  Professional Certifications
+                </h2>
                 {(adminCanCreate("EMP_PROFILE") || isSelfView) && (
                   <button
                     onClick={() => setShowAddCert(true)}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                    className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-white"
+                    style={{ backgroundColor: "#2C3E7C" }}
                   >
                     <Plus className="h-3.5 w-3.5" /> Add Certification
                   </button>
                 )}
               </div>
-
               {!certifications?.length ? (
                 <Empty label="No certifications added yet." />
               ) : (
@@ -3747,11 +4571,7 @@ export default function EmployeeDetailPage() {
                           {c.isVerified && <span className="inline-flex mt-1 items-center gap-1 text-green-600 font-medium">✓ Verified</span>}
                         </div>
                         {(adminCanDelete("EMP_PROFILE") || isSelfView) && (
-                          <button
-                            onClick={() => deleteCertMutation.mutate(c.id)}
-                            disabled={deleteCertMutation.isPending}
-                            className="text-gray-300 hover:text-red-500 transition-colors disabled:opacity-50 mt-0.5"
-                          >
+                          <button onClick={() => deleteCertMutation.mutate(c.id)} disabled={deleteCertMutation.isPending} className="text-gray-300 hover:text-red-500 transition-colors disabled:opacity-50 mt-0.5">
                             <Trash2 className="h-4 w-4" />
                           </button>
                         )}
@@ -3764,298 +4584,366 @@ export default function EmployeeDetailPage() {
           </div>
         )}
 
-        {/* ── Documents ── */}
-        {activeTab === "documents" && (
+        {/* ── Position (employment details + dept memberships) ── */}
+        {activeTab === "position" && (
           <div className="space-y-6">
+            {/* Employment details */}
             <div>
-              <h2 className="text-sm font-semibold text-gray-700 mb-1">Identity & KYC Documents</h2>
-              <p className="text-xs text-gray-400 mb-4">Upload official documents for identity verification and records. Accepted: JPG, PNG, PDF (max 5 MB each).</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {KYC_DOC_TYPES.map((docType) => (
-                  <DocumentCard key={docType} docType={docType} employeeId={id} existing={docByType[docType] ?? null} canWrite={adminCanCreate("EMP_DOCUMENTS") || adminCanDelete("EMP_DOCUMENTS") || isSelfView} />
-                ))}
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">Employment</h3>
+                <div className="flex items-center gap-2">
+                  {isSelf && !isAdmin && (
+                    <span className="text-xs text-gray-400 italic">Managed by HR</span>
+                  )}
+                  {adminCanEdit("EMP_PROFILE") && !editingEmployment && (
+                    <button
+                      onClick={() => setEditingEmployment(true)}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium text-white"
+                      style={{ backgroundColor: "#2C3E7C" }}
+                    >
+                      <Pencil className="h-4 w-4" /> Edit
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
 
+              {editingEmployment ? (
+                <EditEmploymentInlineForm
+                  emp={emp}
+                  employeeId={id}
+                  designations={allDesignations}
+                  departments={allDepts}
+                  employees={allEmployeesList}
+                  workLocations={profileWorkLocations}
+                  onClose={() => setEditingEmployment(false)}
+                />
+              ) : (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Employee Code</label>
+                  <p className="text-sm text-gray-900 font-mono">{emp.employeeCode ?? "—"}</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Access Role</label>
+                  {isSA && editingRole ? (
+                    <div className="flex items-center gap-1">
+                      <select autoFocus value={roleDraft} onChange={(e) => setRoleDraft(e.target.value)}
+                        className="rounded border border-blue-400 px-2 py-0.5 text-sm focus:outline-none bg-white">
+                        <option value="EMPLOYEE">Employee</option>
+                        <option value="DEPT_HEAD">Manager (Dept Head)</option>
+                        <option value="HR_ADMIN">HR Admin</option>
+                        <option value="SUPER_ADMIN">Super Admin</option>
+                        {customRoles.length > 0 && <option disabled>──────────</option>}
+                        {customRoles.map((r) => (<option key={r.name} value={r.name}>{r.label}</option>))}
+                      </select>
+                      <button onClick={async () => {
+                        try {
+                          await api.patch(`/api/v1/employees/${id}`, { role: roleDraft });
+                          await queryClient.invalidateQueries({ queryKey: ["employee", id] });
+                          toast.success("Role updated");
+                          setEditingRole(false);
+                        } catch (err: any) { toast.error(err.response?.data?.error ?? "Update failed"); }
+                      }} className="text-green-600 hover:text-green-800"><Check className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => setEditingRole(false)} className="text-gray-400 hover:text-gray-600"><X className="h-3.5 w-3.5" /></button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm text-gray-900">
+                        {{ EMPLOYEE: "Employee", DEPT_HEAD: "Manager", HR_ADMIN: "HR Admin", SUPER_ADMIN: "Super Admin" }[(emp as any).role as string] ?? (emp as any).role ?? "—"}
+                      </p>
+                      {isSA && (
+                        <button onClick={() => { setRoleDraft((emp as any).role ?? "EMPLOYEE"); setEditingRole(true); }}
+                          className="text-gray-300 hover:text-blue-500 transition-colors" title="Change role">
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Status</label>
+                  {emp.status ? (
+                    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_COLOR[emp.status] ?? "bg-gray-100 text-gray-700"}`}>
+                      {emp.status.replace(/_/g, " ")}
+                    </span>
+                  ) : <p className="text-sm text-gray-900">—</p>}
+                </div>
+                <Field label="Employment Type" value={emp.employmentType?.replace(/_/g, " ")} />
+                <Field label="Joining Date" value={emp.joiningDate ? formatDate(emp.joiningDate) : null} />
+                <Field label="Confirmation Date" value={emp.confirmationDate ? formatDate(emp.confirmationDate) : null} />
+                <Field label="Designation" value={emp.designation?.title} />
+                <Field label="Department" value={emp.department?.name} />
+                <Field label="Reporting To" value={emp.reportingTo ? `${emp.reportingTo.firstName} ${emp.reportingTo.lastName}` : null} />
+                <Field label="Work Location" value={(emp as any).workLocation} />
+              </div>
+              )}
+            </div>
+            <div className="border-t border-gray-200" />
+
+            {/* Department Memberships */}
             <div>
-              <h2 className="text-sm font-semibold text-gray-700 mb-1">Educational Documents</h2>
-              <p className="text-xs text-gray-400 mb-4">Upload degree certificates and educational qualifications. Accepted: JPG, PNG, PDF (max 5 MB each).</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {EDU_DOC_TYPES.map((docType) => (
-                  <DocumentCard key={docType} docType={docType} employeeId={id} existing={docByType[docType] ?? null} canWrite={adminCanCreate("EMP_DOCUMENTS") || adminCanDelete("EMP_DOCUMENTS") || isSelfView} />
-                ))}
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">Department Memberships</h3>
+                {adminCanCreate("EMP_PROFILE") && (
+                  <button
+                    onClick={() => setShowAddDept(true)}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium text-white"
+                    style={{ backgroundColor: "#2C3E7C" }}
+                  >
+                    <Plus className="h-4 w-4" /> Add Department
+                  </button>
+                )}
               </div>
-            </div>
 
-            <OtherDocumentsSection
-              employeeId={id}
-              docs={(documents ?? []).filter((d: any) => d.type === "OTHER")}
-              canWrite={adminCanCreate("EMP_DOCUMENTS") || adminCanDelete("EMP_DOCUMENTS") || isSelfView}
-            />
+              <div className="space-y-2">
+                {changingPrimaryDept ? (
+                  <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50/50 px-4 py-3">
+                    <Building2 className="h-4 w-4 text-blue-400 shrink-0" />
+                    <select autoFocus value={newPrimaryDeptId} onChange={(e) => setNewPrimaryDeptId(e.target.value)}
+                      className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      <option value="">— Select new primary department —</option>
+                      {allDepts.filter((d) => d.id !== emp.departmentId).map((d) => (
+                        <option key={d.id} value={d.id}>{d.name} ({d.code})</option>
+                      ))}
+                    </select>
+                    <button onClick={handleChangePrimaryDept} disabled={!newPrimaryDeptId || changingPrimaryLoading}
+                      className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+                      <Check className="h-3.5 w-3.5" /> Save
+                    </button>
+                    <button onClick={() => { setChangingPrimaryDept(false); setNewPrimaryDeptId(""); }} className="p-1 rounded text-gray-400 hover:text-gray-600">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <Building2 className="h-4 w-4 text-blue-400 shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">{emp.department?.name}</p>
+                        <p className="text-xs text-gray-400">{emp.department?.code}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs bg-blue-50 text-blue-600 border border-blue-100 rounded-full px-2.5 py-0.5 font-medium">Primary</span>
+                      {adminCanEdit("EMP_PROFILE") && (
+                        <button onClick={() => { setNewPrimaryDeptId(""); setChangingPrimaryDept(true); }}
+                          className="text-xs text-gray-400 hover:text-blue-600 font-medium hover:underline" title="Change primary department">
+                          Change
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {deptMemberships?.additional.map((m) => (
+                  <div key={m.membershipId} className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <Building2 className="h-4 w-4 text-gray-400 shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">{m.name}</p>
+                        <p className="text-xs text-gray-400">{m.code}{m.addedBy ? ` · Added by ${m.addedBy}` : ""}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {adminCanEdit("EMP_PROFILE") ? (
+                        <button onClick={() => handleToggleHead(m.id, m.isHead)} title={m.isHead ? "Remove as Head of Department" : "Set as Head of Department"}
+                          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium border transition-colors ${m.isHead ? "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100" : "bg-gray-50 text-gray-400 border-gray-200 hover:border-amber-200 hover:text-amber-600"}`}>
+                          <Star className={`h-3 w-3 ${m.isHead ? "fill-amber-500 text-amber-500" : ""}`} />
+                          {m.isHead ? "HoD" : "Set HoD"}
+                        </button>
+                      ) : m.isHead ? (
+                        <span className="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-2.5 py-0.5 font-medium">
+                          <Star className="h-3 w-3 fill-amber-500 text-amber-500" /> HoD
+                        </span>
+                      ) : null}
+                      {adminCanDelete("EMP_PROFILE") && (
+                        <button onClick={() => handleRemoveDept(m.id)} className="p-1 rounded text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors">
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {deptMemberships && deptMemberships.additional.length === 0 && (
+                  <p className="text-xs text-gray-400 italic px-1">No additional department memberships.</p>
+                )}
+              </div>
+
+              {showAddDept && (
+                <div className="mt-3 flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50/50 p-3">
+                  <Building2 className="h-4 w-4 text-blue-400 shrink-0" />
+                  <select value={addDeptId} onChange={(e) => setAddDeptId(e.target.value)}
+                    className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+                    <option value="">Select department…</option>
+                    {allDepts
+                      .filter((d) => d.id !== emp.department?.id && !deptMemberships?.additional.some((m) => m.id === d.id))
+                      .map((d) => (<option key={d.id} value={d.id}>{d.name}</option>))}
+                  </select>
+                  <label className="flex items-center gap-1.5 text-xs text-gray-600 whitespace-nowrap cursor-pointer select-none">
+                    <input type="checkbox" checked={addDeptIsHead} onChange={(e) => setAddDeptIsHead(e.target.checked)} className="h-3.5 w-3.5 rounded" />
+                    Head of Dept
+                  </label>
+                  <button onClick={handleAddDept} disabled={!addDeptId || addDeptLoading}
+                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                    {addDeptLoading ? "Adding…" : "Add"}
+                  </button>
+                  <button onClick={() => { setShowAddDept(false); setAddDeptId(""); setAddDeptIsHead(false); }} className="p-1 rounded text-gray-400 hover:text-gray-600">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
         {/* ── Salary ── */}
         {activeTab === "salary" && (
-          <div className="space-y-4">
-            {/* Permanent salary structure — first */}
-            <CollapsibleCard
-              title="Salary Structure"
-              icon={Wallet}
-              defaultOpen={true}
-              action={
-                adminCanEdit("EMP_SALARY") && !editingSalary ? (
-                  <button
-                    onClick={() => setEditingSalary(true)}
-                    className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                    {salaryConfig ? "Edit" : "Add Salary"}
-                  </button>
-                ) : undefined
-              }
-            >
-              {editingSalary ? (
-                <SalaryEditForm
-                  employeeId={id}
-                  employmentType={emp?.employmentType ?? "FULL_TIME"}
-                  existing={salaryConfig}
-                  onClose={() => setEditingSalary(false)}
-                />
-              ) : salaryConfig ? (
-                <SalaryConfigCard
-                  config={salaryConfig}
-                  hasActivePlan={(bonusPlans ?? []).some((p: any) => p.status === "ACTIVE")}
-                />
-              ) : (
-                <div className="px-5 py-8 text-center text-sm text-gray-400">
-                  No salary structure defined yet.
-                  {adminCanEdit("EMP_SALARY") && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Main content — 2/3 width */}
+            <div className="lg:col-span-2 space-y-4">
+              {/* Salary Structure */}
+              <CollapsibleCard
+                title="Salary Structure"
+                icon={Wallet}
+                defaultOpen={true}
+                action={
+                  adminCanEdit("EMP_SALARY") && !editingSalary ? (
                     <button
                       onClick={() => setEditingSalary(true)}
-                      className="ml-2 text-blue-600 hover:text-blue-800 font-medium"
+                      className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium"
                     >
-                      Add now
+                      <Pencil className="h-3.5 w-3.5" />
+                      {salaryConfig ? "Edit" : "Add Salary"}
+                    </button>
+                  ) : undefined
+                }
+              >
+                {editingSalary ? (
+                  <SalaryEditForm
+                    employeeId={id}
+                    employmentType={emp?.employmentType ?? "FULL_TIME"}
+                    existing={salaryConfig}
+                    onClose={() => setEditingSalary(false)}
+                  />
+                ) : salaryConfig ? (
+                  <SalaryConfigCard
+                    config={salaryConfig}
+                    hasActivePlan={(bonusPlans ?? []).some((p: any) => p.status === "ACTIVE")}
+                  />
+                ) : (
+                  <div className="px-5 py-8 text-center text-sm text-gray-400">
+                    No salary structure defined yet.
+                    {adminCanEdit("EMP_SALARY") && (
+                      <button
+                        onClick={() => setEditingSalary(true)}
+                        className="ml-2 text-blue-600 hover:text-blue-800 font-medium"
+                      >
+                        Add now
+                      </button>
+                    )}
+                  </div>
+                )}
+              </CollapsibleCard>
+
+              {/* Bonus Plans */}
+              <BonusPlansCard
+                employeeId={id}
+                canAppraise={isAdmin || currentUser?.role === "DEPT_HEAD"}
+              />
+
+              {/* Monthly Payout */}
+              <MonthlySalarySlip employeeId={id} salaryConfig={salaryConfig} />
+            </div>
+
+            {/* Bank details sidebar — 1/3 width */}
+            <div className="space-y-4">
+              <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+                {/* Sidebar header */}
+                <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                  <div className="flex items-center gap-2">
+                    <CreditCard className="h-4 w-4 text-gray-400" />
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Bank Account Details</p>
+                  </div>
+                  {(adminCanCreate("EMP_BANK") || isSelfView) && (
+                    <button
+                      onClick={() => setShowAddBank(true)}
+                      className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800"
+                    >
+                      <Plus className="h-3 w-3" /> Add
                     </button>
                   )}
                 </div>
-              )}
-            </CollapsibleCard>
 
-            {/* Bonus plans — second */}
-            <BonusPlansCard
-              employeeId={id}
-              canAppraise={isAdmin || currentUser?.role === "DEPT_HEAD"}
-            />
-          </div>
-        )}
-
-        {/* ── Bank ── */}
-        {activeTab === "bank" && (
-          <div className="space-y-4">
-            <CollapsibleCard
-              title="Bank Accounts"
-              icon={Building2}
-              defaultOpen={true}
-              action={
-                (adminCanCreate("EMP_BANK") || isSelfView) ? (
-                  <button
-                    onClick={() => setShowAddBank(true)}
-                    className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium"
-                  >
-                    <Plus className="h-3.5 w-3.5" /> Add Account
-                  </button>
-                ) : undefined
-              }
-            >
-              {!bankDetails?.length ? (
-                <div className="py-8 text-center text-sm text-gray-400">
-                  No bank accounts added. Add one for salary credit.
-                </div>
-              ) : (
-                <div className="divide-y divide-gray-50">
-                  {bankDetails.map((b: any) => (
-                    <div key={b.id} className="px-5 py-4 flex items-start justify-between">
-                      <div className="flex items-start gap-3">
-                        <CreditCard className="h-5 w-5 text-gray-400 mt-0.5 shrink-0" />
-                        <div>
+                {!bankDetails?.length ? (
+                  <div className="px-5 py-8 text-center text-sm text-gray-400">
+                    No bank account added.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-gray-50">
+                    {bankDetails.map((b: any) => (
+                      <div key={b.id} className="px-5 py-5 space-y-3">
+                        {/* Primary badge + edit/delete */}
+                        <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <p className="text-sm font-semibold text-gray-800">{b.bankName}</p>
+                            <p className="text-sm font-semibold text-gray-900">{b.bankName}</p>
                             {b.isPrimary && (
                               <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">Primary</span>
                             )}
                           </div>
-                          <p className="text-xs text-gray-500 mt-0.5">{b.accountName}</p>
-                          <p className="text-xs font-mono text-gray-400 mt-0.5">
-                            ••••{b.accountNumber.slice(-4)} · IFSC: {b.ifscCode}
-                          </p>
-                          <p className="text-xs text-gray-400">{b.branchName}</p>
+                          <div className="flex items-center gap-1.5">
+                            {(adminCanEdit("EMP_BANK") || isSelfView) && (
+                              <button onClick={() => setEditingBank(b)} className="p-1 text-gray-300 hover:text-blue-500 rounded transition-colors" title="Edit">
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                            {(adminCanDelete("EMP_BANK") || isSelfView) && (
+                              <button onClick={() => deleteBankMutation.mutate(b.id)} disabled={deleteBankMutation.isPending} className="p-1 text-gray-300 hover:text-red-500 rounded transition-colors disabled:opacity-50">
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
+                        {/* Details */}
+                        {[
+                          { label: "Account Number", value: `XXXX XXXX XXXX ${b.accountNumber.slice(-4)}` },
+                          { label: "IFSC Code",      value: b.ifscCode },
+                          { label: "Branch",         value: b.branchName },
+                          { label: "Account Holder", value: b.accountName },
+                        ].map(({ label, value }) => (
+                          <div key={label}>
+                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{label}</p>
+                            <p className="text-sm text-gray-800 mt-0.5">{value}</p>
+                          </div>
+                        ))}
+                        {/* Edit button */}
                         {(adminCanEdit("EMP_BANK") || isSelfView) && (
                           <button
                             onClick={() => setEditingBank(b)}
-                            className="text-gray-300 hover:text-blue-500 transition-colors"
-                            title="Edit"
+                            className="mt-2 w-full py-2 rounded-lg text-sm font-medium text-white flex items-center justify-center gap-2"
+                            style={{ backgroundColor: "#2C3E7C" }}
                           >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                        {(adminCanDelete("EMP_BANK") || isSelfView) && (
-                          <button
-                            onClick={() => deleteBankMutation.mutate(b.id)}
-                            disabled={deleteBankMutation.isPending}
-                            className="text-gray-300 hover:text-red-500 transition-colors disabled:opacity-50"
-                          >
-                            <Trash2 className="h-4 w-4" />
+                            <Pencil className="h-3.5 w-3.5" /> Edit Bank Details
                           </button>
                         )}
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CollapsibleCard>
-          </div>
-        )}
-
-        {/* ── Monthly Payout ── */}
-        {activeTab === "payout" && (
-          <div className="space-y-4">
-            <MonthlySalarySlip employeeId={id} salaryConfig={salaryConfig} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
         {/* ── Leaves ── */}
         {activeTab === "leaves" && (
-          <div className="space-y-4">
-            {/* Leave policy banner */}
-            {myLeavePolicy ? (
-              <div className="rounded-xl border border-blue-200 bg-blue-50 px-5 py-3 flex items-start gap-3">
-                <CalendarOff className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-blue-900">{myLeavePolicy.name}</p>
-                  <p className="text-xs text-blue-600 mt-0.5">
-                    Your leave entitlements:{" "}
-                    {(myLeavePolicy.rules as any[]).filter((r: any) => r.daysPerYear > 0)
-                      .map((r: any) => `${r.daysPerYear} ${r.leaveType.charAt(0) + r.leaveType.slice(1).toLowerCase().replace("_", " ")}`)
-                      .join(" · ")}
-                  </p>
-                </div>
-              </div>
-            ) : !leaveBalances?.length ? (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-700">
-                No leave policy assigned to your grade yet. Contact HR to set up your leave entitlements.
-              </div>
-            ) : null}
-
-            {/* Leave balance cards — accrual view */}
-            {leaveBalances?.length > 0 && (
-              <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-                <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
-                  <p className="font-semibold text-gray-900 text-sm">Leave Balance Summary</p>
-                  <p className="text-xs text-gray-400">
-                    {(() => { const d = new Date(); const fy = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1; return `FY ${fy}–${fy + 1} · accrued monthly`; })()}
-                  </p>
-                </div>
-                <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {leaveBalances.map((lb: any) => {
-                    const LEAVE_COLORS: Record<string, { bg: string; accent: string }> = {
-                      CASUAL:       { bg: "bg-blue-50",   accent: "text-blue-600" },
-                      SICK:         { bg: "bg-red-50",    accent: "text-red-600" },
-                      EARNED:       { bg: "bg-green-50",  accent: "text-green-600" },
-                      MATERNITY:    { bg: "bg-pink-50",   accent: "text-pink-600" },
-                      PATERNITY:    { bg: "bg-indigo-50", accent: "text-indigo-600" },
-                      COMPENSATORY: { bg: "bg-orange-50", accent: "text-orange-600" },
-                      UNPAID:       { bg: "bg-gray-50",   accent: "text-gray-600" },
-                      SPECIAL:      { bg: "bg-purple-50", accent: "text-purple-600" },
-                    };
-                    const colors = LEAVE_COLORS[lb.leaveType] ?? { bg: "bg-gray-50", accent: "text-gray-600" };
-                    const pct = lb.accrued > 0 ? Math.min(100, (lb.availed / lb.accrued) * 100) : 0;
-                    return (
-                      <div key={lb.id} className={`rounded-xl p-4 ${colors.bg}`}>
-                        <p className={`text-xs font-semibold uppercase tracking-wide mb-3 ${colors.accent}`}>
-                          {lb.leaveType.replace(/_/g, " ")}
-                        </p>
-                        <div className="space-y-1.5">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-gray-500">Accrued</span>
-                            <span className="font-semibold text-gray-800">{lb.accrued}</span>
-                          </div>
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-gray-500">Availed</span>
-                            <span className="font-semibold text-gray-800">{lb.availed}</span>
-                          </div>
-                          <div className="flex items-center justify-between text-xs border-t border-black/5 pt-1.5">
-                            <span className="text-gray-500">Balance</span>
-                            <span className={`font-bold text-sm ${lb.balance <= 0 ? "text-red-600" : colors.accent}`}>
-                              {lb.balance}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="mt-3 h-1.5 rounded-full bg-black/10 overflow-hidden">
-                          <div
-                            className={`h-full rounded-full ${pct >= 100 ? "bg-red-500" : "bg-current opacity-60"} ${colors.accent}`}
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                        <p className="mt-1 text-right text-[10px] text-gray-400">
-                          {lb.used} used · {lb.pending} pending
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="px-5 py-2.5 border-t border-gray-100 bg-gray-50">
-                  <p className="text-xs text-gray-500">
-                    Annual entitlement:{" "}
-                    {leaveBalances.map((lb: any) =>
-                      `${lb.leaveType.charAt(0) + lb.leaveType.slice(1).toLowerCase().replace(/_/g, " ")} ${lb.allocated}`
-                    ).join(" · ")}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {!myLeaves?.length ? (
-              <Empty label="No leave applications." />
-            ) : (
-              <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-gray-100 bg-gray-50">
-                      <th className="px-5 py-3 text-left text-xs text-gray-500 font-semibold uppercase">Type</th>
-                      <th className="px-5 py-3 text-left text-xs text-gray-500 font-semibold uppercase">From</th>
-                      <th className="px-5 py-3 text-left text-xs text-gray-500 font-semibold uppercase">To</th>
-                      <th className="px-5 py-3 text-left text-xs text-gray-500 font-semibold uppercase">Days</th>
-                      <th className="px-5 py-3 text-left text-xs text-gray-500 font-semibold uppercase">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {myLeaves.map((l: any) => (
-                      <tr key={l.id} className="hover:bg-gray-50 text-sm">
-                        <td className="px-5 py-3">{l.leaveType}</td>
-                        <td className="px-5 py-3">{formatDate(l.fromDate)}</td>
-                        <td className="px-5 py-3">{formatDate(l.toDate)}</td>
-                        <td className="px-5 py-3">{l.totalDays}</td>
-                        <td className="px-5 py-3">
-                          <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
-                            l.status === "APPROVED" ? "bg-green-100 text-green-700" :
-                            l.status === "REJECTED" ? "bg-red-100 text-red-700" :
-                            "bg-yellow-100 text-yellow-700"}`}>
-                            {l.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* Loss of Pay section */}
-            <LopSection employeeId={id} salaryConfig={salaryConfig} />
+          <div className="space-y-5">
+            <EmpBalanceSection
+              balances={leaveBalances ?? []}
+              lopTotal={(myLeaves ?? []).reduce((s: number, l: any) => s + (l.lopDays ?? 0), 0)}
+            />
+            <EmpLeaveHistory leaves={myLeaves ?? []} />
+            <EmpLopHistory leaves={myLeaves ?? []} salaryConfig={salaryConfig} />
           </div>
         )}
 
@@ -4174,26 +5062,130 @@ export default function EmployeeDetailPage() {
         )}
 
         {/* ── Policies ── */}
-        {activeTab === "policies" && (
-          <div className="space-y-3">
-            {!policies?.length ? (
-              <Empty label="No policy documents published." />
-            ) : (
-              policies.map((p: any) => (
-                <div key={p.id} className="rounded-xl border border-gray-200 bg-white p-4 flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-gray-900 text-sm">{p.title}</p>
-                    <p className="text-xs text-gray-400">{p.category} · v{p.version} · {formatDate(p.publishedAt)}</p>
+        {activeTab === "policies" && (() => {
+          const filteredPolicies = (policies ?? []).filter((p: any) => {
+            const q = policySearch.toLowerCase();
+            const matchesSearch = !q ||
+              p.title.toLowerCase().includes(q) ||
+              p.category.toLowerCase().includes(q) ||
+              (p.description ?? "").toLowerCase().includes(q);
+            const matchesCat = policyCategoryFilter === "ALL" || p.category === policyCategoryFilter;
+            return matchesSearch && matchesCat;
+          });
+
+          return (
+            <div className="space-y-4">
+              {/* Search + category filter */}
+              <div className="bg-white rounded-lg border border-gray-200 p-4">
+                <div className="flex flex-col md:flex-row gap-3">
+                  <div className="flex-1 relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
+                    <input
+                      type="text"
+                      placeholder="Search policies..."
+                      value={policySearch}
+                      onChange={(e) => setPolicySearch(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 text-sm"
+                    />
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {p.requiresAck && <span className="text-xs text-orange-600 font-medium">Requires Ack</span>}
-                    <a href={p.fileUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">View</a>
-                  </div>
+                  <select
+                    value={policyCategoryFilter}
+                    onChange={(e) => setPolicyCategoryFilter(e.target.value as "ALL" | PolicyCategory)}
+                    className="px-4 py-2 border border-gray-200 rounded-md text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 bg-white"
+                  >
+                    <option value="ALL">All Categories</option>
+                    {POLICY_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
                 </div>
-              ))
-            )}
-          </div>
-        )}
+              </div>
+
+              {/* Grid */}
+              {filteredPolicies.length === 0 ? (
+                <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
+                  <FileText className="mx-auto text-gray-300 mb-4 h-12 w-12" />
+                  <p className="text-base font-medium text-gray-900 mb-1">
+                    {policySearch || policyCategoryFilter !== "ALL" ? "No matching policies found." : "No policy documents published."}
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    {isAdmin ? "Upload policies from the Policies page." : "Check back later for policy updates."}
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {filteredPolicies.map((p: any) => (
+                    <div key={p.id} className="bg-white rounded-lg border border-gray-200 hover:border-gray-300 transition-all p-5">
+                      {/* Card header */}
+                      <div className="flex items-start gap-3 mb-3">
+                        <div className="w-12 h-12 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: "#2C3E7C" }}>
+                          <FileText className="text-white h-5 w-5" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-base font-semibold text-gray-900 mb-1 leading-snug">{p.title}</h3>
+                          <div className="flex items-center gap-2">
+                            <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${POLICY_CATEGORY_COLOR[p.category as PolicyCategory] ?? "bg-gray-100 text-gray-700"}`}>
+                              {p.category}
+                            </span>
+                            <span className="text-xs text-gray-400">v{p.version}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {p.description && (
+                        <p className="text-xs text-gray-500 mb-3 line-clamp-2">{p.description}</p>
+                      )}
+
+                      {/* Meta */}
+                      <div className="space-y-1.5 mb-4">
+                        <div className="flex items-center gap-2 text-xs text-gray-600">
+                          <Calendar className="h-3 w-3 text-gray-400" />
+                          <span>Published {formatDate(p.publishedAt)}</span>
+                        </div>
+                        {p.requiresAck && (
+                          <div className="flex items-center gap-2 text-xs text-gray-600">
+                            <CheckCircle2 className="h-3 w-3 text-gray-400" />
+                            <span>
+                              {p.myAcknowledgedAt
+                                ? `You acknowledged on ${formatDate(p.myAcknowledgedAt)}`
+                                : "Acknowledgement required"}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setViewingPolicy(p)}
+                          className="flex-1 px-4 py-2 rounded-md text-sm font-medium text-white flex items-center justify-center gap-2 hover:opacity-90"
+                          style={{ backgroundColor: "#2C3E7C" }}
+                        >
+                          <Eye className="h-4 w-4" /> View Policy
+                        </button>
+                        {!isAdmin && p.requiresAck && !p.myAcknowledgedAt && (
+                          <button
+                            onClick={() => policyAckMutation.mutate(p.id)}
+                            disabled={policyAckMutation.isPending}
+                            className="px-4 py-2 border border-gray-200 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5 disabled:opacity-50"
+                          >
+                            <CheckCircle2 className="h-4 w-4 text-green-600" /> Acknowledge
+                          </button>
+                        )}
+                        {!isAdmin && p.requiresAck && p.myAcknowledgedAt && (
+                          <div className="px-3 py-2 flex items-center gap-1.5 text-xs text-green-600 font-medium">
+                            <CheckCircle2 className="h-3.5 w-3.5" /> Acknowledged
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* PDF viewer */}
+              {viewingPolicy && <EmpPdfViewerModal policy={viewingPolicy} onClose={() => setViewingPolicy(null)} />}
+            </div>
+          );
+        })()}
 
         {/* ── Team (admin only) ── */}
         {activeTab === "team" && (
@@ -4228,7 +5220,8 @@ export default function EmployeeDetailPage() {
                         <button
                           onClick={() => addMemberMutation.mutate(emp.id)}
                           disabled={addMemberMutation.isPending}
-                          className="ml-3 shrink-0 inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                          className="ml-3 shrink-0 inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-60"
+                          style={{ backgroundColor: "#2C3E7C" }}
                         >
                           <Plus className="h-3 w-3" /> Add
                         </button>
@@ -4265,7 +5258,7 @@ export default function EmployeeDetailPage() {
                     <li key={tm.id} className="flex items-center gap-3 px-5 py-3">
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-100 text-blue-700 text-xs font-bold overflow-hidden">
                         {tm.member.photoUrl
-                          ? <img src={`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}${tm.member.photoUrl}`} alt="" className="h-full w-full object-cover" />
+                          ? <img src={resolvePhotoUrl(tm.member.photoUrl)!} alt="" className="h-full w-full object-cover" />
                           : `${tm.member.firstName[0]}${tm.member.lastName[0]}`
                         }
                       </div>
