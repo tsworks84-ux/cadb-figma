@@ -7,7 +7,7 @@ import { fileURLToPath } from "url";
 import { pipeline } from "stream/promises";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const LOCAL_UPLOADS = join(__dirname, "../../../uploads");
+const LOCAL_UPLOADS = join(__dirname, "../../uploads");
 
 const REGION = process.env.AWS_REGION ?? "ap-south-1";
 export const BUCKET = process.env.AWS_S3_BUCKET ?? "";

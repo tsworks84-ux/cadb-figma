@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
+import { resolvePhotoUrl } from "@/lib/utils";
 import { usePermissions } from "@/hooks/usePermissions";
 import Image from "next/image";
 import { ArrowLeft } from "lucide-react";
@@ -34,8 +35,6 @@ export function AcademicsTopNav() {
     if (isSuperAdmin || isHRAdmin) return true;
     return permissions[permKey]?.canView ?? false;
   });
-
-  const initials = user ? `${user.firstName[0]}${user.lastName[0]}` : "?";
 
   return (
     <header
@@ -116,15 +115,11 @@ export function AcademicsTopNav() {
           className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-black shrink-0 overflow-hidden"
           style={{ background: "#eef2ff", color: NAV2 }}
         >
-          {user?.photoUrl ? (
-            <img
-              src={`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}${user.photoUrl}`}
-              alt="avatar"
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            initials
-          )}
+          <img
+            src={user?.photoUrl ? resolvePhotoUrl(user.photoUrl)! : "/default-avatar.svg"}
+            alt="avatar"
+            className="h-full w-full object-cover"
+          />
         </div>
 
         <span className="hidden sm:block text-[13px] font-bold" style={{ color: "#e5e7eb" }}>

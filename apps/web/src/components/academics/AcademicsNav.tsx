@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { cn } from "@/lib/utils";
+import { cn, resolvePhotoUrl } from "@/lib/utils";
 import {
   Users2, CalendarDays, School,
   BookOpen, FileCheck2, SlidersHorizontal, ArrowLeft,
@@ -89,10 +89,11 @@ export function AcademicsNav() {
       <div className="border-t border-slate-700 px-4 py-3">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-500 text-xs font-bold overflow-hidden">
-            {user?.photoUrl
-              ? <img src={`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}${user.photoUrl}`} alt="avatar" className="h-full w-full object-cover" />
-              : user ? `${user.firstName[0]}${user.lastName[0]}` : "?"
-            }
+            <img
+              src={user?.photoUrl ? resolvePhotoUrl(user.photoUrl)! : "/default-avatar.svg"}
+              alt="avatar"
+              className="h-full w-full object-cover"
+            />
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-xs font-medium truncate">{user ? `${user.firstName} ${user.lastName}` : "..."}</p>

@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { cn } from "@/lib/utils";
+import { cn, resolvePhotoUrl } from "@/lib/utils";
 import {
   Users, Home, CalendarOff, Receipt, Shield,
   GraduationCap, Settings, LogOut, BarChart3, Building2, User,
-  CalendarDays, UsersRound, ListTodo, Megaphone, BookUser, ClipboardList, School,
+  CalendarDays, UsersRound, ListTodo, Megaphone, ClipboardList, School,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useRouter } from "next/navigation";
@@ -62,13 +62,11 @@ export function Sidebar() {
     { name: "Notice Board", href: "/dashboard/announcements", icon: Megaphone },
     { name: "My Team", href: "/dashboard/my-team", icon: UsersRound },
     { name: "My To-Do", href: "/dashboard/todos", icon: ListTodo },
-    { name: "Leaves", href: "/dashboard/leaves", icon: CalendarOff },
+    { name: "Leaves & Holidays", href: "/dashboard/leaves", icon: CalendarOff },
     ...(isPartTime ? [{ name: "My Timesheet", href: "/dashboard/timesheet", icon: ClipboardList }] : []),
-    { name: "Holidays", href: "/dashboard/holidays", icon: CalendarDays },
     { name: "Claims", href: "/dashboard/claims", icon: Receipt },
     { name: "Policies", href: "/dashboard/policies", icon: Shield },
     { name: "Training", href: "/dashboard/training", icon: GraduationCap },
-    { name: "Directory", href: "/dashboard/directory", icon: BookUser },
     { name: "Settings", href: "/dashboard/settings", icon: Settings },
   ];
 
@@ -185,20 +183,47 @@ export function Sidebar() {
     router.push("/login");
   }
 
+  const isSuperAdmin = role === "SUPER_ADMIN";
+
+  // Light theme for Super Admin, dark theme for everyone else
+  const theme = isSuperAdmin ? {
+    aside: "bg-gray-50 border-r border-gray-200",
+    logoBorder: "border-gray-200",
+    logoSubtitle: "text-xs text-gray-400 uppercase tracking-widest font-medium",
+    sectionLabel: "text-gray-400",
+    activeLink: "bg-[#1e3464] text-white",
+    inactiveLink: "text-gray-600 hover:bg-gray-200 hover:text-gray-900",
+    userBorder: "border-gray-200",
+    userName: "text-gray-900",
+    userRole: "text-gray-500",
+    logoutBtn: "text-gray-400 hover:text-gray-700",
+  } : {
+    aside: "bg-slate-900",
+    logoBorder: "border-slate-700",
+    logoSubtitle: "text-xs text-slate-400",
+    sectionLabel: "text-slate-400",
+    activeLink: "bg-blue-600 text-white",
+    inactiveLink: "text-slate-300 hover:bg-slate-800 hover:text-white",
+    userBorder: "border-slate-700",
+    userName: "text-white",
+    userRole: "text-slate-400",
+    logoutBtn: "text-slate-400 hover:text-white",
+  };
+
   return (
-    <aside className="flex h-screen w-64 flex-col bg-slate-900 text-white">
+    <aside className={cn("flex h-screen w-64 flex-col text-inherit", theme.aside)}>
       {/* Logo */}
-      <div className="flex h-16 items-center gap-3 px-4 border-b border-slate-700">
+      <div className={cn("flex h-16 items-center gap-3 px-4 border-b", theme.logoBorder)}>
         <Image src="/logo.png" alt="Centum Academy" width={36} height={36} className="shrink-0 rounded-full" />
         <div>
-          <p className="font-semibold text-sm leading-tight">Centum Academy</p>
-          <p className="text-xs text-slate-400">Dashboard</p>
+          <p className={cn("font-semibold text-sm leading-tight", isSuperAdmin ? "text-gray-900" : "text-white")}>Centum Academy</p>
+          <p className={theme.logoSubtitle}>{isSuperAdmin ? "Administration" : "Dashboard"}</p>
         </div>
       </div>
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-        <p className="px-3 mb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+        <p className={cn("px-3 mb-2 text-xs font-semibold uppercase tracking-wider", theme.sectionLabel)}>
           My Dashboard
         </p>
         {mainNav.map((item) => {
@@ -211,7 +236,7 @@ export function Sidebar() {
               onMouseEnter={() => prefetch(item.href)}
               className={cn(
                 "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                active ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                active ? theme.activeLink : theme.inactiveLink
               )}
             >
               <item.icon className="h-4 w-4 shrink-0" />
@@ -222,7 +247,7 @@ export function Sidebar() {
 
         {mgmtNav.length > 0 && (
           <>
-            <p className="px-3 mt-6 mb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">Management</p>
+            <p className={cn("px-3 mt-6 mb-2 text-xs font-semibold uppercase tracking-wider", theme.sectionLabel)}>Management</p>
             {mgmtNav.map((item) => {
               const active = pathname.startsWith(item.href);
               return (
@@ -233,7 +258,7 @@ export function Sidebar() {
                   onMouseEnter={() => prefetch(item.href)}
                   className={cn(
                     "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                    active ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                    active ? theme.activeLink : theme.inactiveLink
                   )}
                 >
                   <item.icon className="h-4 w-4 shrink-0" />
@@ -246,19 +271,20 @@ export function Sidebar() {
       </nav>
 
       {/* User */}
-      <div className="border-t border-slate-700 px-4 py-3">
+      <div className={cn("border-t px-4 py-3", theme.userBorder)}>
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-500 text-xs font-bold overflow-hidden">
-            {user?.photoUrl
-              ? <img src={`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}${user.photoUrl}`} alt="avatar" className="h-full w-full object-cover" />
-              : user ? `${user.firstName[0]}${user.lastName[0]}` : "?"
-            }
+          <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold overflow-hidden text-white", isSuperAdmin ? "bg-[#1e3464]" : "bg-blue-500")}>
+            <img
+              src={user?.photoUrl ? resolvePhotoUrl(user.photoUrl)! : "/default-avatar.svg"}
+              alt="avatar"
+              className="h-full w-full object-cover"
+            />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{user ? `${user.firstName} ${user.lastName}` : "Loading..."}</p>
-            <p className="text-xs text-slate-400 truncate">{user?.role?.replace("_", " ")}</p>
+            <p className={cn("text-sm font-medium truncate", theme.userName)}>{user ? `${user.firstName} ${user.lastName}` : "Loading..."}</p>
+            <p className={cn("text-xs truncate", theme.userRole)}>{user?.role?.replace(/_/g, " ")}</p>
           </div>
-          <button onClick={handleLogout} className="text-slate-400 hover:text-white transition-colors">
+          <button onClick={handleLogout} className={cn("transition-colors", theme.logoutBtn)}>
             <LogOut className="h-4 w-4" />
           </button>
         </div>
