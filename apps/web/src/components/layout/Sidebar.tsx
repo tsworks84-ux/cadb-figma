@@ -185,8 +185,7 @@ export function Sidebar() {
 
   const isSuperAdmin = role === "SUPER_ADMIN";
 
-  // Light theme for Super Admin, dark theme for everyone else
-  const theme = isSuperAdmin ? {
+  const theme = {
     aside: "bg-gray-50 border-r border-gray-200",
     logoBorder: "border-gray-200",
     logoSubtitle: "text-xs text-gray-400 uppercase tracking-widest font-medium",
@@ -197,17 +196,6 @@ export function Sidebar() {
     userName: "text-gray-900",
     userRole: "text-gray-500",
     logoutBtn: "text-gray-400 hover:text-gray-700",
-  } : {
-    aside: "bg-slate-900",
-    logoBorder: "border-slate-700",
-    logoSubtitle: "text-xs text-slate-400",
-    sectionLabel: "text-slate-400",
-    activeLink: "bg-blue-600 text-white",
-    inactiveLink: "text-slate-300 hover:bg-slate-800 hover:text-white",
-    userBorder: "border-slate-700",
-    userName: "text-white",
-    userRole: "text-slate-400",
-    logoutBtn: "text-slate-400 hover:text-white",
   };
 
   return (
@@ -216,7 +204,7 @@ export function Sidebar() {
       <div className={cn("flex h-16 items-center gap-3 px-4 border-b", theme.logoBorder)}>
         <Image src="/logo.png" alt="Centum Academy" width={36} height={36} className="shrink-0 rounded-full" />
         <div>
-          <p className={cn("font-semibold text-sm leading-tight", isSuperAdmin ? "text-gray-900" : "text-white")}>Centum Academy</p>
+          <p className="font-semibold text-sm leading-tight text-gray-900">Centum Academy</p>
           <p className={theme.logoSubtitle}>{isSuperAdmin ? "Administration" : "Dashboard"}</p>
         </div>
       </div>
@@ -273,7 +261,7 @@ export function Sidebar() {
       {/* User */}
       <div className={cn("border-t px-4 py-3", theme.userBorder)}>
         <div className="flex items-center gap-3">
-          <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold overflow-hidden text-white", isSuperAdmin ? "bg-[#1e3464]" : "bg-blue-500")}>
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full overflow-hidden bg-[#1e3464]">
             <img
               src={user?.photoUrl ? resolvePhotoUrl(user.photoUrl)! : "/default-avatar.svg"}
               alt="avatar"
