@@ -407,7 +407,7 @@ export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
         min: valid.length ? Math.min(...valid) : null,
         marks,
       };
-    }).filter(Boolean) as NonNullable<ReturnType<typeof exams[0]["subjects"][0]>> extends never ? never : any[];
+    }).filter(Boolean) as any[];
 
     const data = { subjectName, examData };
     if (q.format !== "excel") return reply.send({ success: true, data });

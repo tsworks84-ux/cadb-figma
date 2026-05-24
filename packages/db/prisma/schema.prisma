@@ -172,6 +172,7 @@ enum AnnouncementAudience {
   ALL_EMPLOYEES
   MANAGERS
   HR_ONLY
+  STUDENTS
 }
 
 enum StudentStatus {
@@ -185,6 +186,7 @@ enum StudentStatus {
 enum ScheduleStatus {
   UPCOMING
   COMPLETED
+  CONCLUDED
   CANCELLED
 }
 
@@ -334,6 +336,7 @@ model Employee {
   // Identity Documents
   aadhaarEncrypted  String?
   panEncrypted      String?
+  uanNumber         String?
   passportNumber    String?
   passportExpiry    DateTime?
 
@@ -1179,6 +1182,7 @@ model Student {
   initialPasswordHash String?
 
   instalments        StudentInstalment[]
+  paymentLogs        StudentPaymentLog[]
 
   status             StudentStatus @default(ACTIVE)
   isArchived         Boolean       @default(false)
@@ -1186,9 +1190,10 @@ model Student {
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
-  sessions           StudentSession[]
-  submissions        AssignmentSubmission[]
-  examResults        ExamResult[]
+  sessions            StudentSession[]
+  submissions         AssignmentSubmission[]
+  examResults         ExamResult[]
+  scheduleAttendances ScheduleAttendance[]
 
   @@index([batchId])
   @@index([schoolId])
@@ -1241,18 +1246,21 @@ model Centre {
 }
 
 model Batch {
-  id           String    @id @default(cuid())
-  name         String
-  description  String?
-  locationId   String?
-  academicYear String
-  startDate    DateTime?
-  schoolId     String?
-  gradeId      String?
-  isActive     Boolean   @default(true)
-  isArchived   Boolean   @default(false)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id             String    @id @default(cuid())
+  name           String
+  description    String?
+  locationId     String?
+  academicYear   String
+  startDate      DateTime?
+  schoolId       String?
+  gradeId        String?
+  schoolIds      String[]  @default([])
+  courseIds      String[]  @default([])
+  targetStrength Int?
+  isActive       Boolean   @default(true)
+  isArchived     Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   location        Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
   school          School?   @relation(fields: [schoolId],   references: [id], onDelete: SetNull)
@@ -1412,7 +1420,7 @@ model StudentInstalment {
   instalmentNo Int
   label        String?
   amount       Float
-  dueDate      DateTime
+  dueDate      DateTime?
   isPaid       Boolean   @default(false)
   paidAt       DateTime?
   paidAmount   Float?
@@ -1422,6 +1430,24 @@ model StudentInstalment {
   updatedAt    DateTime  @updatedAt
 
   student      Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  paymentLogs  StudentPaymentLog[]
+
+  @@index([studentId])
+}
+
+model StudentPaymentLog {
+  id            String    @id @default(cuid())
+  studentId     String
+  instalmentId  String?
+  amount        Float
+  paymentMode   String?
+  paymentDate   DateTime?
+  receiptNumber String?
+  note          String?
+  createdAt     DateTime  @default(now())
+
+  student       Student            @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  instalment    StudentInstalment? @relation(fields: [instalmentId], references: [id], onDelete: SetNull)
 
   @@index([studentId])
 }
@@ -1477,12 +1503,31 @@ model Schedule {
   employee     Employee?      @relation("FacultySchedules", fields: [employeeId], references: [id], onDelete: SetNull)
   location     Location?      @relation(fields: [locationId], references: [id], onDelete: SetNull)
   batches      ScheduleBatch[]
+  attendances  ScheduleAttendance[]
+  assignments  Assignment[]
 
   @@index([date])
   @@index([status])
   @@index([academicYear])
   @@index([employeeId])
   @@index([locationId])
+}
+
+model ScheduleAttendance {
+  id         String   @id @default(cuid())
+  scheduleId String
+  studentId  String
+  isPresent  Boolean  @default(true)
+  note       String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  schedule   Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  student    Student  @relation(fields: [studentId],  references: [id], onDelete: Cascade)
+
+  @@unique([scheduleId, studentId])
+  @@index([scheduleId])
+  @@index([studentId])
 }
 
 model ScheduleBatch {
@@ -1508,6 +1553,7 @@ model Assignment {
   submissionDate DateTime         @db.Date
   subjectId      String?
   employeeId     String?
+  scheduleId     String?
   topics         String?
   note           String?
   attachmentUrl  String?
@@ -1518,6 +1564,7 @@ model Assignment {
 
   subject     Subject?               @relation(fields: [subjectId],  references: [id], onDelete: SetNull)
   employee    Employee?              @relation("FacultyAssignments", fields: [employeeId], references: [id], onDelete: SetNull)
+  schedule    Schedule?              @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
   batches     AssignmentBatch[]
   submissions AssignmentSubmission[]
 
@@ -1526,6 +1573,7 @@ model Assignment {
   @@index([submissionDate])
   @@index([subjectId])
   @@index([employeeId])
+  @@index([scheduleId])
 }
 
 model AssignmentBatch {

@@ -212,7 +212,7 @@ function ReviewModal({
             Cancel
           </button>
           <button onClick={() => updateMut.mutate()} disabled={busy}
-            className="flex items-center gap-1.5 px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+            className="flex items-center gap-1.5 px-4 py-2 text-sm text-white rounded-md hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#2C3E7C" }}>
             {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             Save
           </button>
@@ -265,7 +265,7 @@ function SubmissionRow({ sub, canEdit, onReview }: {
       <td className="px-4 py-3 whitespace-nowrap">
         {canEdit && (
           <button onClick={() => onReview(sub)}
-            className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 transition-colors opacity-0 group-hover:opacity-100 sm:opacity-100">
+            className="rounded-md px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition-colors opacity-0 group-hover:opacity-100 sm:opacity-100" style={{ backgroundColor: "#2C3E7C" }}>
             Review
           </button>
         )}

@@ -5,11 +5,243 @@ import { api } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
 import { formatDate, formatCurrency, getInitials } from "@/lib/utils";
 import Link from "next/link";
+import { useState, useRef, useEffect } from "react";
 import {
   CalendarOff, Receipt, GraduationCap, Shield, Clock,
   CheckCircle, AlertCircle, User, Pencil, AlertTriangle,
-  Megaphone, Info, Pin,
+  Megaphone, Info, Pin, Bell, TrendingUp, TrendingDown,
+  Users, Briefcase, Headphones, BarChart2, UserCheck, FileText,
+  Activity, Star, ChevronRight, X,
 } from "lucide-react";
+
+// ── Super Admin Dashboard ──────────────────────────────────────────────────────
+
+function MetricCard({ icon: Icon, trend, trendUp, title, value, sub }: {
+  icon: React.ElementType; trend: string; trendUp: boolean;
+  title: string; value: string; sub: string;
+}) {
+  return (
+    <div className="rounded-xl border border-gray-100 bg-white p-5">
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gray-100">
+          <Icon className="h-5 w-5 text-gray-500" />
+        </div>
+        <span className={`flex items-center gap-1 text-xs font-medium ${trendUp ? "text-green-500" : "text-red-500"}`}>
+          {trendUp ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+          {trend}
+        </span>
+      </div>
+      <p className="text-sm text-gray-500 mb-1">{title}</p>
+      <p className="text-2xl font-bold text-gray-900">{value}</p>
+      <p className="text-xs text-gray-400 mt-1">{sub}</p>
+    </div>
+  );
+}
+
+function SectionHeader({ icon: Icon, title, subtitle, linkLabel = "View Details" }: {
+  icon: React.ElementType; title: string; subtitle: string; linkLabel?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center gap-3">
+        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#354070]">
+          <Icon className="h-5 w-5 text-white" />
+        </div>
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">{title}</h2>
+          <p className="text-xs text-gray-400">{subtitle}</p>
+        </div>
+      </div>
+      <button className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-800 border border-gray-200 rounded-lg px-3 py-1.5 transition-colors">
+        {linkLabel} <ChevronRight className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+function SuperAdminDashboard() {
+  const { user } = useAuthStore();
+  const [bellOpen, setBellOpen] = useState(false);
+  const bellRef = useRef<HTMLDivElement>(null);
+
+  const now = new Date();
+  const greeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 17 ? "Good afternoon" : "Good evening";
+  const dateStr = now.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  const timeStr = now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+
+  const currentYear = (() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const start = d.getMonth() >= 3 ? y : y - 1; // April = month 3
+    return `${start}-${String(start + 1).slice(-2)}`;
+  })();
+
+  const { data: annResult } = useQuery({
+    queryKey: ["announcements"],
+    queryFn: () => api.get<{ data: Announcement[] }>("/api/v1/announcements").then((r) => r.data.data),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchInterval: 60 * 1000,
+  });
+  const announcements: Announcement[] = (annResult as any) ?? [];
+
+  // Close bell dropdown on outside click
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (bellRef.current && !bellRef.current.contains(e.target as Node)) setBellOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div className="-m-6 bg-white min-h-screen">
+      {/* Top bar */}
+      <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-4 sm:px-6 py-3 flex items-center gap-3">
+        <div className="flex items-center gap-3 ml-auto">
+          {/* Bell */}
+          <div className="relative" ref={bellRef}>
+            <button
+              onClick={() => setBellOpen((v) => !v)}
+              className="relative p-2 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              <Bell className="h-5 w-5 text-gray-500" />
+              {announcements.length > 0 && (
+                <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-red-500" />
+              )}
+            </button>
+            {bellOpen && (
+              <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl border border-gray-200 shadow-xl z-50 overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+                  <span className="text-sm font-semibold text-gray-900">Notifications</span>
+                  <button onClick={() => setBellOpen(false)} className="text-gray-400 hover:text-gray-600">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                {announcements.length === 0 ? (
+                  <p className="px-4 py-6 text-sm text-gray-400 text-center">No notifications</p>
+                ) : (
+                  <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto">
+                    {announcements.slice(0, 6).map((a) => {
+                      const meta = ANN_META[a.type];
+                      const Icon = meta.icon;
+                      return (
+                        <div key={a.id} className={`flex items-start gap-3 px-4 py-3 border-l-4 ${meta.border} ${meta.bg}`}>
+                          {a.pinned && <Pin className="h-3.5 w-3.5 text-blue-400 shrink-0 mt-0.5" />}
+                          <Icon className={`h-4 w-4 shrink-0 mt-0.5 ${meta.iconColor}`} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-900 truncate">{a.title}</p>
+                            <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{a.body}</p>
+                            <p className="text-[11px] text-gray-400 mt-1">{formatDate(a.createdAt)}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <Link
+                  href="/dashboard/announcements"
+                  onClick={() => setBellOpen(false)}
+                  className="flex items-center justify-center px-4 py-2.5 text-xs text-blue-600 hover:bg-blue-50 transition-colors border-t border-gray-100"
+                >
+                  View all announcements →
+                </Link>
+              </div>
+            )}
+          </div>
+          <div className="hidden sm:flex items-center gap-1.5 text-xs text-gray-500">
+            <Clock className="h-4 w-4" />
+            <span>{dateStr}, {timeStr}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Greeting */}
+      <div className="px-4 sm:px-8 py-6 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">{greeting}, {user?.firstName} {user?.lastName}</h1>
+          <p className="text-sm text-gray-400 mt-1">Super Administrator · Administration · Director</p>
+        </div>
+        <div className="flex items-center gap-5 shrink-0">
+          <div>
+            <p className="text-xs text-gray-400">System Status</p>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="h-2 w-2 rounded-full bg-green-500 inline-block" />
+              <span className="text-sm font-semibold text-gray-800">Operational</span>
+            </div>
+          </div>
+          <div className="w-px h-8 bg-gray-200" />
+          <div>
+            <p className="text-xs text-gray-400">Current Session</p>
+            <p className="text-sm font-semibold text-gray-800 mt-0.5">
+              {currentYear ? `Academic Year ${currentYear}` : "—"}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Sections */}
+      <div className="px-4 sm:px-8 py-6 space-y-8">
+
+        {/* Student Performance Metrics */}
+        <div>
+          <SectionHeader icon={Users} title="Student Performance Metrics" subtitle="Academic performance and attendance analytics" />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <MetricCard icon={UserCheck} trend="+2.3%" trendUp title="Average Daily Attendance" value="92.5%" sub="Last 30 days" />
+            <MetricCard icon={TrendingUp} trend="+5.1%" trendUp title="Average Test Performance" value="78.4%" sub="Across all subjects" />
+            <MetricCard icon={FileText} trend="-1.2%" trendUp={false} title="Average Assignment Submission Rate" value="85.7%" sub="On-time submissions" />
+          </div>
+        </div>
+
+        {/* Faculty & Staff Analytics */}
+        <div>
+          <SectionHeader icon={Briefcase} title="Faculty & Staff Analytics" subtitle="Employee performance and workforce metrics" />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <MetricCard icon={Activity} trend="+3.5%" trendUp title="Average Employee Workload" value="78%" sub="Capacity utilization" />
+            <MetricCard icon={Star} trend="+0.2" trendUp title="Average Employee Quality Score" value="4.6/5" sub="Based on peer reviews" />
+            <MetricCard icon={Briefcase} trend="+8" trendUp title="Total Number of Employees" value="247" sub="Active staff members" />
+          </div>
+        </div>
+
+        {/* Parent Relations & Support */}
+        <div>
+          <SectionHeader icon={Headphones} title="Parent Relations & Support" subtitle="Service requests and stakeholder engagement" />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <MetricCard icon={Headphones} trend="+12" trendUp title="Total Number of Service Requests" value="124" sub="This month" />
+            <MetricCard icon={Clock} trend="-0.5 days" trendUp={false} title="Average Turn Around Time" value="2.3 days" sub="Resolution time" />
+            <MetricCard icon={Clock} trend="-6" trendUp={false} title="Number of Open SRs" value="18" sub="Pending resolution" />
+          </div>
+        </div>
+
+        {/* Administrative Alerts */}
+        <div>
+          <SectionHeader icon={BarChart2} title="Administrative Alerts" subtitle="Key highlights and notifications" linkLabel="View All" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="flex items-start gap-4 rounded-xl border border-green-100 bg-green-50 p-4">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-green-100">
+                <TrendingUp className="h-5 w-5 text-green-600" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Test Performance Improved</p>
+                <p className="text-xs text-gray-500 mt-1">Grade 10 mathematics scores increased by 12% this quarter</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-4 rounded-xl border border-amber-100 bg-amber-50 p-4">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100">
+                <AlertTriangle className="h-5 w-5 text-amber-600" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Priority Service Requests</p>
+                <p className="text-xs text-gray-500 mt-1">5 service requests require immediate administrative review</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
 
 type AnnType = "GENERAL" | "IMPORTANT" | "URGENT";
 interface Announcement {
@@ -109,6 +341,8 @@ export default function HomeDashboardPage() {
   const profileScore: number = (profile as any)?.profileScore ?? 0;
   const profileTotal: number = (profile as any)?.profileTotal ?? 7;
   const profileComplete: boolean = (profile as any)?.profileComplete ?? false;
+
+  if (user?.role === "SUPER_ADMIN") return <SuperAdminDashboard />;
 
   return (
     <div className="space-y-6">

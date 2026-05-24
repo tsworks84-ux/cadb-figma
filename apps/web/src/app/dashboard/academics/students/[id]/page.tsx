@@ -14,8 +14,9 @@ import {
   BadgeCheck, Shield, RotateCcw, Archive, ArchiveRestore,
   BookOpen, Calendar, CreditCard, Building2, MapPin, Hash,
   ChevronDown, ChevronUp, CheckCircle2, Clock, AlertCircle, Plus,
-  Users2, Banknote,
+  Users2, Banknote, Trash2, IndianRupee, Info, AlertTriangle, Pin,
 } from "lucide-react";
+import { formatDate } from "@/lib/utils";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -79,6 +80,70 @@ function SectionCard({ title, icon: Icon, children, action }: {
         {action}
       </div>
       <div className="px-5 py-4">{children}</div>
+    </div>
+  );
+}
+
+type AnnType = "GENERAL" | "IMPORTANT" | "URGENT";
+const ANN_META: Record<AnnType, { border: string; bg: string; icon: React.ElementType; iconColor: string }> = {
+  GENERAL:   { border: "border-l-blue-400",   bg: "bg-blue-50",   icon: Info,          iconColor: "text-blue-500"   },
+  IMPORTANT: { border: "border-l-orange-400", bg: "bg-orange-50", icon: AlertTriangle,  iconColor: "text-orange-500" },
+  URGENT:    { border: "border-l-red-500",    bg: "bg-red-50",    icon: AlertCircle,   iconColor: "text-red-500"    },
+};
+
+function NoticeBoardTab() {
+  const { data: announcements = [], isLoading } = useQuery({
+    queryKey: ["student-announcements-admin"],
+    queryFn: () => api.get("/api/v1/announcements/all").then((r) =>
+      (r.data.data as any[]).filter((a: any) => a.audience === "STUDENTS" && a.status === "PUBLISHED")
+    ),
+    staleTime: 60 * 1000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-40">
+        <div className="h-6 w-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (announcements.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 text-center">
+        <div className="h-14 w-14 rounded-2xl bg-indigo-50 flex items-center justify-center mb-4">
+          <Bell className="h-7 w-7 text-indigo-300" />
+        </div>
+        <p className="font-semibold text-gray-500">Notice Board</p>
+        <p className="text-sm text-gray-400 mt-1">No student notices published yet.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 py-4">
+      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-4">
+        Published notices for students ({announcements.length})
+      </p>
+      {announcements.map((a: any) => {
+        const meta = ANN_META[a.type as AnnType] ?? ANN_META.GENERAL;
+        const Icon = meta.icon;
+        return (
+          <div key={a.id} className={`rounded-xl border-l-4 px-5 py-4 ${meta.border} ${meta.bg}`}>
+            <div className="flex items-start gap-3">
+              {a.pinned && <Pin className="h-3.5 w-3.5 text-amber-400 shrink-0 mt-0.5" />}
+              <Icon className={`h-4 w-4 shrink-0 mt-0.5 ${meta.iconColor}`} />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-gray-900">{a.title}</p>
+                <p className="text-sm text-gray-600 mt-1">{a.body}</p>
+                <p className="text-xs text-gray-400 mt-2">
+                  {a.postedBy?.firstName} {a.postedBy?.lastName} · {a.publishedAt ? formatDate(a.publishedAt) : ""}
+                </p>
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -371,14 +436,28 @@ function ProfileTab({ student, canEdit, onRefetch }: { student: any; canEdit: bo
 
 // ── Admission Tab ─────────────────────────────────────────────────────────────
 
+const PAYMENT_MODES = ["Cash", "UPI", "Bank Transfer", "Cheque", "DD", "Card", "Online"];
+
+const emptyPayForm = () => ({
+  amount: "", paymentMode: "", paymentDate: new Date().toISOString().split("T")[0],
+  receiptNumber: "", note: "", instalmentId: "",
+});
+
 function AdmissionTab({ student, canEdit, onRefetch }: { student: any; canEdit: boolean; onRefetch: () => void }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
+  const [showPayForm, setShowPayForm] = useState(false);
+  const [payForm, setPayForm] = useState(emptyPayForm());
+  const [quickPayInstalmentId, setQuickPayInstalmentId] = useState<string | null>(null);
+
+  // Instalment editing
+  const [editingInstalments, setEditingInstalments] = useState(false);
+  const [instalEdits, setInstalEdits] = useState<Record<string, { amount: string; dueDate: string; label: string }>>({});
+  const [newInstalRows, setNewInstalRows] = useState<{ tempId: string; label: string; dueDate: string; amount: string }[]>([]);
+
   const [form, setForm] = useState({
     admissionNumber: "", admissionDate: "", academicYear: "",
-    gradeId: "", courseId: "",
-    totalFee: "", paidFee: "", discountType: "", discountAmount: "",
-    paymentDate: "", paymentMode: "", receiptNumber: "", paymentNote: "",
+    gradeId: "", courseId: "", totalFee: "", discountType: "", discountAmount: "",
   });
 
   useEffect(() => {
@@ -389,46 +468,84 @@ function AdmissionTab({ student, canEdit, onRefetch }: { student: any; canEdit: 
       gradeId:         student.gradeId        ?? "",
       courseId:        student.courseId       ?? "",
       totalFee:        student.totalFee       != null ? String(student.totalFee)        : "",
-      paidFee:         student.paidFee        != null ? String(student.paidFee)         : "",
       discountType:    student.discountType   ?? "",
       discountAmount:  student.discountAmount != null ? String(student.discountAmount) : "",
-      paymentDate:     student.paymentDate ? new Date(student.paymentDate).toISOString().split("T")[0] : "",
-      paymentMode:     student.paymentMode  ?? "",
-      receiptNumber:   student.receiptNumber ?? "",
-      paymentNote:     student.paymentNote  ?? "",
     });
   }, [student]);
 
-  const { data: grades = [] } = useQuery({
-    queryKey: ["grades"],
-    queryFn: () => api.get("/api/v1/academics/settings/grades").then((r) => r.data.data),
-    staleTime: 5 * 60 * 1000,
-  });
+  const { data: grades = [] } = useQuery({ queryKey: ["grades"], queryFn: () => api.get("/api/v1/academics/settings/grades").then((r) => r.data.data), staleTime: 5 * 60 * 1000 });
+  const { data: courses = [] } = useQuery({ queryKey: ["courses"], queryFn: () => api.get("/api/v1/academics/settings/courses").then((r) => r.data.data), staleTime: 5 * 60 * 1000 });
+  const { data: academicYears = [] } = useQuery({ queryKey: ["academic-years"], queryFn: () => api.get("/api/v1/academics/academic-years").then((r) => r.data.data), staleTime: 10 * 60 * 1000 });
 
-  const { data: courses = [] } = useQuery({
-    queryKey: ["courses"],
-    queryFn: () => api.get("/api/v1/academics/settings/courses").then((r) => r.data.data),
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const { data: academicYears = [] } = useQuery({
-    queryKey: ["academic-years"],
-    queryFn: () => api.get("/api/v1/academics/academic-years").then((r) => r.data.data),
-    staleTime: 10 * 60 * 1000,
-  });
+  const refetchStudent = () => { qc.invalidateQueries({ queryKey: ["student", student.id] }); onRefetch(); };
 
   const updateMut = useMutation({
     mutationFn: (data: any) => api.patch(`/api/v1/academics/students/${student.id}`, data),
-    onSuccess: () => {
-      toast.success("Updated");
-      setEditing(false);
-      qc.invalidateQueries({ queryKey: ["student", student.id] });
-      onRefetch();
-    },
+    onSuccess: () => { toast.success("Updated"); setEditing(false); refetchStudent(); },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to update"),
   });
 
+  const addPaymentMut = useMutation({
+    mutationFn: (data: any) => api.post(`/api/v1/academics/students/${student.id}/payment-logs`, data),
+    onSuccess: () => { toast.success("Payment recorded"); setShowPayForm(false); setPayForm(emptyPayForm()); setQuickPayInstalmentId(null); refetchStudent(); },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to record payment"),
+  });
+
+  const deletePaymentMut = useMutation({
+    mutationFn: (logId: string) => api.delete(`/api/v1/academics/students/${student.id}/payment-logs/${logId}`),
+    onSuccess: () => { toast.success("Payment removed"); refetchStudent(); },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
+  });
+
   const set = (field: string, val: string) => setForm((p) => ({ ...p, [field]: val }));
+  const setPay = (field: string, val: string) => setPayForm((p) => ({ ...p, [field]: val }));
+
+  const startEditInstalments = () => {
+    const initial: Record<string, { amount: string; dueDate: string; label: string }> = {};
+    (student.instalments ?? []).forEach((ins: any) => {
+      initial[ins.id] = {
+        amount:  String(ins.amount),
+        dueDate: ins.dueDate ? new Date(ins.dueDate).toISOString().split("T")[0] : "",
+        label:   ins.label ?? `Instalment ${ins.instalmentNo}`,
+      };
+    });
+    setInstalEdits(initial);
+    setNewInstalRows([]);
+    setEditingInstalments(true);
+  };
+
+  const addNewInstalRow = () => {
+    setNewInstalRows((prev) => [
+      ...prev,
+      { tempId: `new-${Date.now()}`, label: `Instalment ${(student.instalments?.length ?? 0) + prev.length + 1}`, dueDate: "", amount: "" },
+    ]);
+  };
+
+  const updateInstalmentMut = useMutation({
+    mutationFn: async () => {
+      // Update existing instalments
+      const updatePromises = Object.entries(instalEdits).map(([instalmentId, v]) =>
+        api.patch(`/api/v1/academics/students/${student.id}/instalments/${instalmentId}`, {
+          amount:  parseFloat(v.amount) || 0,
+          dueDate: v.dueDate || null,
+          label:   v.label || undefined,
+        })
+      );
+      // Create new instalment rows
+      const createPromises = newInstalRows
+        .filter((r) => r.amount)
+        .map((r) =>
+          api.post(`/api/v1/academics/students/${student.id}/instalments`, {
+            label:   r.label,
+            amount:  parseFloat(r.amount),
+            dueDate: r.dueDate || null,
+          })
+        );
+      await Promise.all([...updatePromises, ...createPromises]);
+    },
+    onSuccess: () => { toast.success("Instalments updated"); setEditingInstalments(false); setNewInstalRows([]); refetchStudent(); },
+    onError:   (e: any) => toast.error(e.response?.data?.error ?? "Failed to update instalments"),
+  });
 
   const handleSave = () => {
     const payload: any = {
@@ -437,34 +554,58 @@ function AdmissionTab({ student, canEdit, onRefetch }: { student: any; canEdit: 
       academicYear:    form.academicYear     || undefined,
       gradeId:         form.gradeId          || undefined,
       courseId:        form.courseId         || undefined,
-      paymentMode:     form.paymentMode      || undefined,
-      receiptNumber:   form.receiptNumber    || undefined,
-      paymentNote:     form.paymentNote      || undefined,
-      paymentDate:     form.paymentDate      || undefined,
       discountType:    form.discountType     || undefined,
     };
-    if (form.totalFee    !== "") payload.totalFee    = parseFloat(form.totalFee);
-    if (form.paidFee     !== "") payload.paidFee     = parseFloat(form.paidFee);
+    if (form.totalFee      !== "") payload.totalFee      = parseFloat(form.totalFee);
     if (form.discountAmount !== "") payload.discountAmount = parseFloat(form.discountAmount);
     updateMut.mutate(payload);
   };
 
-  const balanceDue = (student.totalFee ?? 0) - (student.paidFee ?? 0) - (student.discountAmount ?? 0);
+  const handleAddPayment = () => {
+    const amt = parseFloat(payForm.amount || "0");
+    if (!payForm.amount || amt <= 0) { toast.error("Enter a valid amount"); return; }
+    if (amt > 0 && (!payForm.paymentMode || !payForm.paymentDate || !payForm.receiptNumber)) {
+      toast.error("Payment Mode, Date, and Receipt No. are required");
+      return;
+    }
+    addPaymentMut.mutate({
+      amount:        amt,
+      paymentMode:   payForm.paymentMode   || undefined,
+      paymentDate:   payForm.paymentDate   || undefined,
+      receiptNumber: payForm.receiptNumber || undefined,
+      note:          payForm.note          || undefined,
+      instalmentId:  payForm.instalmentId  || undefined,
+    });
+  };
+
+  const openQuickPay = (ins: any) => {
+    setPayForm({ ...emptyPayForm(), amount: String(ins.amount), instalmentId: ins.id });
+    setQuickPayInstalmentId(ins.id);
+    setShowPayForm(true);
+  };
+
+  const paidFee    = student.paidFee ?? 0;
+  const totalFee   = student.totalFee ?? 0;
+  const discount   = student.discountAmount ?? 0;
+  const balanceDue = Math.max(0, totalFee - discount - paidFee);
+  const paymentLogs: any[] = student.paymentLogs ?? [];
+  const instalments: any[] = student.instalments ?? [];
+
+  const inputCls = "w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none bg-white text-gray-700";
 
   return (
     <div className="space-y-5">
+
+      {/* Enrollment Details */}
       <SectionCard title="Enrollment Details" icon={ClipboardList} action={
         canEdit && !editing ? (
-          <button onClick={() => setEditing(true)}
-            className="flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 px-3 py-1.5 rounded-lg hover:bg-indigo-50 transition-colors">
+          <button onClick={() => setEditing(true)} className="flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 px-3 py-1.5 rounded-lg hover:bg-indigo-50 transition-colors">
             <Edit2 className="h-3.5 w-3.5" /> Edit
           </button>
         ) : canEdit && editing ? (
           <div className="flex items-center gap-2">
-            <button onClick={() => setEditing(false)}
-              className="text-xs font-medium text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
-            <button onClick={handleSave} disabled={updateMut.isPending}
-              className="flex items-center gap-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
+            <button onClick={() => setEditing(false)} className="text-xs font-medium text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
+            <button onClick={handleSave} disabled={updateMut.isPending} className="flex items-center gap-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
               <Save className="h-3.5 w-3.5" /> Save
             </button>
           </div>
@@ -476,22 +617,18 @@ function AdmissionTab({ student, canEdit, onRefetch }: { student: any; canEdit: 
           {editing ? (
             <FSelect label="Academic Year" value={form.academicYear} onChange={(v) => set("academicYear", v)}>
               <option value="">Select academic year</option>
-              {(academicYears as any[]).filter((y) => !y.isArchived).map((y) => (
-                <option key={y.id} value={y.name}>{y.name}</option>
-              ))}
+              {(academicYears as any[]).filter((y) => !y.isArchived).map((y) => <option key={y.id} value={y.name}>{y.name}</option>)}
             </FSelect>
-          ) : (
-            <FInput label="Academic Year" value={form.academicYear} disabled />
-          )}
+          ) : <FInput label="Academic Year" value={form.academicYear} disabled />}
           {editing ? (
             <>
-              <FSelect label="Grade" value={form.gradeId} onChange={(v) => set("gradeId", v)} disabled={!editing}>
+              <FSelect label="Grade" value={form.gradeId} onChange={(v) => set("gradeId", v)}>
                 <option value="">No grade</option>
-                {grades.map((g: any) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                {(grades as any[]).map((g: any) => <option key={g.id} value={g.id}>{g.name}</option>)}
               </FSelect>
-              <FSelect label="Course" value={form.courseId} onChange={(v) => set("courseId", v)} disabled={!editing}>
+              <FSelect label="Course" value={form.courseId} onChange={(v) => set("courseId", v)}>
                 <option value="">No course</option>
-                {courses.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {(courses as any[]).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </FSelect>
             </>
           ) : (
@@ -504,75 +641,324 @@ function AdmissionTab({ student, canEdit, onRefetch }: { student: any; canEdit: 
         </div>
       </SectionCard>
 
-      {/* Fee Summary cards */}
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      {/* Fee Summary */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {[
-          { label: "Total Fee",    value: fmtCurrency(student.totalFee),    color: "border-blue-100  bg-blue-50  text-blue-700"  },
-          { label: "Paid",         value: fmtCurrency(student.paidFee),     color: "border-green-100 bg-green-50 text-green-700" },
-          { label: "Discount",     value: fmtCurrency(student.discountAmount), color: "border-amber-100 bg-amber-50 text-amber-700" },
-          { label: "Balance Due",  value: fmtCurrency(balanceDue < 0 ? 0 : balanceDue), color: balanceDue > 0 ? "border-red-100 bg-red-50 text-red-700" : "border-green-100 bg-green-50 text-green-700" },
+          { label: "Total Fee",   value: fmtCurrency(totalFee),   color: "border-blue-100  bg-blue-50  text-blue-700"  },
+          { label: "Paid",        value: fmtCurrency(paidFee),    color: "border-green-100 bg-green-50 text-green-700" },
+          { label: "Discount",    value: fmtCurrency(discount),   color: "border-amber-100 bg-amber-50 text-amber-700" },
+          { label: "Balance Due", value: fmtCurrency(balanceDue), color: balanceDue > 0 ? "border-red-100 bg-red-50 text-red-700" : "border-green-100 bg-green-50 text-green-700" },
         ].map(({ label, value, color }) => (
           <div key={label} className={`rounded-xl border px-4 py-3 ${color}`}>
-            <p className="text-xs font-medium opacity-75">{label}</p>
+            <p className="text-xs font-medium opacity-70">{label}</p>
             <p className="text-lg font-bold mt-0.5">{value}</p>
           </div>
         ))}
       </div>
 
-      {/* Payment Details */}
-      <SectionCard title="Payment Details" icon={CreditCard}>
-        <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 md:grid-cols-3">
-          <FSelect label="Discount Type" value={form.discountType} onChange={(v) => set("discountType", v)} disabled={!editing}>
-            <option value="">None</option>
-            <option value="PERCENTAGE">Percentage</option>
-            <option value="AMOUNT">Amount</option>
-          </FSelect>
-          <FInput label="Discount Value"  value={form.discountAmount} onChange={(v) => set("discountAmount", v)} type="number" disabled={!editing} />
-          <FInput label="Total Fee"       value={form.totalFee}       onChange={(v) => set("totalFee", v)}       type="number" disabled={!editing} />
-          <FInput label="Paid Fee"        value={form.paidFee}        onChange={(v) => set("paidFee", v)}        type="number" disabled={!editing} />
-          <FInput label="Payment Mode"    value={form.paymentMode}    onChange={(v) => set("paymentMode", v)}    disabled={!editing} />
-          <FInput label="Payment Date"    value={form.paymentDate}    onChange={(v) => set("paymentDate", v)}    type="date"   disabled={!editing} />
-          <FInput label="Receipt Number"  value={form.receiptNumber}  onChange={(v) => set("receiptNumber", v)}  disabled={!editing} />
-          <FInput label="Note"            value={form.paymentNote}    onChange={(v) => set("paymentNote", v)}    disabled={!editing} className="sm:col-span-2" />
-        </div>
-      </SectionCard>
+      {/* Fee Settings (editable: total fee, discount) */}
+      {editing && (
+        <SectionCard title="Fee Configuration" icon={CreditCard}>
+          <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-3">
+            <FInput label="Total Fee" value={form.totalFee} onChange={(v) => set("totalFee", v)} type="number" disabled={false} />
+            <FSelect label="Discount Type" value={form.discountType} onChange={(v) => set("discountType", v)}>
+              <option value="">None</option>
+              <option value="AMOUNT">Amount (₹)</option>
+              <option value="PERCENTAGE">Percentage (%)</option>
+            </FSelect>
+            <FInput label="Discount Value" value={form.discountAmount} onChange={(v) => set("discountAmount", v)} type="number" disabled={false} />
+          </div>
+        </SectionCard>
+      )}
 
-      {/* Instalments */}
-      {student.instalments?.length > 0 && (
-        <SectionCard title="Instalment Schedule" icon={Banknote}>
+      {/* Instalment Schedule */}
+      {instalments.length > 0 && (
+        <SectionCard title="Instalment Schedule" icon={Banknote} action={
+          canEdit ? (
+            <div className="flex items-center gap-2">
+              {editingInstalments ? (
+                <>
+                  <button onClick={addNewInstalRow}
+                    className="flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 px-3 py-1.5 rounded-lg hover:bg-indigo-50 transition-colors border border-indigo-100">
+                    <Plus className="h-3 w-3" /> Add Instalment
+                  </button>
+                  <button onClick={() => { setEditingInstalments(false); setNewInstalRows([]); }}
+                    className="text-xs font-medium text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors border border-gray-200">
+                    Cancel
+                  </button>
+                  <button onClick={() => updateInstalmentMut.mutate()} disabled={updateInstalmentMut.isPending}
+                    className="flex items-center gap-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
+                    <Save className="h-3.5 w-3.5" /> {updateInstalmentMut.isPending ? "Saving…" : "Save Plan"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button onClick={startEditInstalments}
+                    className="flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 px-3 py-1.5 rounded-lg hover:bg-indigo-50 transition-colors">
+                    <Edit2 className="h-3.5 w-3.5" /> Edit Plan
+                  </button>
+                  <button onClick={() => { setPayForm(emptyPayForm()); setQuickPayInstalmentId(null); setShowPayForm(true); }}
+                    className="flex items-center gap-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-lg transition-colors">
+                    <Plus className="h-3.5 w-3.5" /> Add Payment
+                  </button>
+                </>
+              )}
+            </div>
+          ) : null
+        }>
+          {/* Sum warning when editing */}
+          {editingInstalments && (() => {
+            const editTotal = Object.values(instalEdits).reduce((s, v) => s + (parseFloat(v.amount) || 0), 0)
+              + newInstalRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+            const netFee = Math.max(0, totalFee - discount);
+            return Math.abs(editTotal - netFee) > 0.5 && netFee > 0 ? (
+              <div className="mb-3 rounded-lg bg-amber-50 border border-amber-100 px-4 py-2.5 text-xs text-amber-700 font-medium">
+                Instalments total {fmtCurrency(editTotal)} — net fee is {fmtCurrency(netFee)}. Amounts don&apos;t match.
+              </div>
+            ) : null;
+          })()}
+
           <div className="divide-y divide-gray-50">
-            {student.instalments.map((ins: any) => (
-              <div key={ins.id} className="flex items-start justify-between gap-3 py-2.5 sm:items-center">
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className={`h-6 w-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${ins.isPaid ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
-                    {ins.instalmentNo}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-800 truncate">{ins.label ?? `Instalment ${ins.instalmentNo}`}</p>
-                    <p className="text-xs text-gray-400">Due: {fmt(ins.dueDate)}</p>
-                  </div>
-                </div>
-                <div className="flex flex-col items-end gap-1 shrink-0 sm:flex-row sm:items-center sm:gap-4">
-                  <span className="text-sm font-semibold text-gray-700">{fmtCurrency(ins.amount)}</span>
-                  {ins.isPaid ? (
-                    <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 border border-green-100 rounded-full px-2 py-0.5">
-                      <CheckCircle2 className="h-3 w-3" /> Paid
-                    </span>
-                  ) : new Date(ins.dueDate) < new Date() ? (
-                    <span className="inline-flex items-center gap-1 text-xs font-medium text-red-600 bg-red-50 border border-red-100 rounded-full px-2 py-0.5">
-                      <AlertCircle className="h-3 w-3" /> Overdue
-                    </span>
+            {instalments.map((ins: any) => {
+              const isOverdue = !ins.isPaid && ins.dueDate && new Date(ins.dueDate) < new Date();
+              const ed = instalEdits[ins.id];
+              return (
+                <div key={ins.id} className="py-3">
+                  {editingInstalments && ed ? (
+                    /* Editable row */
+                    <div className="flex items-center gap-3">
+                      <span className="h-7 w-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold shrink-0">
+                        {ins.instalmentNo}
+                      </span>
+                      <input
+                        className="flex-1 rounded-lg border border-gray-200 px-2 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
+                        placeholder="Label"
+                        value={ed.label}
+                        onChange={(e) => setInstalEdits((p) => ({ ...p, [ins.id]: { ...p[ins.id], label: e.target.value } }))}
+                      />
+                      <input
+                        type="date"
+                        className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
+                        value={ed.dueDate}
+                        onChange={(e) => setInstalEdits((p) => ({ ...p, [ins.id]: { ...p[ins.id], dueDate: e.target.value } }))}
+                      />
+                      <input
+                        type="number" min="0"
+                        className="w-28 rounded-lg border border-gray-200 px-2 py-1.5 text-sm font-semibold focus:border-indigo-400 focus:outline-none text-right"
+                        value={ed.amount}
+                        onChange={(e) => setInstalEdits((p) => ({ ...p, [ins.id]: { ...p[ins.id], amount: e.target.value } }))}
+                      />
+                      {ins.isPaid
+                        ? <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 border border-green-100 rounded-full px-2.5 py-1 shrink-0"><CheckCircle2 className="h-3 w-3" /> Paid</span>
+                        : <span className="text-xs text-gray-400 shrink-0">Pending</span>
+                      }
+                    </div>
                   ) : (
-                    <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600 bg-amber-50 border border-amber-100 rounded-full px-2 py-0.5">
-                      <Clock className="h-3 w-3" /> Pending
-                    </span>
+                    /* Read-only row */
+                    <div className="flex items-center gap-3">
+                      <span className={`h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${ins.isPaid ? "bg-green-100 text-green-700" : isOverdue ? "bg-red-100 text-red-600" : "bg-gray-100 text-gray-500"}`}>
+                        {ins.instalmentNo}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-800">{ins.label ?? `Instalment ${ins.instalmentNo}`}</p>
+                        {ins.dueDate && <p className="text-xs text-gray-400">Due: {fmt(ins.dueDate)}</p>}
+                      </div>
+                      <span className="text-sm font-bold text-gray-700 shrink-0">{fmtCurrency(ins.amount)}</span>
+                      {ins.isPaid ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 border border-green-100 rounded-full px-2.5 py-1">
+                          <CheckCircle2 className="h-3 w-3" /> Paid
+                        </span>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className={`inline-flex items-center gap-1 text-xs font-medium rounded-full px-2.5 py-1 ${isOverdue ? "text-red-600 bg-red-50 border border-red-100" : "text-amber-600 bg-amber-50 border border-amber-100"}`}>
+                            {isOverdue ? <><AlertCircle className="h-3 w-3" /> Overdue</> : <><Clock className="h-3 w-3" /> Pending</>}
+                          </span>
+                          {canEdit && (
+                            <button onClick={() => openQuickPay(ins)}
+                              className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 rounded-full px-2.5 py-1 transition-colors">
+                              Record Payment
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {/* Payment records for this instalment */}
+                  {ins.isPaid && ins.paidAt && (
+                    <p className="text-xs text-gray-400 mt-1 ml-10">
+                      Paid {fmt(ins.paidAt)}{ins.paidAmount ? ` · ${fmtCurrency(ins.paidAmount)}` : ""}{ins.paymentMode ? ` · ${ins.paymentMode}` : ""}
+                    </p>
                   )}
                 </div>
+              );
+            })}
+
+            {/* New instalment rows (edit mode only) */}
+            {editingInstalments && newInstalRows.map((row, idx) => (
+              <div key={row.tempId} className="py-3 flex items-center gap-3 border-t border-dashed border-indigo-200 bg-indigo-50/30 rounded-lg px-2">
+                <span className="h-7 w-7 rounded-full bg-indigo-200 text-indigo-700 flex items-center justify-center text-xs font-bold shrink-0">
+                  {(instalments.length) + idx + 1}
+                </span>
+                <input
+                  className="flex-1 rounded-lg border border-gray-200 px-2 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
+                  placeholder="Label"
+                  value={row.label}
+                  onChange={(e) => setNewInstalRows((p) => p.map((r, i) => i === idx ? { ...r, label: e.target.value } : r))}
+                />
+                <input
+                  type="date"
+                  className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
+                  value={row.dueDate}
+                  onChange={(e) => setNewInstalRows((p) => p.map((r, i) => i === idx ? { ...r, dueDate: e.target.value } : r))}
+                />
+                <input
+                  type="number" min="0"
+                  placeholder="Amount"
+                  className="w-28 rounded-lg border border-gray-200 px-2 py-1.5 text-sm font-semibold focus:border-indigo-400 focus:outline-none text-right"
+                  value={row.amount}
+                  onChange={(e) => setNewInstalRows((p) => p.map((r, i) => i === idx ? { ...r, amount: e.target.value } : r))}
+                />
+                <button onClick={() => setNewInstalRows((p) => p.filter((_, i) => i !== idx))}
+                  className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors shrink-0">
+                  <X className="h-3.5 w-3.5" />
+                </button>
               </div>
             ))}
           </div>
         </SectionCard>
       )}
+
+      {/* Payment History */}
+      <SectionCard title="Payment History" icon={IndianRupee} action={
+        canEdit && instalments.length === 0 ? (
+          <button onClick={() => { setPayForm(emptyPayForm()); setShowPayForm(true); }}
+            className="flex items-center gap-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-lg transition-colors">
+            <Plus className="h-3.5 w-3.5" /> Add Payment
+          </button>
+        ) : canEdit && instalments.length > 0 ? (
+          <button onClick={() => { setPayForm(emptyPayForm()); setShowPayForm(true); }}
+            className="flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 px-3 py-1.5 rounded-lg hover:bg-indigo-50 transition-colors">
+            <Plus className="h-3.5 w-3.5" /> Add Payment
+          </button>
+        ) : null
+      }>
+
+        {/* Add Payment inline form */}
+        {showPayForm && (
+          <div className="mb-5 rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+            <p className="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-3">
+              {quickPayInstalmentId ? `Record Payment — ${instalments.find(i => i.id === quickPayInstalmentId)?.label ?? "Instalment"}` : "New Payment Entry"}
+            </p>
+            {(() => {
+              const payAmt = parseFloat(payForm.amount || "0");
+              const req = payAmt > 0;
+              return (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 mb-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Amount (₹) *</label>
+                    <input type="number" min="0" placeholder="0.00" value={payForm.amount} onChange={(e) => setPay("amount", e.target.value)} className={inputCls} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                      Payment Mode {req && <span className="text-amber-500">*</span>}
+                    </label>
+                    <select value={payForm.paymentMode} onChange={(e) => setPay("paymentMode", e.target.value)}
+                      className={`${inputCls}${req && !payForm.paymentMode ? " border-amber-300" : ""}`}>
+                      <option value="">Select mode</option>
+                      {PAYMENT_MODES.map(m => <option key={m}>{m}</option>)}
+                    </select>
+                    {req && !payForm.paymentMode && <p className="text-xs text-amber-600 mt-1">Required</p>}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                      Payment Date {req && <span className="text-amber-500">*</span>}
+                    </label>
+                    <input type="date" value={payForm.paymentDate} onChange={(e) => setPay("paymentDate", e.target.value)}
+                      className={`${inputCls}${req && !payForm.paymentDate ? " border-amber-300" : ""}`} />
+                    {req && !payForm.paymentDate && <p className="text-xs text-amber-600 mt-1">Required</p>}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                      Receipt / Ref No. {req && <span className="text-amber-500">*</span>}
+                    </label>
+                    <input type="text" placeholder={req ? "Required" : "Optional"} value={payForm.receiptNumber} onChange={(e) => setPay("receiptNumber", e.target.value)}
+                      className={`${inputCls}${req && !payForm.receiptNumber ? " border-amber-300" : ""}`} />
+                    {req && !payForm.receiptNumber && <p className="text-xs text-amber-600 mt-1">Required</p>}
+                  </div>
+                  {instalments.length > 0 && (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Link to Instalment</label>
+                      <select value={payForm.instalmentId} onChange={(e) => setPay("instalmentId", e.target.value)} className={inputCls}>
+                        <option value="">None (general payment)</option>
+                        {instalments.filter(i => !i.isPaid).map((i: any) => (
+                          <option key={i.id} value={i.id}>{i.label ?? `Instalment ${i.instalmentNo}`} — {fmtCurrency(i.amount)}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <div className={instalments.length > 0 ? "" : "sm:col-span-2"}>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Note</label>
+                    <input type="text" placeholder="Optional" value={payForm.note} onChange={(e) => setPay("note", e.target.value)} className={inputCls} />
+                  </div>
+                </div>
+              );
+            })()}
+            <div className="flex items-center gap-2 justify-end">
+              <button onClick={() => { setShowPayForm(false); setPayForm(emptyPayForm()); setQuickPayInstalmentId(null); }}
+                className="text-xs font-medium text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg hover:bg-white transition-colors border border-transparent hover:border-gray-200">
+                Cancel
+              </button>
+              <button onClick={handleAddPayment} disabled={addPaymentMut.isPending}
+                className="flex items-center gap-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 px-4 py-1.5 rounded-lg transition-colors disabled:opacity-50">
+                <Save className="h-3.5 w-3.5" /> {addPaymentMut.isPending ? "Saving…" : "Save Payment"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Log list */}
+        {paymentLogs.length === 0 && !showPayForm ? (
+          <div className="text-center py-8">
+            <IndianRupee className="h-8 w-8 text-gray-200 mx-auto mb-2" />
+            <p className="text-sm text-gray-400">No payments recorded yet.</p>
+            {canEdit && <p className="text-xs text-gray-400 mt-1">Click "Add Payment" to log the first payment.</p>}
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-50">
+            {paymentLogs.map((log: any) => (
+              <div key={log.id} className="flex items-start justify-between gap-3 py-3">
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="h-8 w-8 rounded-full bg-green-50 border border-green-100 flex items-center justify-center shrink-0 mt-0.5">
+                    <IndianRupee className="h-3.5 w-3.5 text-green-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-bold text-green-700">{fmtCurrency(log.amount)}</span>
+                      {log.paymentMode && <span className="text-xs bg-gray-100 text-gray-600 rounded-full px-2 py-0.5">{log.paymentMode}</span>}
+                      {log.instalment && (
+                        <span className="text-xs bg-indigo-50 text-indigo-600 rounded-full px-2 py-0.5 border border-indigo-100">
+                          {log.instalment.label ?? `Instalment ${log.instalment.instalmentNo}`}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {log.paymentDate ? fmt(log.paymentDate) : fmt(log.createdAt)}
+                      {log.receiptNumber && <> · Receipt: {log.receiptNumber}</>}
+                      {log.note && <> · {log.note}</>}
+                    </p>
+                  </div>
+                </div>
+                {canEdit && (
+                  <button onClick={() => { if (confirm("Remove this payment entry?")) deletePaymentMut.mutate(log.id); }}
+                    className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors shrink-0">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
     </div>
   );
 }
@@ -1094,7 +1480,7 @@ export default function StudentDetailPage() {
           {tab === "assignments" && <ComingSoon label="Assignments"  icon={BookOpenCheck}  />}
           {tab === "assessments" && <ComingSoon label="Assessments"  icon={BarChart2}      />}
           {tab === "ptms"        && <ComingSoon label="PTMs"         icon={MessageSquare}  />}
-          {tab === "noticeboard" && <ComingSoon label="Notice Board" icon={Bell}           />}
+          {tab === "noticeboard" && <NoticeBoardTab />}
           {tab === "documents"   && <ComingSoon label="Documents"    icon={FolderOpen}     />}
           {tab === "assistance"  && <ComingSoon label="Assistance"   icon={LifeBuoy}       />}
           {tab === "login"       && <LoginTab    student={student} canEdit={canEdit} onRefetch={refetch} />}

@@ -565,7 +565,7 @@ export function AssessmentStatsPanel({
                   {(["top","low"] as const).map((v) => (
                     <button key={v} onClick={() => setPerfView(v)}
                       className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
-                        perfView === v ? "bg-indigo-600 text-white" : "bg-white text-gray-500 hover:bg-gray-50"
+                        perfView === v ? "bg-[#2C3E7C] text-white" : "bg-white text-gray-500 hover:bg-gray-50"
                       }`}>
                       {v === "top" ? "Top Performers" : "Low Performers"}
                     </button>

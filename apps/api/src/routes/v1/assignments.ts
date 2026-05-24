@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "@cadb/db";
 import { authenticate } from "../../middleware/authenticate.js";
+import { maybeAutoConcludes } from "./scheduleHelpers.js";
 import { createWriteStream, unlinkSync } from "fs";
 import { pipeline } from "stream/promises";
 import { join, dirname } from "path";
@@ -19,6 +20,7 @@ const assignmentSchema = z.object({
   batchIds:       z.array(z.string()).min(1, "At least one batch required"),
   subjectId:      z.string().optional().nullable(),
   employeeId:     z.string().optional().nullable(),
+  scheduleId:     z.string().optional().nullable(),
   topics:         z.string().optional().nullable(),
   note:           z.string().optional().nullable(),
 });
@@ -238,13 +240,14 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
     const parsed = assignmentSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
-    const { batchIds, assignmentDate, submissionDate, subjectId, employeeId, note, topics, ...rest } = parsed.data;
+    const { batchIds, assignmentDate, submissionDate, subjectId, employeeId, scheduleId, note, topics, ...rest } = parsed.data;
 
     const assignment = await prisma.assignment.create({
       data: {
         ...rest,
         subjectId:      subjectId  || null,
         employeeId:     employeeId || null,
+        scheduleId:     scheduleId || null,
         topics:         topics     || null,
         note:           note       || null,
         assignmentDate: new Date(assignmentDate),
@@ -253,6 +256,9 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
       },
       include: assignmentInclude,
     });
+
+    if (scheduleId) await maybeAutoConcludes(scheduleId);
+
     return reply.status(201).send({ success: true, data: assignment });
   });
 
@@ -264,7 +270,7 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
     const parsed = assignmentSchema.partial().safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
-    const { batchIds, assignmentDate, submissionDate, subjectId, employeeId, note, topics, ...rest } = parsed.data;
+    const { batchIds, assignmentDate, submissionDate, subjectId, employeeId, scheduleId, note, topics, ...rest } = parsed.data;
 
     const assignment = await prisma.$transaction(async (tx) => {
       if (batchIds) {
@@ -276,6 +282,7 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
           ...rest,
           ...(subjectId  !== undefined ? { subjectId:  subjectId  || null } : {}),
           ...(employeeId !== undefined ? { employeeId: employeeId || null } : {}),
+          ...(scheduleId !== undefined ? { scheduleId: scheduleId || null } : {}),
           ...(topics     !== undefined ? { topics:     topics     || null } : {}),
           ...(note       !== undefined ? { note:       note       || null } : {}),
           ...(assignmentDate ? { assignmentDate: new Date(assignmentDate) } : {}),

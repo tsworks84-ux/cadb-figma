@@ -10,6 +10,7 @@ import {
   ChevronUp, ChevronDown, ChevronsUpDown, Paperclip,
   Clock, AlertTriangle, CircleDot, CheckCircle, Ban,
   Filter, CornerDownRight, Send, CalendarDays,
+  Activity, ClipboardList,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -487,7 +488,8 @@ function AddMemberPanel({ ownerId, onClose }: { ownerId: string; onClose: () => 
                 <button
                   onClick={() => addMutation.mutate(emp.id)}
                   disabled={addMutation.isPending}
-                  className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                  className="shrink-0 inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+                  style={{ backgroundColor: "#2C3E7C" }}
                 >
                   <Plus className="h-3 w-3" /> Add
                 </button>
@@ -1120,21 +1122,241 @@ function MemberExpandedPanel({ member, canAssign }: { member: TeamMember; canAss
   );
 }
 
+// ── Member Card (Figma-style rich card) ──────────────────────────────────────
+
+function MemberCard({
+  tm, canManage, canAssign, onAssignTask, onRemove,
+}: {
+  tm: TeamMember;
+  canManage: boolean;
+  canAssign: boolean;
+  onAssignTask: () => void;
+  onRemove: () => void;
+}) {
+  const [expandedTab, setExpandedTab] = useState<null | "tasks" | "leaves">(null);
+  const initials = `${tm.member.firstName[0]}${tm.member.lastName[0]}`;
+  const pct = tm.tasks.total > 0 ? Math.round((tm.tasks.completed / tm.tasks.total) * 100) : 0;
+  const isOnLeave = tm.presence === "ON_LEAVE";
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 hover:shadow-md transition-shadow overflow-hidden">
+      <div className="p-6">
+        {/* Header */}
+        <div className="flex items-start gap-4 mb-4">
+          <div
+            className="w-16 h-16 rounded-full flex items-center justify-center text-white font-semibold text-lg flex-shrink-0 overflow-hidden"
+            style={{ backgroundColor: "#2C3E7C" }}
+          >
+            {tm.member.photoUrl
+              ? <img src={`${API_URL}${tm.member.photoUrl}`} alt="" className="h-full w-full object-cover" />
+              : initials}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between mb-1">
+              <div className="flex-1 min-w-0 pr-2">
+                <h3 className="text-lg font-semibold text-gray-900 truncate">
+                  {tm.member.firstName} {tm.member.lastName}
+                </h3>
+                <p className="text-sm text-gray-600 truncate">{tm.member.designation?.title ?? "—"}</p>
+              </div>
+              {/* Bin + Leave Records tab stacked */}
+              <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                {canManage && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (confirm(`Remove ${tm.member.firstName} ${tm.member.lastName} from your team?`))
+                        onRemove();
+                    }}
+                    className="p-2 hover:bg-red-50 rounded-md text-gray-300 hover:text-red-500"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                )}
+                <button
+                  onClick={() => setExpandedTab(expandedTab === "leaves" ? null : "leaves")}
+                  className={`flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    expandedTab === "leaves"
+                      ? "bg-orange-50 text-orange-600 border border-orange-200"
+                      : "text-gray-700 hover:bg-gray-50 border border-gray-200"
+                  }`}
+                >
+                  <CalendarDays size={14} />
+                  Leave
+                </button>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
+              <span
+                className="px-2 py-1 rounded-md text-xs font-medium"
+                style={
+                  isOnLeave
+                    ? { backgroundColor: "#F2994A15", color: "#F2994A", border: "1px solid #F2994A30" }
+                    : { backgroundColor: "#10b98115", color: "#059669", border: "1px solid #10b98130" }
+                }
+              >
+                {isOnLeave ? "On Leave" : "Active"}
+              </span>
+              <span className="text-xs text-gray-500">{tm.member.employeeCode}</span>
+              {tm.member.department?.name && (
+                <>
+                  <span className="text-xs text-gray-400">•</span>
+                  <span className="text-xs text-gray-500">{tm.member.department.name}</span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Active leave banner */}
+        {tm.activeLeave && (
+          <div className="flex items-center gap-2 mb-4 p-2.5 bg-orange-50 border border-orange-100 rounded-md text-xs text-orange-700">
+            <CalendarOff size={14} className="shrink-0" />
+            <span>
+              {LEAVE_LABEL[tm.activeLeave.leaveType] ?? tm.activeLeave.leaveType} ·{" "}
+              {fmtDate(tm.activeLeave.fromDate)} – {fmtDate(tm.activeLeave.toDate)}
+            </span>
+          </div>
+        )}
+
+        {/* Metrics grid */}
+        <div className="grid grid-cols-3 gap-3 py-4 border-t border-b border-gray-200 mb-4">
+          <div>
+            <div className="flex items-center gap-1 mb-1">
+              <Activity size={14} className="text-gray-500" />
+              <span className="text-xs text-gray-600">Progress</span>
+            </div>
+            <p className="text-lg font-semibold text-gray-900">{pct}%</p>
+            <div className="w-full bg-gray-200 rounded-full h-1 mt-1">
+              <div
+                className="h-1 rounded-full"
+                style={{
+                  width: `${pct}%`,
+                  backgroundColor: pct >= 80 ? "#10b981" : pct >= 40 ? "#F2994A" : "#E07A5F",
+                }}
+              />
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center gap-1 mb-1">
+              <CheckCircle2 size={14} className="text-gray-500" />
+              <span className="text-xs text-gray-600">Tasks</span>
+            </div>
+            <p className="text-lg font-semibold text-gray-900">
+              {tm.tasks.total - tm.tasks.completed}
+            </p>
+            <p className="text-xs text-gray-500">{tm.tasks.completed} done</p>
+          </div>
+
+          <div>
+            <div className="flex items-center gap-1 mb-1">
+              <AlertTriangle size={14} className="text-gray-500" />
+              <span className="text-xs text-gray-600">Overdue</span>
+            </div>
+            <p className={`text-lg font-semibold ${tm.tasks.due > 0 ? "text-red-600" : "text-gray-900"}`}>
+              {tm.tasks.due}
+            </p>
+            {tm.tasks.due > 0 && <p className="text-xs text-red-500">overdue</p>}
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-col sm:flex-row gap-2">
+          <button
+            onClick={() => setExpandedTab(expandedTab === "tasks" ? null : "tasks")}
+            className="flex-1 px-4 py-2 border rounded-md text-sm font-medium hover:bg-blue-50 transition-colors"
+            style={{ borderColor: "#2C3E7C", color: "#2C3E7C" }}
+          >
+            {expandedTab === "tasks" ? "Hide Tasks" : "View Tasks"}
+          </button>
+          {canAssign && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onAssignTask(); }}
+              className="px-4 py-2 border border-gray-200 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Assign Task
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Expanded panels */}
+      {expandedTab === "tasks" && (
+        <div className="border-t border-blue-100 animate-slide-down-reveal">
+          <TaskPanel member={tm} canAssign={canAssign} onClose={() => setExpandedTab(null)} />
+        </div>
+      )}
+      {expandedTab === "leaves" && (
+        <div className="border-t border-orange-100 animate-slide-down-reveal">
+          <LeavePanel memberId={tm.memberId} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Assign-Task Picker ────────────────────────────────────────────────────────
+
+function AssignTaskPicker({
+  team, onSelect, onClose,
+}: {
+  team: TeamMember[];
+  onSelect: (tm: TeamMember) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+      <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <h2 className="text-base font-bold text-gray-900">Select Team Member</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 p-1.5 rounded-lg hover:bg-gray-100">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="p-3 max-h-80 overflow-y-auto">
+          {team.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-8">No team members to assign to.</p>
+          ) : (
+            team.map((tm) => (
+              <button
+                key={tm.id}
+                onClick={() => { onSelect(tm); onClose(); }}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-gray-50 text-left transition-colors"
+              >
+                <Avatar member={tm.member} size="sm" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900">
+                    {tm.member.firstName} {tm.member.lastName}
+                  </p>
+                  <p className="text-xs text-gray-500 truncate">
+                    {tm.member.designation?.title ?? tm.member.employeeCode}
+                  </p>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── My Team Page ──────────────────────────────────────────────────────────────
 
 export default function MyTeamPage() {
   const { user } = useAuthStore();
   const queryClient = useQueryClient();
   const [showAdd, setShowAdd] = useState(false);
-  const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
+  const [assignTaskTarget, setAssignTaskTarget] = useState<TeamMember | null>(null);
+  const [showAssignPicker, setShowAssignPicker] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterStatus, setFilterStatus] = useState<"all" | "active" | "on-leave">("all");
 
-  // Only admins/dept-head can add or remove team members
   const canManage =
     user?.role === "SUPER_ADMIN" ||
     user?.role === "HR_ADMIN" ||
     user?.role === "DEPT_HEAD";
-
-  // Anyone who owns a team can assign tasks to their members
   const canAssignTasks = true;
 
   const { data: team = [], isLoading } = useQuery<TeamMember[]>({
@@ -1158,191 +1380,291 @@ export default function MyTeamPage() {
 
   const present = team.filter((m) => m.presence === "PRESENT").length;
   const onLeave = team.filter((m) => m.presence === "ON_LEAVE").length;
+  const totalActiveTasks = team.reduce((acc, m) => acc + (m.tasks.total - m.tasks.completed), 0);
+  const totalOverdue = team.reduce((acc, m) => acc + m.tasks.due, 0);
+  const avgCompletionPct = team.length > 0
+    ? Math.round(
+        team.reduce((acc, m) => {
+          const pct = m.tasks.total > 0 ? (m.tasks.completed / m.tasks.total) * 100 : 0;
+          return acc + pct;
+        }, 0) / team.length
+      )
+    : 0;
+  const presenceRate = team.length > 0 ? Math.round((present / team.length) * 100) : 0;
+
+  const filtered = useMemo(() => {
+    return team.filter((tm) => {
+      const q = searchQuery.toLowerCase();
+      const name = `${tm.member.firstName} ${tm.member.lastName}`.toLowerCase();
+      const role = tm.member.designation?.title?.toLowerCase() ?? "";
+      const dept = tm.member.department?.name?.toLowerCase() ?? "";
+      const matchesSearch = !q || name.includes(q) || role.includes(q) || dept.includes(q);
+      const matchesFilter =
+        filterStatus === "all" ||
+        (filterStatus === "active" && tm.presence === "PRESENT") ||
+        (filterStatus === "on-leave" && tm.presence === "ON_LEAVE");
+      return matchesSearch && matchesFilter;
+    });
+  }, [team, searchQuery, filterStatus]);
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">My Team</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            {team.length} member{team.length !== 1 ? "s" : ""}
-            {team.length > 0 && ` · ${present} present · ${onLeave} on leave`}
+          <div className="flex items-center gap-2 mb-2">
+            <div
+              className="w-8 h-8 rounded-md flex items-center justify-center"
+              style={{ backgroundColor: "#2C3E7C" }}
+            >
+              <UsersRound className="text-white" size={18} />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500 uppercase tracking-wide">Team Management</p>
+              <h1 className="text-2xl font-semibold text-gray-900">My Team</h1>
+            </div>
+          </div>
+          <p className="text-sm text-gray-600 mt-1">
+            Manage your team members, assign tasks, and track performance
           </p>
         </div>
-        {canManage && (
-          <button
-            onClick={() => setShowAdd((v) => !v)}
-            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm transition-colors ${
-              showAdd
-                ? "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                : "bg-blue-600 text-white hover:bg-blue-700"
-            }`}
-          >
-            {showAdd ? <X className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
-            {showAdd ? "Cancel" : "Add Member"}
-          </button>
-        )}
+        <div className="flex gap-2 md:gap-3 flex-wrap md:flex-nowrap w-full md:w-auto">
+          {canAssignTasks && team.length > 0 && (
+            <button
+              onClick={() => setShowAssignPicker(true)}
+              className="flex-1 md:flex-initial px-3 md:px-4 py-2 border border-gray-200 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center justify-center gap-2"
+            >
+              <ClipboardList size={18} />
+              <span className="hidden sm:inline">Assign Task</span>
+              <span className="sm:hidden">Task</span>
+            </button>
+          )}
+          {canManage && (
+            <button
+              onClick={() => setShowAdd((v) => !v)}
+              className="flex-1 md:flex-initial px-3 md:px-4 py-2 rounded-md text-sm font-medium text-white flex items-center justify-center gap-2"
+              style={{ backgroundColor: "#2C3E7C" }}
+            >
+              {showAdd ? <X size={18} /> : <UserPlus size={18} />}
+              <span className="hidden sm:inline">{showAdd ? "Cancel" : "Add Team Member"}</span>
+              <span className="sm:hidden">{showAdd ? "Cancel" : "Add Member"}</span>
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Add panel */}
+      {/* Add Member Panel */}
       {showAdd && user?.id && (
         <AddMemberPanel ownerId={user.id} onClose={() => setShowAdd(false)} />
       )}
 
-      {/* Summary stats */}
-      {team.length > 0 && (
-        <div className="grid grid-cols-3 gap-4">
-          {[
-            { label: "Total Members", value: team.length,  color: "text-blue-600",   bg: "bg-blue-50"   },
-            { label: "Present Today", value: present,       color: "text-green-600",  bg: "bg-green-50"  },
-            { label: "On Leave",      value: onLeave,       color: "text-orange-600", bg: "bg-orange-50" },
-          ].map((s) => (
-            <div key={s.label} className={`rounded-xl ${s.bg} p-4 text-center`}>
-              <p className={`text-3xl font-bold ${s.color}`}>{s.value}</p>
-              <p className="text-xs text-gray-500 mt-1">{s.label}</p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Team list */}
-      {isLoading ? (
-        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className={`flex items-center gap-4 px-5 py-4 animate-pulse ${i > 0 ? "border-t border-gray-100" : ""}`}>
-              <div className="h-9 w-9 rounded-full bg-gray-200 shrink-0" />
-              <div className="flex-1 space-y-2">
-                <div className="h-3 bg-gray-200 rounded w-40" />
-                <div className="h-2.5 bg-gray-100 rounded w-56" />
+      {/* Two-column layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Main content — left 2/3 */}
+        <div className="lg:col-span-2 space-y-4">
+          {/* Search and filter */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+              <div className="flex-1 relative min-w-0">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                <input
+                  type="text"
+                  placeholder="Search by name, role, or department…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-offset-0"
+                />
               </div>
-              <div className="h-5 w-16 bg-gray-100 rounded-full" />
-              <div className="h-3 w-24 bg-gray-100 rounded" />
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value as typeof filterStatus)}
+                className="px-3 py-2 border border-gray-200 rounded-md text-sm text-gray-700 focus:outline-none bg-white"
+              >
+                <option value="all">All Status</option>
+                <option value="active">Active</option>
+                <option value="on-leave">On Leave</option>
+              </select>
             </div>
-          ))}
-        </div>
-      ) : team.length === 0 ? (
-        <div className="rounded-xl border-2 border-dashed border-gray-200 py-20 text-center">
-          <UsersRound className="mx-auto h-12 w-12 text-gray-300 mb-3" />
-          <p className="text-gray-500 font-medium">No team members yet</p>
-          {canManage ? (
-            <p className="text-sm text-gray-400 mt-1">Click <strong>Add Member</strong> above to build your team.</p>
-          ) : (
-            <p className="text-sm text-gray-400 mt-1">Ask your HR or admin to add team members to your profile.</p>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {/* Column header */}
-          <div className="grid grid-cols-[2fr_1.5fr_120px_200px_36px] items-center gap-4 px-5 py-2.5 bg-gray-50 rounded-xl border border-gray-200 text-[11px] font-bold text-gray-400 uppercase tracking-wide">
-            <span>Member</span>
-            <span>Department · Role</span>
-            <span>Status</span>
-            <span>Task Progress</span>
-            <span />
           </div>
 
-          {/* Accordion member cards */}
-          {team.map((tm) => {
-            const isExpanded = selectedMember?.id === tm.id;
-            const pct = tm.tasks.total > 0 ? Math.round((tm.tasks.completed / tm.tasks.total) * 100) : 0;
-            return (
-              <div
-                key={tm.id}
-                className={`rounded-xl overflow-hidden transition-all duration-200 ${
-                  isExpanded
-                    ? "ring-2 ring-blue-400 shadow-lg"
-                    : "ring-1 ring-gray-200 shadow-sm hover:shadow-md hover:ring-gray-300"
-                }`}
-              >
-                {/* Member row */}
-                <div
-                  onClick={() => setSelectedMember(isExpanded ? null : tm)}
-                  className={`grid grid-cols-[2fr_1.5fr_120px_200px_36px] items-center gap-4 px-5 py-3.5 cursor-pointer group transition-colors
-                    ${isExpanded ? "bg-blue-50/50" : "bg-white hover:bg-blue-50/20"}`}
-                >
-                  {/* Name + avatar */}
-                  <div className="flex items-center gap-3 min-w-0">
-                    <Avatar member={tm.member} size="sm" />
-                    <div className="min-w-0">
-                      <p className={`text-sm font-semibold truncate transition-colors ${isExpanded ? "text-blue-700" : "text-gray-900 group-hover:text-blue-600"}`}>
-                        {tm.member.firstName} {tm.member.lastName}
-                      </p>
-                      <p className="text-xs text-gray-400 truncate">{tm.member.employeeCode}</p>
+          {/* Team member cards */}
+          {isLoading ? (
+            <div className="space-y-4">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="bg-white rounded-lg border border-gray-200 p-6 animate-pulse">
+                  <div className="flex items-start gap-4">
+                    <div className="w-16 h-16 rounded-full bg-gray-200 shrink-0" />
+                    <div className="flex-1 space-y-2 pt-2">
+                      <div className="h-4 bg-gray-200 rounded w-40" />
+                      <div className="h-3 bg-gray-100 rounded w-56" />
                     </div>
-                  </div>
-
-                  {/* Dept + designation */}
-                  <div className="min-w-0">
-                    <p className="text-sm text-gray-600 truncate">{tm.member.department?.name}</p>
-                    <p className="text-xs text-gray-400 truncate">{tm.member.designation?.title}</p>
-                  </div>
-
-                  {/* Presence */}
-                  <div>
-                    {tm.presence === "ON_LEAVE" ? (
-                      <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium bg-orange-100 text-orange-700 whitespace-nowrap">
-                        <CalendarOff className="h-3 w-3" /> On Leave
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium bg-green-100 text-green-700">
-                        <CheckCircle2 className="h-3 w-3" /> Present
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Task progress */}
-                  <div className="min-w-0">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-xs text-gray-500 tabular-nums font-medium">
-                        {tm.tasks.completed}/{tm.tasks.total} done
-                      </span>
-                      {tm.tasks.due > 0 && (
-                        <span className="text-[11px] text-red-500 font-semibold flex items-center gap-0.5">
-                          <AlertTriangle className="h-3 w-3" />{tm.tasks.due} overdue
-                        </span>
-                      )}
-                    </div>
-                    <div className="h-2 w-full rounded-full bg-gray-100 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-500 ${
-                          tm.tasks.due > 0 ? "bg-gradient-to-r from-orange-400 to-red-400" : "bg-gradient-to-r from-blue-400 to-emerald-400"
-                        }`}
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Remove */}
-                  <div className="flex justify-end">
-                    {canManage && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (confirm(`Remove ${tm.member.firstName} ${tm.member.lastName} from your team?`))
-                            removeMutation.mutate(tm.memberId);
-                        }}
-                        disabled={removeMutation.isPending}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1.5 text-gray-300 hover:bg-red-50 hover:text-red-500"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    )}
                   </div>
                 </div>
-
-                {/* Inline expansion — tabs: Tasks | Leave Records */}
-                {isExpanded && (
-                  <div className="animate-slide-down-reveal border-t border-blue-100">
-                    <MemberExpandedPanel member={tm} canAssign={canAssignTasks} />
-                  </div>
-                )}
-              </div>
-            );
-          })}
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="rounded-xl border-2 border-dashed border-gray-200 py-20 text-center bg-white">
+              <UsersRound className="mx-auto h-12 w-12 text-gray-300 mb-3" />
+              <p className="text-gray-500 font-medium">
+                {team.length === 0 ? "No team members yet" : "No members match your search"}
+              </p>
+              {team.length === 0 && canManage && (
+                <p className="text-sm text-gray-400 mt-1">
+                  Click <strong>Add Team Member</strong> above to build your team.
+                </p>
+              )}
+              {team.length === 0 && !canManage && (
+                <p className="text-sm text-gray-400 mt-1">
+                  Ask your HR or admin to add team members to your profile.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {filtered.map((tm) => (
+                <MemberCard
+                  key={tm.id}
+                  tm={tm}
+                  canManage={canManage}
+                  canAssign={canAssignTasks}
+                  onAssignTask={() => setAssignTaskTarget(tm)}
+                  onRemove={() => removeMutation.mutate(tm.memberId)}
+                />
+              ))}
+            </div>
+          )}
         </div>
+
+        {/* Right sidebar — 1/3 */}
+        <div className="space-y-4">
+          {/* Team Overview */}
+          <div className="bg-white rounded-lg border border-gray-200 p-5">
+            <h3 className="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wide">
+              Team Overview
+            </h3>
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm text-gray-600 mb-1">Total Members</p>
+                <p className="text-3xl font-semibold text-gray-900">{team.length}</p>
+              </div>
+              <div className="pt-4 border-t border-gray-200">
+                <p className="text-sm text-gray-600 mb-1">Active Members</p>
+                <p className="text-3xl font-semibold" style={{ color: "#2C3E7C" }}>{present}</p>
+              </div>
+              <div className="pt-4 border-t border-gray-200">
+                <p className="text-sm text-gray-600 mb-1">On Leave</p>
+                <p className="text-3xl font-semibold text-orange-500">{onLeave}</p>
+              </div>
+              <div className="pt-4 border-t border-gray-200">
+                <p className="text-sm text-gray-600 mb-1">Active Tasks</p>
+                <p className="text-3xl font-semibold text-gray-900">{totalActiveTasks}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Team Analytics */}
+          <div className="bg-white rounded-lg border border-gray-200 p-5">
+            <h3 className="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wide">
+              Team Analytics
+            </h3>
+            <div className="space-y-5">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <div
+                    className="w-8 h-8 rounded-lg flex items-center justify-center"
+                    style={{ backgroundColor: "#2C3E7C20" }}
+                  >
+                    <Activity style={{ color: "#2C3E7C" }} size={16} />
+                  </div>
+                  <p className="text-xs text-gray-600 font-medium">Avg. Task Completion</p>
+                </div>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <p className="text-2xl font-semibold text-gray-900">{avgCompletionPct}%</p>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-1.5">
+                  <div
+                    className="h-1.5 rounded-full"
+                    style={{
+                      width: `${avgCompletionPct}%`,
+                      backgroundColor:
+                        avgCompletionPct >= 80 ? "#10b981" : avgCompletionPct >= 50 ? "#F2994A" : "#E07A5F",
+                    }}
+                  />
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  {avgCompletionPct >= 80
+                    ? "Excellent progress"
+                    : avgCompletionPct >= 50
+                    ? "On track"
+                    : "Needs attention"}
+                </p>
+              </div>
+
+              <div className="pt-4 border-t border-gray-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
+                    <UsersRound className="text-blue-600" size={16} />
+                  </div>
+                  <p className="text-xs text-gray-600 font-medium">Presence Rate</p>
+                </div>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <p className="text-2xl font-semibold text-gray-900">{presenceRate}%</p>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-1.5">
+                  <div
+                    className="bg-blue-600 h-1.5 rounded-full"
+                    style={{ width: `${presenceRate}%` }}
+                  />
+                </div>
+              </div>
+
+              {team.length > 0 && (
+                <div className="pt-4 border-t border-gray-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center">
+                      <AlertTriangle className="text-red-500" size={16} />
+                    </div>
+                    <p className="text-xs text-gray-600 font-medium">Overdue Tasks</p>
+                  </div>
+                  <p className="text-2xl font-semibold text-gray-900">{totalOverdue}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Assign Task Picker Modal */}
+      {showAssignPicker && (
+        <AssignTaskPicker
+          team={team}
+          onSelect={(tm) => setAssignTaskTarget(tm)}
+          onClose={() => setShowAssignPicker(false)}
+        />
       )}
 
+      {/* New Task Modal (from per-card or header picker) */}
+      {assignTaskTarget && (
+        <NewTaskModal
+          assigneeId={assignTaskTarget.memberId}
+          assigneeName={`${assignTaskTarget.member.firstName} ${assignTaskTarget.member.lastName}`}
+          onClose={() => setAssignTaskTarget(null)}
+          onCreated={(newTask) => {
+            queryClient.setQueryData<Task[]>(["tasks", assignTaskTarget.memberId], (old) =>
+              old ? [newTask, ...old] : [newTask]
+            );
+            queryClient.setQueryData<TeamMember[]>(["my-team", user?.id], (old) =>
+              old
+                ? old.map((m) =>
+                    m.memberId === assignTaskTarget.memberId
+                      ? { ...m, tasks: { ...m.tasks, total: m.tasks.total + 1 } }
+                      : m
+                  )
+                : old
+            );
+          }}
+        />
+      )}
     </div>
   );
 }

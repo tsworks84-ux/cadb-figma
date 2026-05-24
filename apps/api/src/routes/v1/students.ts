@@ -206,6 +206,10 @@ export async function studentRoutes(fastify: FastifyInstance) {
           select: { id: true, instalmentNo: true, label: true, amount: true, dueDate: true, isPaid: true, paidAt: true, paidAmount: true, paymentMode: true, note: true },
           orderBy: { instalmentNo: "asc" },
         },
+        paymentLogs: {
+          select: { id: true, amount: true, paymentMode: true, paymentDate: true, receiptNumber: true, note: true, instalmentId: true, createdAt: true, instalment: { select: { instalmentNo: true, label: true } } },
+          orderBy: { createdAt: "desc" },
+        },
       },
     });
     if (!student) return reply.status(404).send({ success: false, error: "Student not found" });
@@ -393,6 +397,142 @@ export async function studentRoutes(fastify: FastifyInstance) {
     requireAdmin(request, reply);
     const { id } = request.params as any;
     await prisma.student.delete({ where: { id } });
+    return reply.send({ success: true });
+  });
+
+  // ── PAYMENT LOGS ───────────────────────────────────────────────────────────
+
+  const paymentLogSchema = z.object({
+    amount:        z.number().positive(),
+    paymentMode:   z.string().optional(),
+    paymentDate:   z.string().optional(),
+    receiptNumber: z.string().optional(),
+    note:          z.string().optional(),
+    instalmentId:  z.string().optional(),
+  });
+
+  fastify.get("/:id/payment-logs", async (request, reply) => {
+    const { id } = request.params as any;
+    const logs = await prisma.studentPaymentLog.findMany({
+      where: { studentId: id },
+      orderBy: { createdAt: "desc" },
+      include: { instalment: { select: { instalmentNo: true, label: true } } },
+    });
+    return reply.send({ success: true, data: logs });
+  });
+
+  fastify.post("/:id/payment-logs", async (request, reply) => {
+    requireAdmin(request, reply);
+    const { id } = request.params as any;
+    const parsed = paymentLogSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
+
+    const student = await prisma.student.findUnique({ where: { id }, select: { id: true, paidFee: true } });
+    if (!student) return reply.status(404).send({ success: false, error: "Student not found" });
+
+    const { amount, paymentDate, instalmentId, ...rest } = parsed.data;
+
+    const [log] = await prisma.$transaction(async (tx) => {
+      const newLog = await tx.studentPaymentLog.create({
+        data: {
+          studentId:   id,
+          amount,
+          paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
+          instalmentId: instalmentId || null,
+          ...rest,
+        },
+        include: { instalment: { select: { instalmentNo: true, label: true } } },
+      });
+      // Use explicit value to avoid NULL + amount = NULL in Postgres
+      await tx.student.update({
+        where: { id },
+        data: { paidFee: (student.paidFee ?? 0) + amount },
+      });
+      // If linked to an instalment, mark it paid
+      if (instalmentId) {
+        await tx.studentInstalment.update({
+          where: { id: instalmentId },
+          data: { isPaid: true, paidAt: new Date(), paidAmount: amount, paymentMode: rest.paymentMode ?? null, note: rest.note ?? null },
+        });
+      }
+      return [newLog];
+    });
+
+    return reply.status(201).send({ success: true, data: log });
+  });
+
+  fastify.delete("/:id/payment-logs/:logId", async (request, reply) => {
+    requireAdmin(request, reply);
+    const { id, logId } = request.params as any;
+    const log = await prisma.studentPaymentLog.findUnique({ where: { id: logId, studentId: id } });
+    if (!log) return reply.status(404).send({ success: false, error: "Log not found" });
+
+    await prisma.$transaction(async (tx) => {
+      const cur = await tx.student.findUnique({ where: { id }, select: { paidFee: true } });
+      await tx.studentPaymentLog.delete({ where: { id: logId } });
+      await tx.student.update({ where: { id }, data: { paidFee: Math.max(0, (cur?.paidFee ?? 0) - log.amount) } });
+      if (log.instalmentId) {
+        await tx.studentInstalment.update({
+          where: { id: log.instalmentId },
+          data: { isPaid: false, paidAt: null, paidAmount: null, paymentMode: null, note: null },
+        });
+      }
+    });
+
+    return reply.send({ success: true });
+  });
+
+  // ── ADD INSTALMENT ─────────────────────────────────────────────────────────
+
+  fastify.post("/:id/instalments", async (request, reply) => {
+    requireAdmin(request, reply);
+    const { id } = request.params as any;
+    const body = request.body as any;
+
+    const existing = await prisma.studentInstalment.findMany({
+      where: { studentId: id }, select: { instalmentNo: true }, orderBy: { instalmentNo: "desc" }, take: 1,
+    });
+    const nextNo = (existing[0]?.instalmentNo ?? 0) + 1;
+
+    const ins = await prisma.studentInstalment.create({
+      data: {
+        studentId:    id,
+        instalmentNo: nextNo,
+        label:        body.label ?? `Instalment ${nextNo}`,
+        amount:       parseFloat(body.amount) || 0,
+        dueDate:      body.dueDate ? new Date(body.dueDate) : undefined,
+      },
+    });
+    return reply.status(201).send({ success: true, data: ins });
+  });
+
+  // ── INSTALMENT PAY ─────────────────────────────────────────────────────────
+
+  fastify.patch("/:id/instalments/:instalmentId", async (request, reply) => {
+    requireAdmin(request, reply);
+    const { id, instalmentId } = request.params as any;
+    const body = request.body as any;
+    const ins = await prisma.studentInstalment.findUnique({ where: { id: instalmentId, studentId: id } });
+    if (!ins) return reply.status(404).send({ success: false, error: "Instalment not found" });
+
+    const data: any = {};
+    // Amount / due-date edits (independent of paid status)
+    if (body.amount  !== undefined) data.amount  = parseFloat(body.amount);
+    if (body.dueDate !== undefined) data.dueDate = body.dueDate ? new Date(body.dueDate) : null;
+    if (body.label   !== undefined) data.label   = body.label;
+
+    // Paid-status toggle (only when explicitly sent)
+    if (body.isPaid !== undefined) {
+      const markPaid = body.isPaid !== false;
+      data.isPaid      = markPaid;
+      data.paidAt      = markPaid ? new Date() : null;
+      data.paidAmount  = body.paidAmount ?? null;
+      data.paymentMode = body.paymentMode ?? null;
+      data.note        = body.note ?? null;
+    }
+
+    await prisma.studentInstalment.update({ where: { id: instalmentId }, data });
+
     return reply.send({ success: true });
   });
 }

@@ -18,3 +18,11 @@ export function formatCurrency(amount: number) {
 export function getInitials(firstName: string, lastName: string) {
   return `${firstName[0]}${lastName[0]}`.toUpperCase();
 }
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+
+/** Resolves a photo URL that may be relative (/uploads/...) or absolute (https://...s3...). */
+export function resolvePhotoUrl(photoUrl: string | null | undefined): string | null {
+  if (!photoUrl) return null;
+  return photoUrl.startsWith("http") ? photoUrl : `${API_BASE}${photoUrl}`;
+}

@@ -92,7 +92,7 @@ function SectionHero({ icon, title, subtitle, canEdit, onNew, newLabel }: { icon
   );
 }
 
-function SectionToolbar({ search, onSearch, showAll, onShowAll, showAllLabel = "Show archived" }: { search: string; onSearch: (v: string) => void; showAll: boolean; onShowAll: (v: boolean) => void; showAllLabel?: string }) {
+function SectionToolbar({ search, onSearch, showAll, onShowAll, showAllLabel = "Show archived", onExportExcel, onExportPDF }: { search: string; onSearch: (v: string) => void; showAll: boolean; onShowAll: (v: boolean) => void; showAllLabel?: string; onExportExcel?: () => void; onExportPDF?: () => void }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
       <input value={search} onChange={e => onSearch(e.target.value)} placeholder="Search..." style={{ flex: 1, minWidth: 160, minHeight: 42, borderRadius: 12, border: `1px solid ${D.line}`, padding: "0 14px", fontSize: 13, background: "#fff", outline: "none" }} />
@@ -100,7 +100,8 @@ function SectionToolbar({ search, onSearch, showAll, onShowAll, showAllLabel = "
         <input type="checkbox" checked={showAll} onChange={e => onShowAll(e.target.checked)} style={{ accentColor: D.nav2 }} />
         {showAllLabel}
       </label>
-      <button style={{ padding: "0 16px", height: 42, borderRadius: 12, border: `1px solid ${D.line}`, background: "#fff", color: D.muted, fontSize: 13, cursor: "pointer" }}>Export</button>
+      {onExportExcel && <button onClick={onExportExcel} style={{ padding: "0 14px", height: 42, borderRadius: 12, border: `1px solid ${D.line}`, background: "#fff", color: D.muted, fontSize: 13, cursor: "pointer" }}>↓ Excel</button>}
+      {onExportPDF && <button onClick={onExportPDF} style={{ padding: "0 14px", height: 42, borderRadius: 12, border: `1px solid ${D.line}`, background: "#fff", color: D.muted, fontSize: 13, cursor: "pointer" }}>↓ PDF</button>}
     </div>
   );
 }
@@ -134,6 +135,31 @@ const rowStyle = (dim = false): React.CSSProperties => ({ borderTop: `1px solid 
 const addCard: React.CSSProperties = { borderRadius: 14, border: `1px solid ${D.accent}`, background: "#f8f9ff", padding: 16, marginBottom: 16 };
 const addTitle: React.CSSProperties = { margin: "0 0 12px", fontSize: 13, fontWeight: 600, color: D.nav2 };
 const iconBadge = (text: string, color = "#8b5cf6", bg = "#f5f3ff"): React.CSSProperties => ({});
+
+function downloadCSV(filename: string, headers: string[], rows: (string | number | null | undefined)[][]) {
+  const lines = [headers, ...rows].map(r => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","));
+  const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  Object.assign(document.createElement("a"), { href: url, download: filename + ".csv" }).click();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadPDF(title: string, headers: string[], rows: (string | number | null | undefined)[][]) {
+  const { jsPDF } = await import("jspdf");
+  const { default: autoTable } = await import("jspdf-autotable");
+  const doc = new jsPDF({ orientation: "landscape" });
+  doc.setFontSize(14); doc.text(title, 14, 15);
+  doc.setFontSize(9); doc.setTextColor(150);
+  doc.text(`Exported ${new Date().toLocaleDateString("en-IN")}`, 14, 22);
+  autoTable(doc, {
+    head: [headers], body: rows.map(r => r.map(v => String(v ?? ""))),
+    startY: 27, styles: { fontSize: 9 }, headStyles: { fillColor: [40, 36, 95] },
+  });
+  const blob = doc.output("blob");
+  const url = URL.createObjectURL(blob);
+  Object.assign(document.createElement("a"), { href: url, download: `${title.toLowerCase().replace(/\s+/g, "-")}.pdf` }).click();
+  URL.revokeObjectURL(url);
+}
 
 // ── Academic Years Tab ─────────────────────────────────────────────────────────
 function AcademicYearsTab({ canEdit }: { canEdit: boolean }) {
@@ -241,7 +267,9 @@ function TargetExamsTab({ canEdit }: { canEdit: boolean }) {
     <>
       <SectionHero icon="TE" title="Target Exams" subtitle="Define JEE, NEET, Foundation, board, and custom exam goals." canEdit={canEdit} onNew={() => setAdding(true)} newLabel="New Exam" />
       <StatCards cards={[{ label: "Active Exams", value: activeCount }, { label: "Total", value: exams.length }, { label: "Inactive", value: inactiveCount }]} />
-      <SectionToolbar search={search} onSearch={setSearch} showAll={showAll} onShowAll={setShowAll} showAllLabel="Show inactive" />
+      <SectionToolbar search={search} onSearch={setSearch} showAll={showAll} onShowAll={setShowAll} showAllLabel="Show inactive"
+        onExportExcel={() => downloadCSV("target-exams", ["Code", "Name", "Category", "Status"], (exams as any[]).map(e => [e.code, e.name, CATEGORY_LABELS[e.category as ExamCategory] ?? e.category, e.isActive ? "Active" : "Inactive"]))}
+        onExportPDF={() => downloadPDF("Target Exams", ["Code", "Name", "Category", "Status"], (exams as any[]).map(e => [e.code, e.name, CATEGORY_LABELS[e.category as ExamCategory] ?? e.category, e.isActive ? "Active" : "Inactive"]))} />
       {adding && (
         <div style={addCard}>
           <p style={addTitle}>New Target Exam</p>
@@ -310,8 +338,10 @@ function GradesTab({ canEdit }: { canEdit: boolean }) {
   return (
     <>
       <SectionHero icon="GR" title="Grades" subtitle="Set grade levels used for students, batches, courses, and reports." canEdit={canEdit} onNew={() => setAdding(true)} newLabel="New Grade" />
-      <StatCards cards={[{ label: "Active Grades", value: activeCount }, { label: "Total Grades", value: grades.length }, { label: "Archived", value: grades.length - activeCount }]} />
-      <SectionToolbar search={search} onSearch={setSearch} showAll={showAll} onShowAll={setShowAll} showAllLabel="Show inactive" />
+      <StatCards cards={[{ label: "Active Grades", value: activeCount }, { label: "Total Grades", value: grades.length }]} />
+      <SectionToolbar search={search} onSearch={setSearch} showAll={showAll} onShowAll={setShowAll} showAllLabel="Show inactive"
+        onExportExcel={() => downloadCSV("grades", ["Grade", "Sort Order", "Status"], (grades as any[]).map(g => [g.name, g.sortOrder, g.isActive ? "Active" : "Inactive"]))}
+        onExportPDF={() => downloadPDF("Grades", ["Grade", "Sort Order", "Status"], (grades as any[]).map(g => [g.name, g.sortOrder, g.isActive ? "Active" : "Inactive"]))} />
       {adding && (
         <div style={addCard}>
           <p style={addTitle}>New Grade</p>
@@ -370,7 +400,9 @@ function SchoolsTab({ canEdit }: { canEdit: boolean }) {
     <>
       <SectionHero icon="SC" title="Schools" subtitle="Maintain source schools for student profiles and MIS reporting." canEdit={canEdit} onNew={() => setAdding(true)} newLabel="New School" />
       <StatCards cards={[{ label: "Total Schools", value: schools.length }, { label: "Active", value: activeCount }, { label: "Inactive", value: schools.length - activeCount }]} />
-      <SectionToolbar search={search} onSearch={setSearch} showAll={showAll} onShowAll={setShowAll} showAllLabel="Show inactive" />
+      <SectionToolbar search={search} onSearch={setSearch} showAll={showAll} onShowAll={setShowAll} showAllLabel="Show inactive"
+        onExportExcel={() => downloadCSV("schools", ["School Name", "City", "Board", "Status"], (schools as any[]).map(s => [s.name, s.city ?? "", s.board ?? "", s.isActive ? "Active" : "Inactive"]))}
+        onExportPDF={() => downloadPDF("Schools", ["School Name", "City", "Board", "Status"], (schools as any[]).map(s => [s.name, s.city ?? "", s.board ?? "", s.isActive ? "Active" : "Inactive"]))} />
       {adding && (
         <div style={addCard}>
           <p style={addTitle}>New School</p>
@@ -437,7 +469,9 @@ function SubjectsTab({ canEdit }: { canEdit: boolean }) {
     <>
       <SectionHero icon="SB" title="Subjects" subtitle="Manage subjects used in schedules, assignments, assessments, and batches." canEdit={canEdit} onNew={() => setAdding(true)} newLabel="New Subject" />
       <StatCards cards={[{ label: "Active Subjects", value: activeCount }, { label: "Total Subjects", value: subjects.length }, { label: "Inactive", value: subjects.length - activeCount }]} />
-      <SectionToolbar search={search} onSearch={setSearch} showAll={showAll} onShowAll={setShowAll} showAllLabel="Show inactive" />
+      <SectionToolbar search={search} onSearch={setSearch} showAll={showAll} onShowAll={setShowAll} showAllLabel="Show inactive"
+        onExportExcel={() => downloadCSV("subjects", ["Code", "Name", "Description", "Status", "Batches"], (subjects as any[]).map(s => [s.code, s.name, s.description ?? "", s.isActive ? "Active" : "Inactive", s._count?.batchSubjects ?? 0]))}
+        onExportPDF={() => downloadPDF("Subjects", ["Code", "Name", "Description", "Status", "Batches"], (subjects as any[]).map(s => [s.code, s.name, s.description ?? "", s.isActive ? "Active" : "Inactive", s._count?.batchSubjects ?? 0]))} />
       {adding && (
         <div style={addCard}>
           <p style={addTitle}>New Subject</p>
@@ -512,7 +546,9 @@ function CoursesTab({ canEdit }: { canEdit: boolean }) {
     <>
       <SectionHero icon="CR" title="Courses" subtitle="Build course offerings with grade, subject, target exam, and fee mappings." canEdit={canEdit} onNew={() => setAdding(true)} newLabel="New Course" />
       <StatCards cards={[{ label: "Active Courses", value: activeCount }, { label: "Total", value: courses.length }, { label: "Fee Mapped", value: feeMapped }]} />
-      <SectionToolbar search={search} onSearch={setSearch} showAll={showAll} onShowAll={setShowAll} showAllLabel="Show inactive" />
+      <SectionToolbar search={search} onSearch={setSearch} showAll={showAll} onShowAll={setShowAll} showAllLabel="Show inactive"
+        onExportExcel={() => downloadCSV("courses", ["Course", "Code", "Duration", "Fee (₹)", "Status"], (courses as any[]).map(c => [c.name, c.code ?? "", c.duration ?? "", c.fee != null ? Number(c.fee) : "", c.isActive ? "Active" : "Inactive"]))}
+        onExportPDF={() => downloadPDF("Courses", ["Course", "Code", "Duration", "Fee (₹)", "Status"], (courses as any[]).map(c => [c.name, c.code ?? "", c.duration ?? "", c.fee != null ? Number(c.fee) : "", c.isActive ? "Active" : "Inactive"]))} />
       {adding && (
         <div style={addCard}>
           <p style={addTitle}>New Course</p>
@@ -582,7 +618,9 @@ function LocationsTab({ canEdit }: { canEdit: boolean }) {
     <>
       <SectionHero icon="CT" title="City" subtitle="Manage cities for centres, students, batches, and city-wise reporting." canEdit={canEdit} onNew={() => setAdding(true)} newLabel="New City" />
       <StatCards cards={[{ label: "Active Cities", value: activeCount }, { label: "Total Cities", value: locations.length }, { label: "Inactive", value: locations.length - activeCount }]} />
-      <SectionToolbar search={search} onSearch={setSearch} showAll={showAll} onShowAll={setShowAll} showAllLabel="Show inactive" />
+      <SectionToolbar search={search} onSearch={setSearch} showAll={showAll} onShowAll={setShowAll} showAllLabel="Show inactive"
+        onExportExcel={() => downloadCSV("cities", ["City", "Status"], (locations as any[]).map(l => [l.name, l.isActive ? "Active" : "Inactive"]))}
+        onExportPDF={() => downloadPDF("Cities", ["City", "Status"], (locations as any[]).map(l => [l.name, l.isActive ? "Active" : "Inactive"]))} />
       {adding && (
         <div style={addCard}>
           <p style={addTitle}>New City</p>
@@ -644,7 +682,9 @@ function CentreTab({ canEdit }: { canEdit: boolean }) {
     <>
       <SectionHero icon="CE" title="Centres" subtitle="Configure physical centres, classrooms, and operational locations." canEdit={canEdit} onNew={() => setAdding(true)} newLabel="New Centre" />
       <StatCards cards={[{ label: "Active Centres", value: activeCount }, { label: "Total Centres", value: centres.length }, { label: "Inactive", value: centres.length - activeCount }]} />
-      <SectionToolbar search={search} onSearch={setSearch} showAll={showAll} onShowAll={setShowAll} showAllLabel="Show inactive" />
+      <SectionToolbar search={search} onSearch={setSearch} showAll={showAll} onShowAll={setShowAll} showAllLabel="Show inactive"
+        onExportExcel={() => downloadCSV("centres", ["Centre", "City", "Status"], (centres as any[]).map(c => [c.name, c.city?.name ?? "", c.isActive ? "Active" : "Inactive"]))}
+        onExportPDF={() => downloadPDF("Centres", ["Centre", "City", "Status"], (centres as any[]).map(c => [c.name, c.city?.name ?? "", c.isActive ? "Active" : "Inactive"]))} />
       {adding && (
         <div style={addCard}>
           <p style={addTitle}>New Centre</p>
@@ -698,7 +738,7 @@ function CentreTab({ canEdit }: { canEdit: boolean }) {
 // ── Instalment Plans Tab ───────────────────────────────────────────────────────
 type PlanItem = { _id: string; instalmentNo: number; label: string; amount: string; daysFromAdmission: string; dueDate: string; dueDateMode: "days" | "date" };
 const genId = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-const mkItem = (no: number): PlanItem => ({ _id: genId(), instalmentNo: no, label: `Instalment ${no}`, amount: "", daysFromAdmission: "", dueDate: "", dueDateMode: "days" });
+const mkItem = (no: number): PlanItem => ({ _id: genId(), instalmentNo: no, label: `Instalment ${no}`, amount: "", daysFromAdmission: "", dueDate: "", dueDateMode: "date" });
 
 function PlanItemsEditor({ items, setItems }: { items: PlanItem[]; setItems: (items: PlanItem[]) => void }) {
   const add = () => setItems([...items, mkItem(items.length + 1)]);
@@ -781,7 +821,36 @@ function InstalmentPlansTab({ canEdit }: { canEdit: boolean }) {
           <option value="">All courses</option>
           {(courses as any[]).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </Select>
-        <button style={{ padding: "0 16px", height: 42, borderRadius: 12, border: `1px solid ${D.line}`, background: "#fff", color: D.muted, fontSize: 13, cursor: "pointer" }}>Export</button>
+        <button onClick={() => {
+          const headers = ["Plan Name", "Course", "Status", "#", "Instalment Label", "Amount (₹)", "Due Date"];
+          const rows = (plans as any[]).flatMap(p =>
+            (p.items?.length ? p.items : [null]).map((item: any, idx: number) => [
+              idx === 0 ? p.name : "",
+              idx === 0 ? (p.course?.name ?? "Generic") : "",
+              idx === 0 ? (p.isActive ? "Active" : "Inactive") : "",
+              item ? item.instalmentNo : "",
+              item ? (item.label ?? `Instalment ${item.instalmentNo}`) : "",
+              item ? Number(item.amount).toLocaleString() : "",
+              item ? (item.dueDate ? new Date(item.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : item.daysFromAdmission != null ? `${item.daysFromAdmission} days from admission` : "") : "",
+            ])
+          );
+          downloadCSV("instalment-plans", headers, rows);
+        }} style={{ padding: "0 14px", height: 42, borderRadius: 12, border: `1px solid ${D.line}`, background: "#fff", color: D.muted, fontSize: 13, cursor: "pointer" }}>↓ Excel</button>
+        <button onClick={() => {
+          const headers = ["Plan Name", "Course", "Status", "#", "Instalment Label", "Amount (₹)", "Due Date"];
+          const rows = (plans as any[]).flatMap(p =>
+            (p.items?.length ? p.items : [null]).map((item: any, idx: number) => [
+              idx === 0 ? p.name : "",
+              idx === 0 ? (p.course?.name ?? "Generic") : "",
+              idx === 0 ? (p.isActive ? "Active" : "Inactive") : "",
+              item ? item.instalmentNo : "",
+              item ? (item.label ?? `Instalment ${item.instalmentNo}`) : "",
+              item ? Number(item.amount).toLocaleString() : "",
+              item ? (item.dueDate ? new Date(item.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : item.daysFromAdmission != null ? `${item.daysFromAdmission} days from admission` : "") : "",
+            ])
+          );
+          downloadPDF("Instalment Plans", headers, rows);
+        }} style={{ padding: "0 14px", height: 42, borderRadius: 12, border: `1px solid ${D.line}`, background: "#fff", color: D.muted, fontSize: 13, cursor: "pointer" }}>↓ PDF</button>
       </div>
 
       {adding && (

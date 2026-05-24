@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { formatDate, getInitials } from "@/lib/utils";
-import { Plus, Search, Trash2, ChevronDown, X, AlertTriangle, UserCheck, UserX, Users, CalendarOff, UserPlus, LogOut } from "lucide-react";
+import { Plus, Search, Trash2, ChevronDown, X, AlertTriangle, UserCheck, UserX, Users, CalendarOff, UserPlus, LogOut, Upload, Download, MoreVertical, Filter } from "lucide-react";
 import Link from "next/link";
 import type { EmployeeListItem } from "@cadb/types";
 import { toast } from "sonner";
@@ -279,64 +279,56 @@ export default function EmployeesPage() {
       )}
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Employees</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{data?.meta?.total ?? 0} total employees</p>
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-8 h-8 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: "#2C3E7C" }}>
+              <Users className="text-white" size={18} />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Employees</h1>
+              <p className="text-sm text-gray-500">{data?.meta?.total ?? 0} total employees</p>
+            </div>
+          </div>
         </div>
-        <Link
-          href="/dashboard/employees/new"
-          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
-        >
-          <Plus className="h-4 w-4" /> Add Employee
-        </Link>
+        {isAdmin && (
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <button className="px-3 py-2 border border-gray-200 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+              <Upload className="h-4 w-4" /> <span className="hidden sm:inline">Import</span>
+            </button>
+            <button className="px-3 py-2 border border-gray-200 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+              <Download className="h-4 w-4" /> <span className="hidden sm:inline">Export</span>
+            </button>
+            <Link
+              href="/dashboard/employees/new"
+              className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold text-white transition-colors"
+              style={{ backgroundColor: "#2C3E7C" }}
+            >
+              <Plus className="h-4 w-4" /> Add Employee
+            </Link>
+          </div>
+        )}
       </div>
 
       {/* Stats cards */}
       {isAdmin && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            {
-              label: "Total Employees",
-              value: empStats?.total ?? "—",
-              sub: "active headcount",
-              icon: Users,
-              color: "bg-blue-50 text-blue-600",
-              textColor: "text-blue-700",
-            },
-            {
-              label: "On Leave Today",
-              value: empStats?.onLeaveToday ?? "—",
-              sub: new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" }),
-              icon: CalendarOff,
-              color: "bg-amber-50 text-amber-600",
-              textColor: "text-amber-700",
-            },
-            {
-              label: `Onboarded in ${empStats?.monthName ?? new Date().toLocaleString("en-IN", { month: "long" })}`,
-              value: empStats?.onboardedThisMonth ?? "—",
-              sub: "joined this month",
-              icon: UserPlus,
-              color: "bg-emerald-50 text-emerald-600",
-              textColor: "text-emerald-700",
-            },
-            {
-              label: `Quit in ${empStats?.monthName ?? new Date().toLocaleString("en-IN", { month: "long" })}`,
-              value: empStats?.quitThisMonth ?? "—",
-              sub: "left this month",
-              icon: LogOut,
-              color: "bg-red-50 text-red-600",
-              textColor: "text-red-700",
-            },
+            { label: "Total Employees", value: empStats?.total ?? "—", sub: "active headcount", icon: Users, iconCls: "bg-blue-50", iconColor: "text-blue-600", numColor: "text-gray-900" },
+            { label: "On Leave Today",  value: empStats?.onLeaveToday ?? "—", sub: new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" }), icon: CalendarOff, iconCls: "bg-orange-50", iconColor: "text-orange-600", numColor: "text-gray-900" },
+            { label: `Onboarded in ${empStats?.monthName ?? new Date().toLocaleString("en-IN", { month: "long" })}`, value: empStats?.onboardedThisMonth ?? "—", sub: "joined this month", icon: UserPlus, iconCls: "bg-green-50", iconColor: "text-green-600", numColor: "text-gray-900" },
+            { label: `Out in ${empStats?.monthName ?? new Date().toLocaleString("en-IN", { month: "long" })}`, value: empStats?.quitThisMonth ?? "—", sub: "left this month", icon: LogOut, iconCls: "bg-red-50", iconColor: "text-red-600", numColor: "text-gray-900" },
           ].map((s) => (
-            <div key={s.label} className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-4 flex items-center gap-4">
-              <div className={`p-2.5 rounded-xl shrink-0 ${s.color}`}>
-                <s.icon className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs text-gray-500 font-medium truncate">{s.label}</p>
-                <p className={`text-2xl font-bold mt-0.5 ${s.textColor}`}>{s.value}</p>
-                <p className="text-xs text-gray-400 mt-0.5">{s.sub}</p>
+            <div key={s.label} className="bg-white rounded-lg border border-gray-200 p-5">
+              <div className="flex items-center gap-3 mb-2">
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${s.iconCls}`}>
+                  <s.icon className={`h-5 w-5 ${s.iconColor}`} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm text-gray-600 truncate">{s.label}</p>
+                  <p className={`text-2xl font-semibold ${s.numColor}`}>{s.value}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{s.sub}</p>
+                </div>
               </div>
             </div>
           ))}
@@ -398,38 +390,47 @@ export default function EmployeesPage() {
         </div>
       )}
 
-      {/* Search + filter toggle */}
-      <div className="flex gap-2">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <input
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            placeholder="Search by name, code, email..."
-            className="w-full rounded-lg border border-gray-200 pl-9 pr-4 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          />
+      {/* Search + filter bar */}
+      <div className="bg-white rounded-lg border border-gray-200 p-4">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <input
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              placeholder="Search by name, code, email..."
+              className="w-full rounded-md border border-gray-200 pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="flex gap-2">
+            <select
+              value={departmentId}
+              onChange={(e) => { setDepartmentId(e.target.value); setPage(1); }}
+              className="flex-1 sm:flex-none px-3 py-2 border border-gray-200 rounded-md text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">All Departments</option>
+              {departments?.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+            <button
+              onClick={() => setShowFilters((v) => !v)}
+              className={`p-2 border rounded-md text-gray-600 hover:bg-gray-50 flex items-center gap-1.5 text-sm font-medium ${
+                showFilters || activeFilterCount > 0 ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200"
+              }`}
+            >
+              <Filter className="h-4 w-4" />
+              {activeFilterCount > 0 && (
+                <span className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-[10px] font-bold text-white">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+            {activeFilterCount > 0 && (
+              <button onClick={clearFilters} className="p-2 border border-gray-200 rounded-md text-gray-500 hover:bg-gray-50">
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         </div>
-        <button
-          onClick={() => setShowFilters((v) => !v)}
-          className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
-            showFilters || activeFilterCount > 0
-              ? "border-blue-500 bg-blue-50 text-blue-700"
-              : "border-gray-200 text-gray-600 hover:bg-gray-50"
-          }`}
-        >
-          <ChevronDown className={`h-4 w-4 transition-transform ${showFilters ? "rotate-180" : ""}`} />
-          Filters
-          {activeFilterCount > 0 && (
-            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-[10px] font-bold text-white">
-              {activeFilterCount}
-            </span>
-          )}
-        </button>
-        {activeFilterCount > 0 && (
-          <button onClick={clearFilters} className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-500 hover:bg-gray-50">
-            <X className="h-3.5 w-3.5" /> Clear
-          </button>
-        )}
       </div>
 
       {/* Filter panel */}
@@ -520,11 +521,11 @@ export default function EmployeesPage() {
       )}
 
       {/* Table */}
-      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+      <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full min-w-[900px]">
           <thead>
-            <tr className="border-b border-gray-100 bg-gray-50">
+            <tr className="border-b border-gray-200 bg-gray-50">
               {isAdmin && (
                 <th className="w-10 px-4 py-3">
                   <input
@@ -532,27 +533,28 @@ export default function EmployeesPage() {
                     checked={allSelected}
                     ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }}
                     onChange={toggleAll}
-                    className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    className="h-4 w-4 rounded border-gray-300 cursor-pointer"
+                    style={{ accentColor: "#2C3E7C" }}
                   />
                 </th>
               )}
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Employee</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Code</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Department</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Designation</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Gender</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Joined</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-              {isAdmin && <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Profile</th>}
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Employee</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Code</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Department</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Designation</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Type</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Joined</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
+              {isAdmin && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Profile</th>}
+              <th className="px-4 py-3 w-10" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-50">
+          <tbody className="divide-y divide-gray-200">
             {isLoading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <tr key={i}>
                   {Array.from({ length: isAdmin ? 10 : 8 }).map((_, j) => (
-                    <td key={j} className="px-6 py-4">
+                    <td key={j} className="px-4 py-4">
                       <div className="h-4 bg-gray-100 rounded animate-pulse" />
                     </td>
                   ))}
@@ -567,66 +569,77 @@ export default function EmployeesPage() {
             ) : (
               employees
                 .filter((e) => !incompleteOnly || !e.profileComplete)
-                .map((emp) => (
-                <tr
-                  key={emp.id}
-                  onClick={(e) => handleRowClick(e, emp.id)}
-                  onMouseEnter={() => handleRowEnter(emp.id)}
-                  className={`hover:bg-blue-50 transition-colors cursor-pointer ${
-                    selected.has(emp.id) ? "bg-blue-50" : emp.status === "DRAFT" ? "bg-amber-50/60" : ""
-                  }`}
-                >
-                  {isAdmin && (
-                    <td className="w-10 px-4 py-4" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={selected.has(emp.id)}
-                        onChange={() => toggleOne(emp.id)}
-                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                      />
-                    </td>
-                  )}
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-blue-700 text-xs font-bold shrink-0">
-                        {getInitials(emp.firstName, emp.lastName)}
+                .map((emp) => {
+                  const score = emp.profileScore ?? 0;
+                  const total = emp.profileTotal ?? 7;
+                  const pct   = total > 0 ? Math.round((score / total) * 100) : 0;
+                  return (
+                  <tr
+                    key={emp.id}
+                    onClick={(e) => handleRowClick(e, emp.id)}
+                    onMouseEnter={() => handleRowEnter(emp.id)}
+                    className={`hover:bg-gray-50 transition-colors cursor-pointer ${
+                      selected.has(emp.id) ? "bg-blue-50/50" : emp.status === "DRAFT" ? "bg-amber-50/60" : ""
+                    }`}
+                  >
+                    {isAdmin && (
+                      <td className="w-10 px-4 py-4" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selected.has(emp.id)}
+                          onChange={() => toggleOne(emp.id)}
+                          className="h-4 w-4 rounded border-gray-300 cursor-pointer"
+                          style={{ accentColor: "#2C3E7C" }}
+                        />
+                      </td>
+                    )}
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full text-white text-sm font-medium shrink-0" style={{ backgroundColor: "#2C3E7C" }}>
+                          {getInitials(emp.firstName, emp.lastName)}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">{emp.firstName} {emp.lastName}</p>
+                          <p className="text-xs text-gray-500">{emp.email}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">{emp.firstName} {emp.lastName}</p>
-                        <p className="text-xs text-gray-400">{emp.email}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-600 font-mono">{emp.employeeCode}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{emp.department.name}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{emp.designation.title}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600 capitalize">{emp.gender?.toLowerCase()}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{emp.employmentType.replace("_", " ")}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{formatDate(emp.joiningDate)}</td>
-                  <td className="px-6 py-4">
-                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_COLOR[emp.status] ?? "bg-gray-100 text-gray-700"}`}>
-                      {emp.status.replace("_", " ")}
-                    </span>
-                  </td>
-                  {isAdmin && (
-                    <td className="px-6 py-4">
-                      {emp.profileComplete ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
-                          Complete
-                        </span>
-                      ) : (
-                        <span
-                          title={`Missing: ${emp.profileMissing?.join(", ")}`}
-                          className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700"
-                        >
-                          <AlertTriangle className="h-3 w-3" />
-                          {emp.profileScore}/{emp.profileTotal}
-                        </span>
-                      )}
                     </td>
-                  )}
-                </tr>
-              ))
+                    <td className="px-4 py-4 text-sm text-gray-600 font-mono">{emp.employeeCode}</td>
+                    <td className="px-4 py-4 text-sm text-gray-600">{emp.department.name}</td>
+                    <td className="px-4 py-4 text-sm text-gray-600">{emp.designation.title}</td>
+                    <td className="px-4 py-4">
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${
+                        emp.employmentType === "FULL_TIME" ? "bg-blue-50 text-blue-700" : "bg-gray-100 text-gray-700"
+                      }`}>
+                        {emp.employmentType.replace("_", " ")}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-sm text-gray-600">{formatDate(emp.joiningDate)}</td>
+                    <td className="px-4 py-4">
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_COLOR[emp.status] ?? "bg-gray-100 text-gray-700"}`}>
+                        {emp.status.replace("_", " ")}
+                      </span>
+                    </td>
+                    {isAdmin && (
+                      <td className="px-4 py-4">
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 bg-gray-200 rounded-full h-1.5 w-16">
+                            <div
+                              className="h-1.5 rounded-full"
+                              style={{ width: `${pct}%`, backgroundColor: pct >= 100 ? "#10b981" : "#F2994A" }}
+                            />
+                          </div>
+                          <span className="text-xs text-gray-600 shrink-0">{pct}%</span>
+                        </div>
+                      </td>
+                    )}
+                    <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
+                      <button className="p-1 hover:bg-gray-100 rounded">
+                        <MoreVertical size={16} className="text-gray-400" />
+                      </button>
+                    </td>
+                  </tr>
+                )})
             )}
           </tbody>
         </table>

@@ -6,10 +6,9 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
-  ArrowLeft, Upload, Check, User, Users2, ClipboardList,
+  ArrowLeft, Check, User, Users2, ClipboardList,
   GraduationCap, KeyRound, ChevronRight, ChevronLeft,
-  Camera, X, CheckCircle2, Circle, ChevronDown, ChevronUp,
-  Plus, Trash2, Percent, IndianRupee, Clock, History, Link2, Layers,
+  Camera, X,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { cn } from "@/lib/utils";
@@ -59,17 +58,22 @@ function FSelect({ className = "", children, ...props }: React.SelectHTMLAttribu
 }
 
 // Wraps a logical group in a white card
-function Card({ children, title, icon: Icon }: {
+function Card({ children, title, mark }: {
   children: React.ReactNode;
   title?: string;
-  icon?: React.ComponentType<{ className?: string }>;
+  mark?: string;
 }) {
   return (
     <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden mb-5">
       {title && (
-        <div className="flex items-center gap-2.5 px-6 py-4 border-b border-gray-50 bg-gray-50/60">
-          {Icon && <Icon className="h-4 w-4 text-gray-400" />}
-          <h3 className="text-sm font-semibold text-gray-600 tracking-wide">{title}</h3>
+        <div className="flex items-center gap-3 px-[22px] py-[18px] border-b bg-[#fbfcfe]" style={{ borderColor: "#f0f2f5" }}>
+          {mark && (
+            <div className="w-7 h-7 rounded-[9px] flex items-center justify-center shrink-0 text-[11px] font-black"
+              style={{ background: "#eef2ff", color: "#28245f" }}>
+              {mark}
+            </div>
+          )}
+          <h3 className="text-[18px] font-black text-gray-800 m-0">{title}</h3>
         </div>
       )}
       <div className="px-6 py-5">{children}</div>
@@ -77,21 +81,21 @@ function Card({ children, title, icon: Icon }: {
   );
 }
 
+function FieldWarn({ msg }: { msg: string }) {
+  return <p className="mt-1.5 text-xs text-amber-600 font-medium">{msg}</p>;
+}
+
+const OCCUPATION_OPTIONS = ["Service", "Self-Employed", "Business-Owner", "Professional", "Retired", "Other", "NA"];
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const TODAY = new Date().toISOString().split("T")[0];
+
 function DOBInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
-    <FInput
-      placeholder="DD / MM / YYYY"
-      value={value}
-      maxLength={10}
-      className="font-mono tracking-widest"
-      onChange={(e) => {
-        const d = e.target.value.replace(/\D/g, "").slice(0, 8);
-        let f = d;
-        if (d.length > 4) f = `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4)}`;
-        else if (d.length > 2) f = `${d.slice(0, 2)}/${d.slice(2)}`;
-        onChange(f);
-      }}
-    />
+    <>
+      <FInput type="date" value={value} max={TODAY} onChange={(e) => onChange(e.target.value)} />
+      {value && value > TODAY && <FieldWarn msg="Date of birth cannot be in the future" />}
+    </>
   );
 }
 
@@ -117,15 +121,13 @@ type FormState = {
   motherName: string; motherPhone: string; motherEmail: string; motherOccupation: string;
   communicationContact: "FATHER" | "MOTHER" | "BOTH" | "OTHER";
   communicationContactName: string; communicationContactPhone: string;
-  courseId: string;
+  courseId: string; programmeType: string;
   admissionDate: string; academicYear: string;
-  totalFee: string;
-  discountType: "PERCENTAGE" | "AMOUNT";
-  discountValue: string;
+  totalFee: string; discountType: "percent" | "amount"; discountValue: string;
   paidFee: string; paymentDate: string; paymentMode: string; receiptNumber: string; paymentNote: string;
-  instalments: Array<{ id: string; instalmentNo: number; label: string; amount: string; dueDate: string }>;
+  instalmentPlan: string; customInstalmentCount: string; firstDueDate: string;
+  customItems: { dueDate: string; amount: string }[];
   batchId: string;
-  subjectIds: string[];
 };
 
 const INITIAL: FormState = {
@@ -137,13 +139,13 @@ const INITIAL: FormState = {
   parentName: "", parentPhone: "", parentEmail: "", parentRelation: "Father", parentOccupation: "",
   motherName: "", motherPhone: "", motherEmail: "", motherOccupation: "",
   communicationContact: "FATHER", communicationContactName: "", communicationContactPhone: "",
-  courseId: "",
+  courseId: "", programmeType: "",
   admissionDate: "", academicYear: "",
-  totalFee: "", discountType: "AMOUNT", discountValue: "",
+  totalFee: "", discountType: "amount", discountValue: "",
   paidFee: "", paymentDate: "", paymentMode: "", receiptNumber: "", paymentNote: "",
-  instalments: [],
+  instalmentPlan: "NONE", customInstalmentCount: "3", firstDueDate: "",
+  customItems: [{ dueDate: "", amount: "" }, { dueDate: "", amount: "" }, { dueDate: "", amount: "" }],
   batchId: "",
-  subjectIds: [],
 };
 
 const PAYMENT_MODES = ["Cash", "UPI", "Bank Transfer", "Cheque", "DD", "Card", "Online"];
@@ -176,7 +178,7 @@ function PersonalSection({ form, set, schools, grades }: {
     <div className="space-y-5">
 
       {/* Photo + Identity card */}
-      <Card title="Profile" icon={User}>
+      <Card title="Profile" mark="P">
         <div className="flex items-center gap-6">
           {/* Avatar */}
           <div className="relative shrink-0">
@@ -235,12 +237,13 @@ function PersonalSection({ form, set, schools, grades }: {
       </Card>
 
       {/* Contact card */}
-      <Card title="Contact & Demographics" icon={User}>
+      <Card title="Contact & Demographics" mark="CD">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {/* Email */}
           <div>
             <Label required>Email</Label>
             <FInput type="email" placeholder="student@email.com" value={form.email} onChange={(e) => set("email", e.target.value)} />
+            {form.email && !EMAIL_RE.test(form.email) && <FieldWarn msg="Enter a valid email address" />}
           </div>
 
           {/* Mobile — country code + number, full half-width */}
@@ -248,8 +251,10 @@ function PersonalSection({ form, set, schools, grades }: {
             <Label>Mobile</Label>
             <div className="flex gap-2">
               <FSelect className="w-[80px] shrink-0 px-2"><option>+91</option></FSelect>
-              <FInput placeholder="Mobile number" value={form.phone} onChange={(e) => set("phone", e.target.value)} className="flex-1 min-w-0" />
+              <FInput placeholder="10-digit mobile" value={form.phone} inputMode="numeric"
+                onChange={(e) => set("phone", e.target.value.replace(/\D/g, "").slice(0, 10))} className="flex-1 min-w-0" />
             </div>
+            {form.phone && form.phone.length !== 10 && <FieldWarn msg="Mobile number must be 10 digits" />}
           </div>
 
           {/* Date of Birth */}
@@ -267,8 +272,8 @@ function PersonalSection({ form, set, schools, grades }: {
                   className={cn(
                     "px-5 py-2.5 rounded-xl border text-sm font-semibold transition-all duration-150 shadow-sm",
                     form.gender === g
-                      ? "bg-indigo-600 border-indigo-600 text-white shadow-indigo-100"
-                      : "bg-white border-gray-200 text-gray-500 hover:border-indigo-200 hover:text-indigo-600"
+                      ? "bg-[#f1efff] border-[#8b5cf6] text-[#28245f]"
+                      : "bg-white border-gray-200 text-gray-500 hover:border-violet-200 hover:text-[#28245f]"
                   )}
                 >
                   {g.charAt(0) + g.slice(1).toLowerCase()}
@@ -280,7 +285,7 @@ function PersonalSection({ form, set, schools, grades }: {
       </Card>
 
       {/* Address card */}
-      <Card title="Address" icon={User}>
+      <Card title="Address" mark="A">
         <div className="space-y-3">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div><Label>Street / Flat / Building</Label><FInput placeholder="Address line" value={form.address} onChange={(e) => set("address", e.target.value)} /></div>
@@ -290,13 +295,18 @@ function PersonalSection({ form, set, schools, grades }: {
             <div><Label>Landmark</Label><FInput placeholder="Landmark" value={form.landmark} onChange={(e) => set("landmark", e.target.value)} /></div>
             <div><Label>City</Label><FInput placeholder="City" value={form.city} onChange={(e) => set("city", e.target.value)} /></div>
             <div><Label>State</Label><FInput placeholder="State" value={form.state} onChange={(e) => set("state", e.target.value)} /></div>
-            <div><Label>PIN Code</Label><FInput placeholder="560001" value={form.pincode} onChange={(e) => set("pincode", e.target.value)} /></div>
+            <div>
+              <Label>PIN Code</Label>
+              <FInput placeholder="560001" value={form.pincode} inputMode="numeric"
+                onChange={(e) => set("pincode", e.target.value.replace(/\D/g, "").slice(0, 6))} />
+              {form.pincode && form.pincode.length !== 6 && <FieldWarn msg="PIN code must be exactly 6 digits" />}
+            </div>
           </div>
         </div>
       </Card>
 
       {/* Academic context card */}
-      <Card title="Academic Context" icon={GraduationCap}>
+      <Card title="Academic Context" mark="AC">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
           <div>
             <Label>School / College</Label>
@@ -326,9 +336,13 @@ function PersonalSection({ form, set, schools, grades }: {
 
 function PhoneField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
-    <div className="flex gap-2">
-      <FSelect className="w-[90px] shrink-0 px-2"><option>+91</option></FSelect>
-      <FInput placeholder="Phone number" value={value} onChange={(e) => onChange(e.target.value)} />
+    <div>
+      <div className="flex gap-2">
+        <FSelect className="w-[90px] shrink-0 px-2"><option>+91</option></FSelect>
+        <FInput placeholder="10-digit number" value={value} inputMode="numeric"
+          onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 10))} />
+      </div>
+      {value && value.length !== 10 && <FieldWarn msg="Must be exactly 10 digits" />}
     </div>
   );
 }
@@ -347,7 +361,7 @@ function ParentsSection({ form, set }: { form: FormState; set: (k: keyof FormSta
 
   return (
     <div className="space-y-5">
-      <Card title="Father / Parent / Guardian" icon={Users2}>
+      <Card title="Father / Parent / Guardian" mark="FG">
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div><Label>Full Name</Label><FInput placeholder="Full name" value={form.parentName} onChange={(e) => set("parentName", e.target.value)} /></div>
@@ -360,26 +374,46 @@ function ParentsSection({ form, set }: { form: FormState; set: (k: keyof FormSta
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div><Label>Mobile</Label><PhoneField value={form.parentPhone} onChange={(v) => set("parentPhone", v)} /></div>
-            <div><Label>Occupation</Label><FInput placeholder="Occupation" value={form.parentOccupation} onChange={(e) => set("parentOccupation", e.target.value)} /></div>
+            <div>
+              <Label>Occupation</Label>
+              <FSelect value={form.parentOccupation} onChange={(e) => set("parentOccupation", e.target.value)}>
+                <option value="">Select occupation</option>
+                {OCCUPATION_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+              </FSelect>
+            </div>
           </div>
-          <div><Label>Email</Label><FInput type="email" placeholder="Email address" value={form.parentEmail} onChange={(e) => set("parentEmail", e.target.value)} /></div>
+          <div>
+            <Label>Email</Label>
+            <FInput type="email" placeholder="Email address" value={form.parentEmail} onChange={(e) => set("parentEmail", e.target.value)} />
+            {form.parentEmail && !EMAIL_RE.test(form.parentEmail) && <FieldWarn msg="Enter a valid email address" />}
+          </div>
         </div>
       </Card>
 
-      <Card title="Mother's Information" icon={Users2}>
+      <Card title="Mother's Information" mark="M">
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div><Label>Full Name</Label><FInput placeholder="Full name" value={form.motherName} onChange={(e) => set("motherName", e.target.value)} /></div>
-            <div><Label>Occupation</Label><FInput placeholder="Occupation" value={form.motherOccupation} onChange={(e) => set("motherOccupation", e.target.value)} /></div>
+            <div>
+              <Label>Occupation</Label>
+              <FSelect value={form.motherOccupation} onChange={(e) => set("motherOccupation", e.target.value)}>
+                <option value="">Select occupation</option>
+                {OCCUPATION_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+              </FSelect>
+            </div>
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div><Label>Mobile</Label><PhoneField value={form.motherPhone} onChange={(v) => set("motherPhone", v)} /></div>
-            <div><Label>Email</Label><FInput type="email" placeholder="Email address" value={form.motherEmail} onChange={(e) => set("motherEmail", e.target.value)} /></div>
+            <div>
+              <Label>Email</Label>
+              <FInput type="email" placeholder="Email address" value={form.motherEmail} onChange={(e) => set("motherEmail", e.target.value)} />
+              {form.motherEmail && !EMAIL_RE.test(form.motherEmail) && <FieldWarn msg="Enter a valid email address" />}
+            </div>
           </div>
         </div>
       </Card>
 
-      <Card title="Communication Preference" icon={Users2}>
+      <Card title="Communication Preference" mark="CP">
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {COMM_OPTIONS.map(({ value, label, sub }) => (
@@ -390,20 +424,20 @@ function ParentsSection({ form, set }: { form: FormState; set: (k: keyof FormSta
                 className={cn(
                   "flex items-start gap-3 rounded-xl border p-4 text-left transition-all duration-150 shadow-sm",
                   form.communicationContact === value
-                    ? "border-indigo-400 bg-indigo-50 shadow-indigo-100"
+                    ? "border-[#8b5cf6] bg-[#f1efff]"
                     : "border-gray-200 bg-white hover:border-gray-300"
                 )}
               >
                 <div className={cn(
                   "mt-0.5 h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors",
-                  form.communicationContact === value ? "border-indigo-500" : "border-gray-300"
+                  form.communicationContact === value ? "border-[#6d5dfc]" : "border-gray-300"
                 )}>
                   {form.communicationContact === value && (
-                    <div className="h-2 w-2 rounded-full bg-indigo-500" />
+                    <div className="h-2 w-2 rounded-full" style={{ background: "#6d5dfc" }} />
                   )}
                 </div>
                 <div>
-                  <p className={cn("text-sm font-semibold", form.communicationContact === value ? "text-indigo-700" : "text-gray-700")}>{label}</p>
+                  <p className={cn("text-sm font-semibold", form.communicationContact === value ? "text-[#28245f]" : "text-gray-700")}>{label}</p>
                   <p className="text-xs text-gray-400 mt-0.5">{sub}</p>
                 </div>
               </button>
@@ -431,137 +465,81 @@ function ParentsSection({ form, set }: { form: FormState; set: (k: keyof FormSta
   );
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ background: "white", border: "1px solid #e6e8ef", borderRadius: 16, padding: 18, boxShadow: "0 8px 22px rgba(20,23,53,.05)" }}>
+      <span style={{ color: "#7c8598", fontSize: 12, fontWeight: 850, textTransform: "uppercase" as const, letterSpacing: "0.04em" }}>{label}</span>
+      <strong style={{ display: "block", marginTop: 8, fontSize: 22, lineHeight: 1, color: "#111827" }}>{value}</strong>
+    </div>
+  );
+}
+
 // ── Section: Admission ────────────────────────────────────────────────────────
 
-function AdmissionSection({ form, set, courses, academicYears }: {
+function AdmissionSection({ form, set, courses, academicYears, instalmentPlans }: {
   form: FormState;
   set: (k: keyof FormState, v: any) => void;
   courses: any[];
   academicYears: any[];
+  instalmentPlans: any[];
 }) {
-  const [feeExpanded, setFeeExpanded] = useState(true);
-  const [selectedPlanId, setSelectedPlanId] = useState("");
+  const totalFeeNum = parseFloat(form.totalFee || "0");
+  const discountNum = parseFloat(form.discountValue || "0");
+  const netFee      = Math.max(0, form.discountType === "percent"
+    ? totalFeeNum - (totalFeeNum * discountNum / 100)
+    : totalFeeNum - discountNum);
+  const paidNum     = parseFloat(form.paidFee || "0");
+  const pendingNum  = Math.max(0, netFee - paidNum);
+  const selectedPlan = form.instalmentPlan !== "NONE" && form.instalmentPlan !== "CUSTOM"
+    ? (instalmentPlans as any[]).find(p => p.id === form.instalmentPlan)
+    : null;
 
-  const selectedCourse = courses.find((c) => c.id === form.courseId);
-
-  // Fetch instalment plans for selected course (+ generic plans)
-  const { data: instalmentPlans = [] } = useQuery({
-    queryKey: ["instalment-plans", form.courseId],
-    queryFn: () => api.get(`/api/v1/academics/instalment-plans${form.courseId ? `?courseId=${form.courseId}` : ""}`).then((r) => r.data.data),
-    enabled: true,
-  });
-
-  // Auto-fill fee from course (only if totalFee is empty)
   const handleCourseChange = (id: string) => {
     set("courseId", id);
-    setSelectedPlanId("");
-    const c = courses.find((x) => x.id === id);
+    const c = courses.find((x: any) => x.id === id);
     if (c?.fee && !form.totalFee) set("totalFee", String(c.fee));
-  };
-
-  // Apply selected plan to instalment rows
-  const applyPlan = () => {
-    const plan = instalmentPlans.find((p: any) => p.id === selectedPlanId);
-    if (!plan?.items?.length) return;
-    const admDate = form.admissionDate ? new Date(form.admissionDate) : null;
-    const rows = (plan.items as any[]).map((item: any) => {
-      let dueDate = "";
-      if (admDate && item.daysFromAdmission != null) {
-        const d = new Date(admDate);
-        d.setDate(d.getDate() + item.daysFromAdmission);
-        dueDate = d.toISOString().split("T")[0];
-      }
-      return {
-        id: crypto.randomUUID(),
-        instalmentNo: item.instalmentNo,
-        label: item.label ?? `Instalment ${item.instalmentNo}`,
-        amount: String(item.amount),
-        dueDate,
-      };
-    });
-    set("instalments", rows);
-  };
-
-  // Discount calculation
-  const totalFeeNum   = parseFloat(form.totalFee    || "0");
-  const discountNum   = form.discountType === "PERCENTAGE"
-    ? totalFeeNum * (parseFloat(form.discountValue || "0") / 100)
-    : parseFloat(form.discountValue || "0");
-  const netFee        = Math.max(0, totalFeeNum - discountNum);
-  const paidNum       = parseFloat(form.paidFee || "0");
-  const pendingNum    = Math.max(0, netFee - paidNum);
-  const instalSum     = form.instalments.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
-  const instalRemain  = Math.max(0, pendingNum - instalSum);
-
-  const addInstalment = () => {
-    const no = form.instalments.length + 1;
-    set("instalments", [
-      ...form.instalments,
-      { id: crypto.randomUUID(), instalmentNo: no, label: `Instalment ${no}`, amount: "", dueDate: "" },
-    ]);
-  };
-
-  const updateInstalment = (id: string, field: string, val: string) => {
-    set("instalments", form.instalments.map((i) => i.id === id ? { ...i, [field]: val } : i));
-  };
-
-  const removeInstalment = (id: string) => {
-    const updated = form.instalments
-      .filter((i) => i.id !== id)
-      .map((i, idx) => ({ ...i, instalmentNo: idx + 1, label: `Instalment ${idx + 1}` }));
-    set("instalments", updated);
   };
 
   return (
     <div className="space-y-5">
 
-      {/* Course */}
-      <Card title="Course / Programme" icon={ClipboardList}>
-        <div className="space-y-4">
+      {/* Course / Programme */}
+      <Card title="Course / Programme" mark="CP">
+        <div className="grid grid-cols-2 gap-[14px]">
           <div>
             <Label required>Course</Label>
             <FSelect value={form.courseId} onChange={(e) => handleCourseChange(e.target.value)}>
-              <option value="">— Select a course —</option>
-              {courses.filter((c) => c.isActive).map((c: any) => (
-                <option key={c.id} value={c.id}>
-                  {c.code ? `[${c.code}] ` : ""}{c.name}{c.duration ? ` · ${c.duration} Yr` : ""}
-                </option>
+              <option value="">Select a course</option>
+              {courses.filter((c: any) => c.isActive).map((c: any) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </FSelect>
           </div>
-          {selectedCourse && (
-            <div className="flex items-center gap-4 rounded-xl border border-indigo-100 bg-indigo-50/60 px-5 py-3.5">
-              <div className="h-10 w-10 rounded-xl bg-indigo-600 flex items-center justify-center shrink-0">
-                <ClipboardList className="h-5 w-5 text-white" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-indigo-900">{selectedCourse.name}</p>
-                <div className="flex items-center gap-3 mt-0.5 flex-wrap text-xs text-indigo-500">
-                  {selectedCourse.code     && <span className="font-mono">{selectedCourse.code}</span>}
-                  {selectedCourse.duration && <span>{selectedCourse.duration}</span>}
-                  {selectedCourse.fee      && <span className="font-semibold">₹{selectedCourse.fee.toLocaleString()}</span>}
-                  {selectedCourse.description && <span className="text-indigo-400 truncate">{selectedCourse.description}</span>}
-                </div>
-              </div>
-              <CheckCircle2 className="h-5 w-5 text-indigo-400 shrink-0" />
-            </div>
-          )}
+          <div>
+            <Label>Programme Type</Label>
+            <FSelect value={form.programmeType} onChange={(e) => set("programmeType", e.target.value)}>
+              <option value="">Select type</option>
+              <option>Regular Classroom</option>
+              <option>Hybrid</option>
+              <option>Test Series</option>
+            </FSelect>
+          </div>
         </div>
       </Card>
 
       {/* Admission Details */}
-      <Card title="Admission Details" icon={ClipboardList}>
-        <div className="grid grid-cols-3 gap-4">
+      <Card title="Admission Details" mark="AD">
+        <div className="grid grid-cols-3 gap-[14px]">
           <div>
             <Label>Admission Number</Label>
-            <FInput
-              readOnly
-              placeholder="Auto-generated on save"
-              value=""
-              className="bg-gray-50 text-gray-400 cursor-default font-mono"
-            />
+            <FInput readOnly placeholder="Auto-generated on save" value="" className="bg-gray-50 text-gray-400 cursor-default font-mono" />
           </div>
-          <div><Label>Admission Date</Label><FInput type="date" value={form.admissionDate} onChange={(e) => set("admissionDate", e.target.value)} /></div>
+          <div>
+            <Label>Admission Date</Label>
+            <FInput type="date" value={form.admissionDate} onChange={(e) => set("admissionDate", e.target.value)} />
+          </div>
           <div>
             <Label>Academic Year</Label>
             <FSelect value={form.academicYear} onChange={(e) => set("academicYear", e.target.value)}>
@@ -574,255 +552,168 @@ function AdmissionSection({ form, set, courses, academicYears }: {
         </div>
       </Card>
 
-      {/* Fee & Payment — collapsible */}
-      <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
-        {/* Summary header — always visible, click to expand/collapse */}
-        <button
-          type="button"
-          onClick={() => setFeeExpanded((v) => !v)}
-          className="w-full flex items-center justify-between px-6 py-4 border-b border-gray-50 bg-gray-50/60 hover:bg-gray-100/60 transition-colors"
-        >
-          <div className="flex items-center gap-2.5">
-            <IndianRupee className="h-4 w-4 text-gray-400" />
-            <span className="text-sm font-semibold text-gray-600">Fee & Payment</span>
-          </div>
-          <div className="flex items-center gap-4 text-xs">
-            {totalFeeNum > 0 && (
-              <>
-                <span className="text-gray-400">Course fee <span className="font-semibold text-gray-700">₹{totalFeeNum.toLocaleString()}</span></span>
-                {discountNum > 0 && <span className="text-green-600">− ₹{discountNum.toFixed(0)}</span>}
-                <span className="text-gray-400">Net <span className="font-bold text-gray-800">₹{netFee.toLocaleString()}</span></span>
-                {paidNum > 0 && <span className="text-indigo-600">Paid ₹{paidNum.toLocaleString()}</span>}
-                {pendingNum > 0 && <span className="font-semibold text-orange-600">Due ₹{pendingNum.toLocaleString()}</span>}
-              </>
-            )}
-            {feeExpanded ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
-          </div>
-        </button>
-
-        {feeExpanded && (
-          <div className="px-6 py-5 space-y-6">
-            {/* Fee calculation */}
+      {/* Fee & Payment */}
+      <Card title="Fee & Payment" mark="₹">
+        <div className="space-y-[14px]">
+          <div className="grid grid-cols-3 gap-[14px]">
             <div>
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Fee Calculation</p>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  <Label>Total Fee (₹)</Label>
-                  <FInput type="number" min="0" placeholder="0.00" value={form.totalFee}
-                    onChange={(e) => set("totalFee", e.target.value)} />
-                  {selectedCourse?.fee && form.totalFee !== String(selectedCourse.fee) && (
-                    <button type="button" onClick={() => set("totalFee", String(selectedCourse.fee))}
-                      className="text-xs text-indigo-500 hover:text-indigo-700 mt-1 font-medium">
-                      ← Reset to course fee (₹{selectedCourse.fee.toLocaleString()})
-                    </button>
-                  )}
-                </div>
-                <div>
-                  <Label>Discount</Label>
-                  <div className="flex gap-2">
-                    {/* Toggle % / ₹ */}
-                    <div className="flex rounded-xl border border-gray-200 overflow-hidden shadow-sm shrink-0">
-                      <button type="button"
-                        onClick={() => set("discountType", "PERCENTAGE")}
-                        className={cn("flex items-center gap-1 px-3 py-2.5 text-sm font-semibold transition-colors",
-                          form.discountType === "PERCENTAGE" ? "bg-indigo-600 text-white" : "bg-white text-gray-500 hover:bg-gray-50"
-                        )}>
-                        <Percent className="h-3.5 w-3.5" />
-                      </button>
-                      <button type="button"
-                        onClick={() => set("discountType", "AMOUNT")}
-                        className={cn("flex items-center gap-1 px-3 py-2.5 text-sm font-semibold transition-colors",
-                          form.discountType === "AMOUNT" ? "bg-indigo-600 text-white" : "bg-white text-gray-500 hover:bg-gray-50"
-                        )}>
-                        <IndianRupee className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                    <FInput type="number" min="0"
-                      placeholder={form.discountType === "PERCENTAGE" ? "e.g. 10" : "0.00"}
-                      value={form.discountValue}
-                      onChange={(e) => set("discountValue", e.target.value)} />
-                  </div>
-                  {discountNum > 0 && (
-                    <p className="text-xs text-green-600 mt-1 font-medium">
-                      ₹{discountNum.toFixed(2)} discount applied
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* Net fee highlight */}
-              {totalFeeNum > 0 && (
-                <div className="mt-4 flex items-center justify-between rounded-xl bg-gray-50 border border-gray-100 px-5 py-3">
-                  <span className="text-sm text-gray-500">Net Payable</span>
-                  <span className="text-xl font-bold text-gray-900">₹{netFee.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
-                </div>
-              )}
+              <Label>Total Fee</Label>
+              <FInput type="number" min="0" placeholder="0.00" value={form.totalFee} onChange={(e) => set("totalFee", e.target.value)} />
             </div>
-
-            {/* Initial payment */}
             <div>
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Initial Payment</p>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div><Label>Amount Paid (₹)</Label><FInput type="number" min="0" placeholder="0.00" value={form.paidFee} onChange={(e) => set("paidFee", e.target.value)} /></div>
-                <div><Label>Payment Date</Label><FInput type="date" value={form.paymentDate} onChange={(e) => set("paymentDate", e.target.value)} /></div>
-                <div>
-                  <Label>Mode of Payment</Label>
-                  <FSelect value={form.paymentMode} onChange={(e) => set("paymentMode", e.target.value)}>
-                    <option value="">Select mode</option>
-                    {PAYMENT_MODES.map((m) => <option key={m}>{m}</option>)}
-                  </FSelect>
+              <Label>Discount</Label>
+              <div className="flex gap-2">
+                <div className="flex shrink-0 rounded-xl overflow-hidden border border-gray-200">
+                  <button type="button" onClick={() => set("discountType", "percent")}
+                    className={cn("px-3 py-1 text-sm font-bold transition-colors", form.discountType === "percent" ? "bg-indigo-600 text-white" : "bg-white text-gray-500 hover:bg-gray-50")}>%</button>
+                  <button type="button" onClick={() => set("discountType", "amount")}
+                    className={cn("px-3 py-1 text-sm font-bold border-l border-gray-200 transition-colors", form.discountType === "amount" ? "bg-indigo-600 text-white" : "bg-white text-gray-500 hover:bg-gray-50")}>₹</button>
                 </div>
-                <div><Label>Receipt Number</Label><FInput placeholder="Receipt / ref no." value={form.receiptNumber} onChange={(e) => set("receiptNumber", e.target.value)} /></div>
+                <FInput type="number" min="0" placeholder={form.discountType === "percent" ? "e.g. 10" : "0.00"}
+                  value={form.discountValue} onChange={(e) => set("discountValue", e.target.value)} className="flex-1" />
               </div>
-
-              {/* Pending display */}
-              {totalFeeNum > 0 && (
-                <div className={cn(
-                  "mt-4 flex items-center justify-between rounded-xl border px-5 py-3",
-                  pendingNum > 0 ? "border-orange-200 bg-orange-50" : "border-green-200 bg-green-50"
-                )}>
-                  <span className="text-sm font-medium text-gray-600">
-                    {pendingNum > 0 ? "Outstanding Balance" : "Fully Paid"}
-                  </span>
-                  <span className={cn("text-xl font-bold", pendingNum > 0 ? "text-orange-700" : "text-green-700")}>
-                    {pendingNum > 0 ? `₹${pendingNum.toLocaleString("en-IN", { minimumFractionDigits: 2 })}` : "₹0.00"}
-                  </span>
-                </div>
-              )}
             </div>
-
-            {/* Note */}
+            <div>
+              <Label>Net Payable</Label>
+              <FInput readOnly placeholder="Auto calculated" value={totalFeeNum > 0 ? netFee.toFixed(2) : ""} className="bg-gray-50 text-gray-700 cursor-default font-semibold" />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-[14px]">
+            <div>
+              <Label>Amount Paid</Label>
+              <FInput type="number" min="0" placeholder="0.00" value={form.paidFee} onChange={(e) => set("paidFee", e.target.value)} />
+            </div>
+            <div>
+              <Label>Payment Date</Label>
+              <FInput type="date" value={form.paymentDate} onChange={(e) => set("paymentDate", e.target.value)} />
+            </div>
+            <div>
+              <Label>Mode of Payment</Label>
+              <FSelect value={form.paymentMode} onChange={(e) => set("paymentMode", e.target.value)}>
+                <option value="">Select mode</option>
+                {PAYMENT_MODES.map((m) => <option key={m}>{m}</option>)}
+              </FSelect>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-[14px]">
+            <div>
+              <Label>Receipt Number</Label>
+              <FInput placeholder="Receipt / ref no." value={form.receiptNumber} onChange={(e) => set("receiptNumber", e.target.value)} />
+            </div>
             <div>
               <Label>Note</Label>
-              <textarea
-                rows={2}
-                placeholder="Any note about this payment or admission..."
-                value={form.paymentNote}
-                onChange={(e) => set("paymentNote", e.target.value)}
-                className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-base text-gray-800 shadow-sm placeholder:text-gray-300 focus:border-indigo-400 focus:outline-none focus:ring-4 focus:ring-indigo-50 resize-none"
-              />
+              <FInput placeholder="Payment or admission note" value={form.paymentNote} onChange={(e) => set("paymentNote", e.target.value)} />
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      </Card>
 
       {/* Instalment Plan */}
-      <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-50 bg-gray-50/60">
-          <div className="flex items-center gap-2.5">
-            <Clock className="h-4 w-4 text-gray-400" />
-            <span className="text-sm font-semibold text-gray-600">Instalment Plan</span>
-            {form.instalments.length > 0 && (
-              <span className="ml-1 rounded-full bg-indigo-100 text-indigo-700 text-xs font-semibold px-2 py-0.5">
-                {form.instalments.length}
-              </span>
-            )}
-          </div>
-          <button type="button" onClick={addInstalment}
-            className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 transition-colors shadow-sm">
-            <Plus className="h-3.5 w-3.5" /> Add Instalment
-          </button>
-        </div>
-
-        {/* Plan selector */}
-        {instalmentPlans.length > 0 && (
-          <div className="flex items-center gap-3 px-6 py-3.5 border-b border-gray-50 bg-indigo-50/30">
-            <Layers className="h-4 w-4 text-indigo-400 shrink-0" />
-            <FSelect
-              value={selectedPlanId}
-              onChange={(e) => setSelectedPlanId(e.target.value)}
-              className="flex-1 py-2 text-sm"
-            >
-              <option value="">Apply a template plan…</option>
-              {instalmentPlans.map((p: any) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}{p.course ? ` — ${p.course.name}` : " — Generic"} ({p.items?.length ?? 0} instalments)
-                </option>
-              ))}
-            </FSelect>
-            <button
-              type="button"
-              disabled={!selectedPlanId}
-              onClick={applyPlan}
-              className="flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-white px-3.5 py-2 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
-            >
-              <Check className="h-3.5 w-3.5" /> Apply
-            </button>
-          </div>
-        )}
-
-        <div className="px-6 py-4">
-          {form.instalments.length === 0 ? (
-            <div className="flex flex-col items-center py-6 text-center">
-              <div className="h-10 w-10 rounded-xl bg-gray-100 flex items-center justify-center mb-2">
-                <Clock className="h-5 w-5 text-gray-300" />
-              </div>
-              <p className="text-sm text-gray-400">No instalment plan defined.</p>
-              <p className="text-xs text-gray-300 mt-0.5">Full amount due at once, or click "Add Instalment" to split.</p>
+      <Card title="Instalment Plan" mark="IP">
+        <div className="space-y-[14px]">
+          <div className="grid grid-cols-2 gap-[14px]">
+            <div>
+              <Label>Plan</Label>
+              <FSelect value={form.instalmentPlan} onChange={(e) => set("instalmentPlan", e.target.value)}>
+                <option value="NONE">No instalment plan</option>
+                {(instalmentPlans as any[]).filter((p: any) => p.isActive).map((p: any) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}{p.course ? ` — ${p.course.name}` : ""} ({p.items?.length ?? 0} instalments)
+                  </option>
+                ))}
+                <option value="CUSTOM">Custom plan</option>
+              </FSelect>
             </div>
-          ) : (
-            <div className="space-y-3">
-              {/* Header row */}
-              <div className="grid grid-cols-[40px_1fr_160px_160px_44px] gap-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-1">
-                <span>#</span><span>Label</span><span>Amount (₹)</span><span>Due Date</span><span />
-              </div>
-              {form.instalments.map((ins) => (
-                <div key={ins.id} className="grid grid-cols-[40px_1fr_160px_160px_44px] gap-3 items-center">
-                  <div className="h-8 w-8 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-sm font-bold text-indigo-600">
-                    {ins.instalmentNo}
-                  </div>
-                  <FInput placeholder="e.g. 1st Instalment" value={ins.label}
-                    onChange={(e) => updateInstalment(ins.id, "label", e.target.value)} />
-                  <FInput type="number" min="0" placeholder="0.00" value={ins.amount}
-                    onChange={(e) => updateInstalment(ins.id, "amount", e.target.value)} />
-                  <FInput type="date" value={ins.dueDate}
-                    onChange={(e) => updateInstalment(ins.id, "dueDate", e.target.value)} />
-                  <button type="button" onClick={() => removeInstalment(ins.id)}
-                    className="h-9 w-9 rounded-xl border border-gray-200 flex items-center justify-center text-gray-400 hover:text-red-500 hover:border-red-200 transition-colors">
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
+            <div>
+              <Label>Pending Amount</Label>
+              <FInput readOnly placeholder="Auto calculated" value={pendingNum > 0 ? pendingNum.toFixed(2) : ""}
+                className="bg-gray-50 text-gray-700 cursor-default font-semibold" />
+            </div>
+          </div>
 
-              {/* Running total + payment link note */}
-              <div className="mt-2 pt-3 border-t border-gray-100 flex items-center justify-between">
-                <div className="flex items-center gap-4 text-sm">
-                  <span className="text-gray-500">Total planned: <span className="font-semibold text-gray-800">₹{instalSum.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span></span>
-                  {instalRemain > 0 && (
-                    <span className="text-orange-500 font-medium">Unplanned: ₹{instalRemain.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
-                  )}
-                  {instalRemain === 0 && instalSum > 0 && (
-                    <span className="text-green-600 font-medium flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" /> Fully planned</span>
-                  )}
+          {/* Settings plan preview */}
+          {selectedPlan?.items?.length > 0 && (
+            <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+              <p className="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-3">Plan Schedule</p>
+              <div className="space-y-2">
+                {selectedPlan.items.map((item: any) => (
+                  <div key={item.id} className="flex items-center gap-4 text-sm">
+                    <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-[10px] font-black shrink-0">{item.instalmentNo}</span>
+                    <span className="flex-1 font-medium text-gray-700">{item.label ?? `Instalment ${item.instalmentNo}`}</span>
+                    <span className="font-bold text-gray-900">₹{Number(item.amount).toLocaleString()}</span>
+                    <span className="text-gray-400 text-xs text-right">
+                      {item.dueDate
+                        ? new Date(item.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+                        : item.daysFromAdmission != null ? `${item.daysFromAdmission} days from admission` : "—"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Custom plan per-row editor */}
+          {form.instalmentPlan === "CUSTOM" && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="w-48">
+                  <Label>Number of Instalments</Label>
+                  <FSelect value={form.customInstalmentCount} onChange={(e) => {
+                    const n = parseInt(e.target.value) || 3;
+                    set("customInstalmentCount", e.target.value);
+                    set("customItems", Array.from({ length: n }, (_, i) => form.customItems[i] ?? { dueDate: "", amount: "" }));
+                  }}>
+                    {["2","3","4","6","12"].map(n => <option key={n} value={n}>{n} instalments</option>)}
+                  </FSelect>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-gray-400">
-                  <Link2 className="h-3.5 w-3.5" />
-                  <span>Payment links via Razorpay — coming soon</span>
+              </div>
+
+              <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4 space-y-3">
+                <div className="grid grid-cols-[28px_1fr_1fr] gap-3 mb-1">
+                  <div />
+                  <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider">Due Date</p>
+                  <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider">Amount (₹)</p>
                 </div>
+                {form.customItems.map((item, idx) => (
+                  <div key={idx} className="grid grid-cols-[28px_1fr_1fr] gap-3 items-center">
+                    <span className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-[10px] font-black shrink-0">
+                      {idx + 1}
+                    </span>
+                    <FInput type="date" value={item.dueDate} onChange={(e) => {
+                      const updated = [...form.customItems];
+                      updated[idx] = { ...updated[idx], dueDate: e.target.value };
+                      set("customItems", updated);
+                    }} />
+                    <FInput type="number" min="0" placeholder="0.00" value={item.amount} onChange={(e) => {
+                      const updated = [...form.customItems];
+                      updated[idx] = { ...updated[idx], amount: e.target.value };
+                      set("customItems", updated);
+                    }} />
+                  </div>
+                ))}
+
+                {(() => {
+                  const customTotal = form.customItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
+                  const anyAmounts  = form.customItems.some(i => i.amount !== "");
+                  if (anyAmounts && pendingNum > 0 && Math.abs(customTotal - pendingNum) > 0.5) {
+                    return (
+                      <p className="text-xs text-amber-600 font-medium pt-1">
+                        Instalments total ₹{customTotal.toLocaleString()} — pending fee is ₹{pendingNum.toFixed(2)}. Amounts don&apos;t match.
+                      </p>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
             </div>
           )}
         </div>
-      </div>
-
-      {/* Payment History */}
-      <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
-        <div className="flex items-center gap-2.5 px-6 py-4 border-b border-gray-50 bg-gray-50/60">
-          <History className="h-4 w-4 text-gray-400" />
-          <span className="text-sm font-semibold text-gray-600">Payment History</span>
-        </div>
-        <div className="flex flex-col items-center py-8 text-center px-6">
-          <div className="h-10 w-10 rounded-xl bg-gray-100 flex items-center justify-center mb-2">
-            <History className="h-5 w-5 text-gray-300" />
-          </div>
-          <p className="text-sm text-gray-400">No payments recorded yet.</p>
-          <p className="text-xs text-gray-300 mt-0.5">History will appear here after the student record is saved and payments are processed.</p>
-        </div>
-      </div>
+      </Card>
 
     </div>
   );
 }
+
 
 // ── Section: Batch ────────────────────────────────────────────────────────────
 
@@ -834,209 +725,165 @@ function BatchSection({ form, set, batches }: { form: FormState; set: (k: keyof 
     queryFn: () => api.get("/api/v1/academics/academic-years").then((r) => r.data.data),
     staleTime: 10 * 60 * 1000,
   });
-  const activeYears = (academicYears as any[]).filter((y) => !y.isArchived);
+  const { data: locations = [] } = useQuery({
+    queryKey: ["locations"],
+    queryFn: () => api.get("/api/v1/academics/locations").then((r) => r.data.data),
+    staleTime: 10 * 60 * 1000,
+  });
+  const activeYears = (academicYears as any[]).filter((y: any) => !y.isArchived);
 
   const [filterYear, setFilterYear] = useState("");
+  const [filterCity, setFilterCity] = useState("");
 
-  // Initialize to the first active year once they load
   useEffect(() => {
-    if (activeYears.length > 0 && !filterYear) {
-      setFilterYear(activeYears[0].name);
-    }
+    if (activeYears.length > 0 && !filterYear) setFilterYear(activeYears[0].name);
   }, [activeYears.length]);
 
-  const filteredBatches = filterYear
-    ? activeBatches.filter((b: any) => b.academicYear === filterYear)
-    : activeBatches;
+  const filteredBatches = activeBatches.filter((b: any) => {
+    if (filterYear && b.academicYear !== filterYear) return false;
+    if (filterCity && b.location?.id !== filterCity) return false;
+    return true;
+  });
 
   const selectedBatch = activeBatches.find((b: any) => b.id === form.batchId);
 
-  // Fetch subjects for the selected batch
-  const { data: batchSubjects = [], isLoading: loadingSubjects } = useQuery({
-    queryKey: ["batch-subjects", form.batchId],
-    queryFn: () => api.get(`/api/v1/academics/batches/${form.batchId}/subjects`).then((r) => r.data.data),
-    enabled: !!form.batchId,
-  });
-
-  // Auto-select ALL subjects when they first load for a batch
-  useEffect(() => {
-    if (batchSubjects.length > 0 && form.subjectIds.length === 0) {
-      set("subjectIds", batchSubjects.map((bs: any) => bs.subject.id));
-    }
-  }, [batchSubjects]);
-
-  const handleBatchChange = (id: string) => {
-    set("batchId", id);
-    set("subjectIds", []);
-  };
-
-  const toggleSubject = (subjectId: string) => {
-    const current = form.subjectIds;
-    set("subjectIds", current.includes(subjectId)
-      ? current.filter((s) => s !== subjectId)
-      : [...current, subjectId]
-    );
-  };
-
   return (
     <div className="space-y-5">
-      <Card title="Batch Assignment" icon={GraduationCap}>
-        <div className="space-y-5">
 
-          {/* Step 1 — Academic Year */}
-          <div>
-            <Label>Academic Year</Label>
-            <FSelect
-              value={filterYear}
-              onChange={(e) => {
-                setFilterYear(e.target.value);
-                set("batchId", "");
-                set("subjectIds", []);
-              }}
-            >
-              <option value="">— All years —</option>
-              {activeYears.map((y: any) => (
-                <option key={y.id} value={y.name}>{y.name}</option>
-              ))}
-            </FSelect>
+      {/* Batch Assignment */}
+      <Card title="Batch Assignment" mark="BA">
+        <div className="space-y-[14px]">
+          <div className="grid grid-cols-2 gap-[14px]">
+            <div>
+              <Label>Academic Year</Label>
+              <FSelect value={filterYear} onChange={(e) => { setFilterYear(e.target.value); set("batchId", ""); }}>
+                <option value="">All years</option>
+                {activeYears.map((y: any) => (
+                  <option key={y.id} value={y.name}>{y.name}</option>
+                ))}
+              </FSelect>
+            </div>
+            <div>
+              <Label>City</Label>
+              <FSelect value={filterCity} onChange={(e) => { setFilterCity(e.target.value); set("batchId", ""); }}>
+                <option value="">All cities</option>
+                {(locations as any[]).filter((l: any) => l.isActive).map((l: any) => (
+                  <option key={l.id} value={l.id}>{l.name}</option>
+                ))}
+              </FSelect>
+            </div>
           </div>
-
-          {/* Step 2 — Batch */}
           <div>
             <Label>Select Batch</Label>
-            <FSelect value={form.batchId} onChange={(e) => handleBatchChange(e.target.value)}>
-              <option value="">— Select a batch —</option>
+            <FSelect value={form.batchId} onChange={(e) => set("batchId", e.target.value)}>
+              <option value="">Select a batch</option>
               {filteredBatches.map((b: any) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}{b._count?.students != null ? ` (${b._count.students} students)` : ""}
-                </option>
+                <option key={b.id} value={b.id}>{b.name}</option>
               ))}
             </FSelect>
           </div>
-
-          {/* Step 3 — Subjects */}
-          {form.batchId && (
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <Label>Enrolled Subjects</Label>
-                {!loadingSubjects && batchSubjects.length > 0 && (
-                  <span className="text-xs text-gray-400">
-                    {form.subjectIds.length} / {batchSubjects.length} selected
-                  </span>
-                )}
-              </div>
-              {loadingSubjects ? (
-                <div className="space-y-2">
-                  {[1,2,3,4].map((i) => <div key={i} className="h-11 rounded-xl bg-gray-100 animate-pulse" />)}
-                </div>
-              ) : batchSubjects.length === 0 ? (
-                <p className="text-sm text-gray-400">No subjects assigned to this batch yet.</p>
-              ) : (
-                <div className="rounded-xl border border-gray-200 overflow-hidden divide-y divide-gray-100">
-                  {batchSubjects.map((bs: any) => {
-                    const enrolled = form.subjectIds.includes(bs.subject.id);
-                    return (
-                      <button
-                        key={bs.subject.id}
-                        type="button"
-                        onClick={() => toggleSubject(bs.subject.id)}
-                        className={cn(
-                          "w-full flex items-center gap-3 px-4 py-3 text-left transition-colors",
-                          enrolled ? "bg-white hover:bg-gray-50/50" : "bg-gray-50/60 hover:bg-gray-100/60"
-                        )}
-                      >
-                        {/* Checkbox visual */}
-                        <div className={cn(
-                          "h-5 w-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors",
-                          enrolled ? "border-indigo-500 bg-indigo-600" : "border-gray-300 bg-white"
-                        )}>
-                          {enrolled && <Check className="h-3 w-3 text-white" />}
-                        </div>
-                        {/* Subject info */}
-                        <div className="flex-1 min-w-0">
-                          <span className={cn("text-sm font-medium", enrolled ? "text-gray-800" : "text-gray-400 line-through")}>
-                            {bs.subject.name}
-                          </span>
-                          {bs.subject.code && (
-                            <span className="ml-2 font-mono text-xs text-gray-400">{bs.subject.code}</span>
-                          )}
-                        </div>
-                        {!enrolled && (
-                          <span className="text-xs text-gray-400 shrink-0">Not enrolled</span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              {!loadingSubjects && batchSubjects.length > 0 && form.subjectIds.length < batchSubjects.length && (
-                <p className="text-xs text-amber-600 mt-2 font-medium">
-                  {batchSubjects.length - form.subjectIds.length} subject{(batchSubjects.length - form.subjectIds.length) !== 1 ? "s" : ""} not enrolled
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Selected batch preview */}
-          {selectedBatch && (
-            <div className="flex items-center gap-4 rounded-2xl bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-100 p-5">
-              <div className="h-12 w-12 rounded-xl bg-indigo-600 flex items-center justify-center shrink-0">
-                <GraduationCap className="h-6 w-6 text-white" />
-              </div>
-              <div>
-                <p className="text-base font-bold text-indigo-900">{selectedBatch.name}</p>
-                <p className="text-sm text-indigo-500 mt-0.5">
-                  {selectedBatch.academicYear} · {selectedBatch._count?.students ?? 0} students enrolled
-                  {form.subjectIds.length > 0 && ` · ${form.subjectIds.length} subject${form.subjectIds.length !== 1 ? "s" : ""} selected`}
-                </p>
-              </div>
-              <CheckCircle2 className="ml-auto h-5 w-5 text-indigo-400" />
-            </div>
-          )}
         </div>
       </Card>
+
+      {/* Batch Preview */}
+      {selectedBatch && (
+        <Card title="Batch Preview" mark="PV">
+          <div className="grid grid-cols-4 gap-[14px]">
+            <StatCard label="Strength" value={String(selectedBatch._count?.students ?? 0)} />
+            <StatCard label="Schedule" value={selectedBatch.academicYear ?? "—"} />
+            <StatCard label="Start Date" value={selectedBatch.startDate ? new Date(selectedBatch.startDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"} />
+            <StatCard label="Subjects" value={String(selectedBatch._count?.batchSubjects ?? "—")} />
+          </div>
+        </Card>
+      )}
+
     </div>
   );
 }
 
 // ── Section: Login Info ───────────────────────────────────────────────────────
 
+const CHOICE_OPTIONS = [
+  { label: "Force password change" },
+  { label: "Prevent password reuse" },
+  { label: "Email credentials" },
+  { label: "SMS / WhatsApp later" },
+] as const;
+
 function LoginInfoSection({ form }: { form: FormState }) {
+  const [active, setActive] = useState<Record<string, boolean>>({
+    "Force password change":  true,
+    "Prevent password reuse": true,
+    "Email credentials":      false,
+    "SMS / WhatsApp later":   false,
+  });
+
+  const toggle = (label: string) => setActive((prev) => ({ ...prev, [label]: !prev[label] }));
+
   return (
     <div className="space-y-5">
-      <Card title="Student Login Credentials" icon={KeyRound}>
-        <div className="space-y-4 max-w-md">
-          <div>
-            <Label>Login Email</Label>
-            <FInput readOnly value={form.email || "—"} className="bg-gray-50/80 text-gray-500 cursor-default" />
+
+      {/* Login Credentials */}
+      <Card title="Student Login Credentials" mark="LC">
+        <div>
+          <div className="grid grid-cols-2 gap-[14px]">
+            <div>
+              <Label>Login Email</Label>
+              <FInput readOnly placeholder="Auto from student email" value={form.email || ""}
+                className="bg-gray-50 text-gray-500 cursor-default" />
+            </div>
+            <div>
+              <Label>Default Password</Label>
+              <FInput readOnly value="Welcome@123"
+                className="bg-gray-50 font-mono text-gray-700 cursor-default tracking-wider" />
+            </div>
           </div>
-          <div>
-            <Label>Default Password</Label>
-            <FInput readOnly value="Welcome@123" className="bg-gray-50/80 font-mono text-gray-700 cursor-default tracking-wider" />
+
+          {/* 4 choice cards */}
+          <div className="grid grid-cols-4 gap-[10px] mt-4">
+            {CHOICE_OPTIONS.map(({ label }) => {
+              const on = active[label];
+              return (
+                <button key={label} type="button" onClick={() => toggle(label)}
+                  style={{
+                    minHeight: 54,
+                    border: `1px solid ${on ? "#8b5cf6" : "#e6e8ef"}`,
+                    background: on ? "#f1efff" : "white",
+                    borderRadius: 14,
+                    padding: "10px 13px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    color: on ? "#28245f" : "#4b5563",
+                    fontWeight: 850,
+                    fontSize: 13,
+                    cursor: "pointer",
+                    textAlign: "left" as const,
+                  }}
+                >
+                  <div style={{
+                    width: 18, height: 18, borderRadius: "50%", flexShrink: 0,
+                    border: on ? "5px solid #6d5dfc" : "2px solid #a8b0bf",
+                    background: on ? "white" : "transparent",
+                  }} />
+                  {label}
+                </button>
+              );
+            })}
           </div>
         </div>
       </Card>
 
-      <div className="rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 to-indigo-50 p-5 space-y-3">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 h-5 w-5 rounded-full bg-blue-500 flex items-center justify-center shrink-0">
-            <Check className="h-3 w-3 text-white" />
-          </div>
-          <p className="text-sm text-blue-800">Student will be prompted to change this password on first login.</p>
+      {/* Final Review */}
+      <Card title="Final Review" mark="✓">
+        <div className="grid grid-cols-4 gap-[14px]">
+          <StatCard label="Profile"   value={isComplete("personal",  form) ? "Ready"    : "Incomplete"} />
+          <StatCard label="Parents"   value={isComplete("parents",   form) ? "Added"    : "Incomplete"} />
+          <StatCard label="Admission" value={isComplete("admission", form) ? "Ready"    : "Draft"}      />
+          <StatCard label="Batch"     value={isComplete("batch",     form) ? "Assigned" : "Optional"}   />
         </div>
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 h-5 w-5 rounded-full bg-blue-500 flex items-center justify-center shrink-0">
-            <Check className="h-3 w-3 text-white" />
-          </div>
-          <p className="text-sm text-blue-800">The default password cannot be reused as the new password.</p>
-        </div>
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 h-5 w-5 rounded-full bg-blue-300 flex items-center justify-center shrink-0">
-            <Circle className="h-3 w-3 text-white" />
-          </div>
-          <p className="text-sm text-blue-600">Sharing credentials via Email, SMS, or WhatsApp — coming soon.</p>
-        </div>
-      </div>
+      </Card>
+
     </div>
   );
 }
@@ -1056,19 +903,44 @@ export default function NewStudentPage() {
   const { data: courses       = [] } = useQuery({ queryKey: ["courses"],        queryFn: () => api.get("/api/v1/academics/courses").then((r) => r.data.data),        staleTime: 5 * 60 * 1000 });
   const { data: academicYears = [] } = useQuery({ queryKey: ["academic-years"], queryFn: () => api.get("/api/v1/academics/academic-years").then((r) => r.data.data), staleTime: 5 * 60 * 1000 });
   const { data: batches = [] } = useQuery({ queryKey: ["batches"], queryFn: () => api.get("/api/v1/academics/batches?archived=false").then((r) => r.data.data), staleTime: 5 * 60 * 1000 });
+  const { data: instalmentPlans = [] } = useQuery({ queryKey: ["instalment-plans"], queryFn: () => api.get("/api/v1/academics/instalment-plans").then((r) => r.data.data), staleTime: 5 * 60 * 1000 });
 
   const buildPayload = () => {
-    let dateOfBirth: string | undefined;
-    if (form.dob.length === 10) {
-      const [dd, mm, yyyy] = form.dob.split("/");
-      if (dd && mm && yyyy) dateOfBirth = `${yyyy}-${mm}-${dd}`;
-    }
-    const totalFeeNum = parseFloat(form.totalFee || "0");
-    const discountAmount = form.discountValue
-      ? form.discountType === "PERCENTAGE"
-        ? totalFeeNum * (parseFloat(form.discountValue) / 100)
-        : parseFloat(form.discountValue)
+    const dateOfBirth = form.dob && form.dob.length === 10 ? form.dob : undefined;
+    const totalFeeNum   = parseFloat(form.totalFee    || "0");
+    const discountNum   = parseFloat(form.discountValue || "0");
+    const discountAmount = discountNum > 0
+      ? (form.discountType === "percent" ? (totalFeeNum * discountNum / 100) : discountNum)
       : undefined;
+    const netFee        = Math.max(0, totalFeeNum - (discountAmount ?? 0));
+    const paidNum       = parseFloat(form.paidFee || "0");
+    const pendingNum    = Math.max(0, netFee - paidNum);
+
+    // Instalments — from Settings plan or custom
+    let instalments: { instalmentNo: number; label?: string; amount: number; dueDate?: string; daysFromAdmission?: number }[] = [];
+    if (form.instalmentPlan !== "NONE") {
+      if (form.instalmentPlan === "CUSTOM") {
+        instalments = form.customItems
+          .filter(item => item.dueDate && item.amount)
+          .map((item, i) => ({
+            instalmentNo: i + 1,
+            label: `Instalment ${i + 1}`,
+            amount: parseFloat(item.amount),
+            dueDate: item.dueDate,
+          }));
+      } else {
+        const plan = (instalmentPlans as any[]).find(p => p.id === form.instalmentPlan);
+        if (plan?.items?.length) {
+          instalments = plan.items.map((item: any) => ({
+            instalmentNo: item.instalmentNo,
+            label: item.label ?? undefined,
+            amount: Number(item.amount),
+            dueDate: item.dueDate ? new Date(item.dueDate).toISOString().split("T")[0] : undefined,
+            daysFromAdmission: item.daysFromAdmission ?? undefined,
+          }));
+        }
+      }
+    }
 
     return {
       firstName: form.firstName, lastName: form.lastName, middleName: form.middleName || undefined,
@@ -1084,23 +956,16 @@ export default function NewStudentPage() {
       communicationContactName: form.communicationContactName || undefined,
       communicationContactPhone: form.communicationContactPhone || undefined,
       admissionDate: form.admissionDate || undefined, academicYear: form.academicYear || undefined,
-      totalFee: form.totalFee ? totalFeeNum : undefined,
-      discountType: form.discountValue ? form.discountType : undefined,
-      discountAmount,
+      totalFee: totalFeeNum > 0 ? totalFeeNum : undefined,
+      discountType: discountAmount ? "AMOUNT" as const : undefined,
+      discountAmount: discountAmount ? Math.round(discountAmount * 100) / 100 : undefined,
       paidFee: form.paidFee ? parseFloat(form.paidFee) : undefined,
       paymentDate: form.paymentDate || undefined,
       paymentMode: form.paymentMode || undefined,
       receiptNumber: form.receiptNumber || undefined,
       paymentNote: form.paymentNote || undefined,
       batchId: form.batchId || undefined,
-      instalments: form.instalments
-        .filter((i) => i.amount && i.dueDate)
-        .map((i) => ({
-          instalmentNo: i.instalmentNo,
-          label:        i.label || undefined,
-          amount:       parseFloat(i.amount),
-          dueDate:      i.dueDate,
-        })),
+      instalments: instalments.length > 0 ? instalments : undefined,
     };
   };
 
@@ -1127,11 +992,32 @@ export default function NewStudentPage() {
   const canDraft   = !!form.firstName && !!form.lastName && !!form.email;
   const completedCount = SECTIONS.filter((s) => isComplete(s.id, form)).length;
 
+  // Validate phone/email fields before save; clear invalid ones if user declines to proceed
+  const validateAndSave = (redirect: boolean) => {
+    let f = { ...form };
+    const warnings: { field: keyof FormState; msg: string }[] = [];
+    if (f.phone       && f.phone.length !== 10)          warnings.push({ field: "phone",       msg: `Student mobile "${f.phone}" is not 10 digits.` });
+    if (f.email       && !EMAIL_RE.test(f.email))        warnings.push({ field: "email",       msg: `Student email "${f.email}" looks invalid.` });
+    if (f.parentPhone && f.parentPhone.length !== 10)    warnings.push({ field: "parentPhone", msg: `Father mobile "${f.parentPhone}" is not 10 digits.` });
+    if (f.parentEmail && !EMAIL_RE.test(f.parentEmail))  warnings.push({ field: "parentEmail", msg: `Father email "${f.parentEmail}" looks invalid.` });
+    if (f.motherPhone && f.motherPhone.length !== 10)    warnings.push({ field: "motherPhone", msg: `Mother mobile "${f.motherPhone}" is not 10 digits.` });
+    if (f.motherEmail && !EMAIL_RE.test(f.motherEmail))  warnings.push({ field: "motherEmail", msg: `Mother email "${f.motherEmail}" looks invalid.` });
+
+    for (const w of warnings) {
+      const proceed = window.confirm(`⚠ ${w.msg}\n\nSave anyway? (Click Cancel to clear that field first)`);
+      if (!proceed) {
+        setFormState((prev) => ({ ...prev, [w.field]: "" }));
+        return; // stop — let user fix it
+      }
+    }
+    saveMut.mutate(redirect);
+  };
+
   // Initials for nav avatar
   const initials = ((form.firstName[0] ?? "") + (form.lastName[0] ?? "")).toUpperCase() || "ST";
 
   return (
-    <div className="flex flex-col h-full" style={{ background: "#F4F6F9" }}>
+    <div className="flex flex-col h-full" style={{ background: "#f4f6fa" }}>
 
       {/* ── Top bar ─────────────────────────────────────────────────────────── */}
       <div className="shrink-0 bg-white border-b border-gray-100 px-8 py-4 flex items-center justify-between shadow-sm">
@@ -1143,31 +1029,31 @@ export default function NewStudentPage() {
             <ArrowLeft className="h-4 w-4" />
           </button>
           <div>
-            <p className="text-xs text-gray-400 font-medium">Students / New</p>
-            <h1 className="text-xl font-bold text-gray-900 leading-tight">New Student</h1>
+            <p className="text-[13px] font-extrabold text-gray-400">Students / New</p>
+            <h1 className="text-[28px] font-black text-gray-900 leading-tight">New Student</h1>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
           <div className="hidden sm:flex items-center gap-2 mr-2">
-            <div className="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center">
-              <span className="text-xs font-bold text-indigo-600">
+            <div className="h-8 w-8 rounded-full flex items-center justify-center" style={{ background: "#eef2ff" }}>
+              <span className="text-xs font-bold" style={{ color: "#28245f" }}>
                 {user ? `${user.firstName[0]}${user.lastName[0]}` : "—"}
               </span>
             </div>
             <span className="text-sm text-gray-500">{user ? `${user.firstName} ${user.lastName}` : "—"}</span>
           </div>
           <button
-            onClick={() => saveMut.mutate(false)}
+            onClick={() => validateAndSave(false)}
             disabled={!canDraft || saveMut.isPending}
             className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-40 transition-all shadow-sm"
           >
             Save Draft
           </button>
           <button
-            onClick={() => saveMut.mutate(true)}
+            onClick={() => validateAndSave(true)}
             disabled={!canSubmit || saveMut.isPending}
-            className="flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-sm shadow-indigo-200"
+            className="flex items-center gap-2 rounded-xl px-5 py-2 text-sm font-extrabold text-white disabled:opacity-50 transition-all" style={{ background: "linear-gradient(135deg, #28245f, #4f46e5)", boxShadow: "0 12px 24px rgba(79,70,229,.25)" }}
           >
             <Check className="h-4 w-4" />
             {saveMut.isPending ? "Saving…" : "Save Student"}
@@ -1179,71 +1065,93 @@ export default function NewStudentPage() {
       <div className="flex flex-1 overflow-hidden">
 
         {/* Left nav */}
-        <aside className="w-60 shrink-0 bg-white border-r border-gray-100 flex flex-col">
+        <aside className="hidden md:flex flex-col w-[292px] shrink-0 bg-white border-r border-gray-100">
 
           {/* Student preview */}
-          <div className="px-5 py-5 border-b border-gray-100">
-            <div className="flex items-center gap-3">
-              <div className="h-11 w-11 rounded-xl bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center shrink-0 overflow-hidden shadow-sm">
-                {form.photoUrl
-                  ? <img src={form.photoUrl} alt="" className="h-full w-full object-cover" />
-                  : <span className="text-sm font-bold text-white">{initials}</span>
-                }
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-gray-800 truncate">
-                  {[form.firstName, form.lastName].filter(Boolean).join(" ") || "New Student"}
-                </p>
-                <p className="text-xs text-gray-400 truncate">{form.email || "No email yet"}</p>
-              </div>
+          <div className="flex items-center gap-[13px] px-[22px] py-[22px] border-b border-gray-100">
+            <div
+              className="flex items-center justify-center shrink-0 overflow-hidden"
+              style={{ width: 58, height: 58, borderRadius: 18, background: "linear-gradient(135deg, #28245f, #7c3aed)" }}
+            >
+              {form.photoUrl
+                ? <img src={form.photoUrl} alt="" className="h-full w-full object-cover" />
+                : <span className="text-base font-bold text-white">{initials}</span>
+              }
+            </div>
+            <div className="min-w-0">
+              <p className="text-[16px] font-bold text-gray-800 truncate leading-tight">
+                {[form.firstName, form.lastName].filter(Boolean).join(" ") || "New Student"}
+              </p>
+              <p className="text-xs text-gray-400 truncate mt-0.5">{form.email || "No email yet"}</p>
             </div>
           </div>
 
           {/* Section nav */}
-          <nav className="flex-1 px-3 py-4 space-y-1">
-            {SECTIONS.map(({ id, label, icon: Icon, num }, i) => {
-              const active    = section === i;
-              const completed = isComplete(id, form);
+          <nav className="flex-1 px-[14px] py-[18px]" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {SECTIONS.map(({ id, label, num }, i) => {
+              const active  = section === i;
+              const done    = isComplete(id, form);
               return (
                 <button key={id} onClick={() => setSection(i)}
-                  className={cn(
-                    "w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-left transition-all duration-150",
-                    active
-                      ? "bg-indigo-600 text-white shadow-sm shadow-indigo-200"
-                      : "text-gray-500 hover:bg-gray-50 hover:text-gray-800"
-                  )}
+                  className="w-full text-left transition-all duration-150"
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "32px minmax(0,1fr) auto",
+                    alignItems: "center",
+                    gap: "10px",
+                    minHeight: "52px",
+                    borderRadius: "14px",
+                    padding: "8px 12px",
+                    fontWeight: 850,
+                    color: active ? "white" : "#6b7280",
+                    background: active ? "linear-gradient(135deg, #28245f, #4f46e5)" : "transparent",
+                    boxShadow: active ? "0 12px 24px rgba(79,70,229,.22)" : "none",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
                 >
-                  <Icon className={cn("h-4.5 w-4.5 shrink-0", active ? "text-white" : "text-gray-400")} />
-                  <span className="flex-1 text-sm font-medium">{label}</span>
-                  {!active && completed && <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />}
-                  {!active && !completed && <div className="h-4 w-4 rounded-full border-2 border-gray-200 flex items-center justify-center shrink-0"><span className="text-[9px] font-bold text-gray-400">{num}</span></div>}
+                  {/* Step indicator: checkmark when done, number otherwise */}
+                  <div style={{
+                    width: 28, height: 28, borderRadius: 9,
+                    display: "grid", placeItems: "center",
+                    fontSize: done ? 15 : 12, fontWeight: 900,
+                    background: active ? "white" : done ? "#dcfce7" : "#f1f5f9",
+                    color: active ? "#28245f" : done ? "#16a34a" : "#94a3b8",
+                  }}>{done && !active ? "✓" : num}</div>
+                  <span style={{ fontSize: 14 }}>{label}</span>
+                  {done && !active && (
+                    <span style={{ fontSize: 10, fontWeight: 800, color: "#16a34a", background: "#dcfce7", borderRadius: 999, padding: "1px 7px" }}>Done</span>
+                  )}
                 </button>
               );
             })}
           </nav>
 
           {/* Progress */}
-          <div className="px-5 py-4 border-t border-gray-100">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-gray-400">Profile complete</span>
-              <span className="text-xs font-bold text-gray-600">{Math.round((completedCount / SECTIONS.length) * 100)}%</span>
+          <div className="mt-auto px-[22px] py-[18px] border-t border-gray-100">
+            <div className="flex items-center justify-between mb-2.5">
+              <span className="text-[13px] font-extrabold text-gray-400">Profile complete</span>
+              <span className="text-[13px] font-bold text-gray-600">{Math.round((completedCount / SECTIONS.length) * 100)}%</span>
             </div>
-            <div className="w-full bg-gray-100 rounded-full h-1.5">
+            <div className="w-full rounded-full overflow-hidden" style={{ height: 8, background: "#eef2f7" }}>
               <div
-                className="bg-gradient-to-r from-indigo-500 to-violet-500 h-full rounded-full transition-all duration-500"
-                style={{ width: `${(completedCount / SECTIONS.length) * 100}%` }}
+                className="h-full rounded-full transition-all duration-500"
+                style={{
+                  width: `${(completedCount / SECTIONS.length) * 100}%`,
+                  background: "linear-gradient(90deg, #ff914d, #a8d879)",
+                }}
               />
             </div>
-            <p className="text-[11px] text-gray-400 mt-2">{completedCount} of {SECTIONS.length} sections done</p>
+            <p className="text-[12px] text-gray-400 mt-2.5">{completedCount} of {SECTIONS.length} sections done</p>
           </div>
         </aside>
 
         {/* Form content */}
-        <main className="flex-1 overflow-y-auto px-8 py-6">
-          <div className="max-w-3xl mx-auto">
+        <main className="flex-1 overflow-y-auto px-8 py-7 pb-[108px]">
+          <div className="max-w-[1120px] mx-auto">
             {section === 0 && <PersonalSection  form={form} set={set} schools={schools} grades={grades} />}
             {section === 1 && <ParentsSection   form={form} set={set} />}
-            {section === 2 && <AdmissionSection form={form} set={set} courses={courses} academicYears={academicYears} />}
+            {section === 2 && <AdmissionSection form={form} set={set} courses={courses} academicYears={academicYears} instalmentPlans={instalmentPlans} />}
             {section === 3 && <BatchSection     form={form} set={set} batches={batches} />}
             {section === 4 && <LoginInfoSection form={form} />}
           </div>
@@ -1251,38 +1159,49 @@ export default function NewStudentPage() {
       </div>
 
       {/* ── Bottom nav ──────────────────────────────────────────────────────── */}
-      <div className="shrink-0 bg-white border-t border-gray-100 px-8 py-3 flex items-center justify-between">
-        <span className="text-sm text-gray-400">
-          Step <span className="font-semibold text-gray-600">{section + 1}</span> of {SECTIONS.length}
-          <span className="mx-2 text-gray-200">·</span>
-          <span className="font-semibold text-gray-600">{SECTIONS[section].label}</span>
+      <div
+        className="shrink-0 flex items-center justify-between gap-4 border-t px-7"
+        style={{
+          minHeight: 78,
+          background: "rgba(255,255,255,.92)",
+          backdropFilter: "blur(12px)",
+          borderColor: "#e6e8ef",
+        }}
+      >
+        <span className="text-sm font-extrabold text-gray-400">
+          Step <strong className="text-gray-700">{section + 1}</strong> of {SECTIONS.length}
+          <span className="mx-2 text-gray-300">·</span>
+          <strong className="text-gray-700">{SECTIONS[section].label}</strong>
         </span>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <button
             onClick={() => setSection((s) => Math.max(0, s - 1))}
             disabled={section === 0}
-            className="flex items-center gap-1.5 rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-30 transition-all"
+            className="flex items-center gap-1.5 rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-extrabold text-gray-500 hover:bg-gray-50 disabled:opacity-30 transition-all"
           >
             <ChevronLeft className="h-4 w-4" /> Previous
           </button>
           <button
-            onClick={() => saveMut.mutate(false)}
+            onClick={() => validateAndSave(false)}
             disabled={!canDraft || saveMut.isPending}
-            className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-30 transition-all"
+            className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-extrabold text-gray-500 hover:bg-gray-50 disabled:opacity-30 transition-all"
           >
             Save Draft
           </button>
           {section < SECTIONS.length - 1 ? (
-            <button onClick={() => setSection((s) => s + 1)}
-              className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 transition-all shadow-sm shadow-indigo-200"
+            <button
+              onClick={() => setSection((s) => s + 1)}
+              className="flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-sm font-extrabold text-white transition-all"
+              style={{ background: "linear-gradient(135deg, #28245f, #4f46e5)", boxShadow: "0 12px 24px rgba(79,70,229,.25)" }}
             >
               Next: {SECTIONS[section + 1].label} <ChevronRight className="h-4 w-4" />
             </button>
           ) : (
             <button
-              onClick={() => saveMut.mutate(true)}
+              onClick={() => validateAndSave(true)}
               disabled={!canSubmit || saveMut.isPending}
-              className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-sm shadow-indigo-200"
+              className="flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-sm font-extrabold text-white disabled:opacity-50 transition-all"
+              style={{ background: "linear-gradient(135deg, #28245f, #4f46e5)", boxShadow: "0 12px 24px rgba(79,70,229,.25)" }}
             >
               <Check className="h-4 w-4" />
               {saveMut.isPending ? "Saving…" : "Save Student"}

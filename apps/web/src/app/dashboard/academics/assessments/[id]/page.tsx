@@ -569,7 +569,7 @@ export default function ExamDetailPage() {
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-gray-700">Exam Overview</h2>
             <button onClick={generatePDF}
-              className="flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
+              className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white rounded-md hover:opacity-90 transition-colors" style={{ backgroundColor: "#2C3E7C" }}>
               <FileDown className="h-3.5 w-3.5" /> Download PDF Report
             </button>
           </div>
@@ -929,7 +929,7 @@ export default function ExamDetailPage() {
             </button>
             {canEdit && (
               <button onClick={() => saveMut.mutate()} disabled={saveMut.isPending}
-                className="flex items-center gap-2 px-5 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50">
+                className="flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white rounded-md hover:opacity-90 transition-colors disabled:opacity-50" style={{ backgroundColor: "#2C3E7C" }}>
                 {saveMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                 Save Marks
               </button>

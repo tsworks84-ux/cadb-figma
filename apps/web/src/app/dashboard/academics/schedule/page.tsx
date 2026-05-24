@@ -5,12 +5,14 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
-  Plus, X, Calendar, MapPin, User, ChevronDown,
+  Plus, X, Calendar, User, ChevronDown, ChevronRight,
   Download, Loader2, Pencil, Trash2, CalendarDays,
   BarChart2, AlertTriangle, CheckCircle2, XCircle,
-  Search, SlidersHorizontal,
+  Search, SlidersHorizontal, ClipboardList, BookOpen,
+  Users, Percent, UserCheck, UserX, Check, ExternalLink,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
+import { useRouter } from "next/navigation";
 import { format, parseISO, startOfWeek, endOfWeek } from "date-fns";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -25,6 +27,7 @@ const D = {
   ink:   "#111827",
   nav2:  "#28245f",
   bg:    "#f4f6fa",
+  accent: "#eef2ff",
 };
 
 const inputBase: React.CSSProperties = {
@@ -95,7 +98,6 @@ function DField({
   );
 }
 
-// FSelect kept for StatsPanel (uses Tailwind internally)
 function FSelect({ className = "", children, ...p }: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select {...p}
@@ -113,10 +115,11 @@ function StatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
     UPCOMING:  "bg-blue-50 text-blue-700 border border-blue-200",
     COMPLETED: "bg-green-50 text-green-700 border border-green-200",
+    CONCLUDED: "bg-purple-50 text-purple-700 border border-purple-200",
     CANCELLED: "bg-red-50 text-red-700 border border-red-200",
   };
   const label: Record<string, string> = {
-    UPCOMING: "Upcoming", COMPLETED: "Completed", CANCELLED: "Cancelled",
+    UPCOMING: "Upcoming", COMPLETED: "Completed", CONCLUDED: "Concluded", CANCELLED: "Cancelled",
   };
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${map[status] ?? "bg-gray-100 text-gray-600"}`}>
@@ -149,6 +152,76 @@ function lectureDurationHours(s: any) {
   try {
     return (new Date(s.endTime).getTime() - new Date(s.startTime).getTime()) / 3600000;
   } catch { return 0; }
+}
+function todayStr() {
+  return new Date().toISOString().split("T")[0];
+}
+
+// ── Attendance % helper ────────────────────────────────────────────────────────
+
+function AttendancePct({ attendances }: { attendances: { isPresent: boolean }[] }) {
+  if (!attendances || attendances.length === 0) {
+    return <span className="text-xs text-gray-300">—</span>;
+  }
+  const present = attendances.filter((a) => a.isPresent).length;
+  const total   = attendances.length;
+  const pct     = Math.round((present / total) * 100);
+  const color   = pct >= 75 ? "#16a34a" : pct >= 50 ? "#d97706" : "#dc2626";
+  return (
+    <span style={{
+      fontSize: 12, fontWeight: 700, color,
+      background: pct >= 75 ? "#dcfce7" : pct >= 50 ? "#fef3c7" : "#fee2e2",
+      borderRadius: 999, padding: "2px 8px",
+    }}>
+      {pct}%
+    </span>
+  );
+}
+
+// ── Assignment column badge ────────────────────────────────────────────────────
+// assignments: API now returns { id, name, submissions: [{ status }] }[]
+
+function AssignmentBadge({ assignments }: { assignments: { id: string; submissions: { status: string }[] }[] }) {
+  if (!assignments || assignments.length === 0) {
+    // No assignment linked
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", color: "#d1d5db" }}>
+        <X style={{ width: 14, height: 14 }} />
+      </span>
+    );
+  }
+  // Aggregate across all linked assignments (usually 1)
+  let totalSubs = 0, submittedSubs = 0;
+  for (const a of assignments) {
+    for (const s of a.submissions) {
+      totalSubs++;
+      if (s.status !== "NOT_SUBMITTED") submittedSubs++;
+    }
+  }
+  if (submittedSubs === 0) {
+    // Assignment exists but no submissions yet
+    return (
+      <span style={{
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        width: 20, height: 20, borderRadius: "50%",
+        background: "#dcfce7", color: "#16a34a",
+      }}>
+        <Check style={{ width: 12, height: 12, strokeWidth: 3 }} />
+      </span>
+    );
+  }
+  // Has submissions — show %
+  const pct = Math.round((submittedSubs / totalSubs) * 100);
+  return (
+    <span style={{
+      fontSize: 11, fontWeight: 800,
+      color: pct >= 75 ? "#16a34a" : pct >= 50 ? "#d97706" : "#dc2626",
+      background: pct >= 75 ? "#dcfce7" : pct >= 50 ? "#fef3c7" : "#fee2e2",
+      borderRadius: 999, padding: "2px 8px",
+    }}>
+      {pct}%
+    </span>
+  );
 }
 
 // ── BatchMultiSelect ──────────────────────────────────────────────────────────
@@ -523,7 +596,7 @@ function StatsPanel({ schedules, subjects }: { schedules: any[]; subjects: any[]
   );
 }
 
-// ── Schedule modal (redesigned) ───────────────────────────────────────────────
+// ── Schedule modal ────────────────────────────────────────────────────────────
 
 type ScheduleForm = {
   academicYear: string; batchIds: string[]; subjectId: string; employeeId: string;
@@ -652,7 +725,6 @@ function ScheduleModal({
         className="w-full bg-white flex flex-col"
         style={{ maxWidth: 960, borderRadius: 22, boxShadow: "0 32px 90px rgba(0,0,0,.28)", maxHeight: "92vh", overflow: "hidden" }}
       >
-        {/* head */}
         <div
           className="flex items-center justify-between gap-5 border-b shrink-0"
           style={{ padding: "24px 28px", borderColor: D.line }}
@@ -661,35 +733,21 @@ function ScheduleModal({
             <div style={{
               width: 44, height: 44, borderRadius: 14, display: "grid", placeItems: "center",
               background: "#eef2ff", color: D.nav2, fontWeight: 900, fontSize: 15, flexShrink: 0,
-            }}>
-              SC
-            </div>
+            }}>SC</div>
             <h2 style={{ margin: 0, fontSize: 28, fontWeight: 900, color: D.ink }}>
               {scheduleId ? "Edit Schedule" : "New Schedule"}
             </h2>
           </div>
-          <button
-            onClick={onClose}
-            className="border-0 bg-transparent cursor-pointer leading-none text-3xl"
-            style={{ color: "#9aa3b4" }}
-          >
-            ×
-          </button>
+          <button onClick={onClose} className="border-0 bg-transparent cursor-pointer leading-none text-3xl" style={{ color: "#9aa3b4" }}>×</button>
         </div>
 
-        {/* body */}
         <div className="overflow-y-auto flex-1" style={{ padding: "24px 28px" }}>
           <div style={{ display: "grid", gap: 18 }}>
-
-            {/* Section 1: Class Context */}
             <section style={sectionStyle}>
               <h3 style={sectionHeadStyle}>Class Context</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-[14px]">
                 <DField label="Academic Year" required>
-                  <DSelect
-                    value={form.academicYear}
-                    onChange={(e) => setForm({ ...form, academicYear: e.target.value, batchIds: [] })}
-                  >
+                  <DSelect value={form.academicYear} onChange={(e) => setForm({ ...form, academicYear: e.target.value, batchIds: [] })}>
                     <option value="">Select academic year</option>
                     {academicYears.filter((y) => !y.isArchived).map((y) => (
                       <option key={y.id} value={y.name}>{y.name}</option>
@@ -697,11 +755,7 @@ function ScheduleModal({
                   </DSelect>
                 </DField>
                 <DField label="Batch(es)" required>
-                  <BatchMultiSelect
-                    batches={filteredBatches}
-                    selected={form.batchIds}
-                    onChange={(ids) => setForm({ ...form, batchIds: ids })}
-                  />
+                  <BatchMultiSelect batches={filteredBatches} selected={form.batchIds} onChange={(ids) => setForm({ ...form, batchIds: ids })} />
                   {form.batchIds.length > 0 && (
                     <p style={{ fontSize: 12, color: "#4f46e5", margin: 0 }}>
                       {form.batchIds.length} batch{form.batchIds.length > 1 ? "es" : ""} selected
@@ -724,15 +778,10 @@ function ScheduleModal({
                 </DField>
               </div>
               {conflictWarnings.length > 0 && (
-                <div
-                  className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50"
-                  style={{ padding: "10px 14px", marginTop: 14 }}
-                >
+                <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50" style={{ padding: "10px 14px", marginTop: 14 }}>
                   <AlertTriangle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
                   <div>
-                    <p style={{ fontSize: 13, fontWeight: 700, color: "#b91c1c", margin: "0 0 2px" }}>
-                      Faculty conflict detected
-                    </p>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: "#b91c1c", margin: "0 0 2px" }}>Faculty conflict detected</p>
                     <p style={{ fontSize: 12, color: "#ef4444", margin: 0 }}>
                       {employees.find((e) => e.id === form.employeeId)
                         ? `${employees.find((e) => e.id === form.employeeId)!.firstName} ${employees.find((e) => e.id === form.employeeId)!.lastName}`
@@ -744,52 +793,28 @@ function ScheduleModal({
               )}
             </section>
 
-            {/* Section 2: Timing & Location */}
             <section style={sectionStyle}>
-              <h3 style={sectionHeadStyle}>Timing & Location</h3>
+              <h3 style={sectionHeadStyle}>Timing &amp; Location</h3>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-[14px]">
                 <DField label="Date" required>
-                  <DInput
-                    type="date"
-                    value={form.date}
-                    onChange={(e) => setForm({ ...form, date: e.target.value })}
-                  />
+                  <DInput type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
                 </DField>
                 <DField label="Start Time" required>
-                  <DInput
-                    type="time"
-                    value={form.startTime}
-                    onChange={(e) => setForm({ ...form, startTime: e.target.value })}
-                  />
+                  <DInput type="time" value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} />
                 </DField>
                 <DField label="End Time" required>
-                  <DInput
-                    type="time"
-                    error={endTimeError}
-                    value={form.endTime}
-                    onChange={(e) => setForm({ ...form, endTime: e.target.value })}
-                  />
-                  {endTimeError && (
-                    <p style={{ fontSize: 12, color: "#ef4444", margin: 0 }}>
-                      End time must be after start time
-                    </p>
-                  )}
+                  <DInput type="time" error={endTimeError} value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} />
+                  {endTimeError && <p style={{ fontSize: 12, color: "#ef4444", margin: 0 }}>End time must be after start time</p>}
                 </DField>
               </div>
               {form.startTime && form.endTime && form.date && !endTimeError && (
                 <p style={{ fontSize: 13, color: D.muted, margin: "8px 0 0" }}>
-                  Duration: {calcDuration(
-                    new Date(`${form.date}T${form.startTime}`).toISOString(),
-                    new Date(`${form.date}T${form.endTime}`).toISOString()
-                  )}
+                  Duration: {calcDuration(new Date(`${form.date}T${form.startTime}`).toISOString(), new Date(`${form.date}T${form.endTime}`).toISOString())}
                 </p>
               )}
               <div style={{ marginTop: 14 }}>
                 <DField label="Location">
-                  <DSelect
-                    value={form.locationId}
-                    onChange={(e) => setForm({ ...form, locationId: e.target.value })}
-                  >
+                  <DSelect value={form.locationId} onChange={(e) => setForm({ ...form, locationId: e.target.value })}>
                     <option value="">Select location</option>
                     {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
                   </DSelect>
@@ -797,40 +822,25 @@ function ScheduleModal({
               </div>
             </section>
 
-            {/* Section 3: Class Plan */}
             <section style={sectionStyle}>
               <h3 style={sectionHeadStyle}>Class Plan</h3>
               <DField label="Topics">
-                <DInput
-                  placeholder="e.g. Quadratic Equations, Chapter 5"
-                  value={form.topics}
-                  onChange={(e) => setForm({ ...form, topics: e.target.value })}
-                />
+                <DInput placeholder="e.g. Quadratic Equations, Chapter 5" value={form.topics} onChange={(e) => setForm({ ...form, topics: e.target.value })} />
               </DField>
               <div style={{ marginTop: 14 }}>
                 <DField label="Notes">
-                  <DTextarea
-                    placeholder="Additional notes…"
-                    value={form.notes}
-                    onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                  />
+                  <DTextarea placeholder="Additional notes…" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
                 </DField>
               </div>
             </section>
           </div>
         </div>
 
-        {/* foot */}
-        <div
-          className="flex flex-wrap items-center justify-between gap-3 border-t shrink-0"
-          style={{ padding: "18px 28px", borderColor: D.line }}
-        >
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t shrink-0" style={{ padding: "18px 28px", borderColor: D.line }}>
           <DBtn onClick={onClose} disabled={busy}>Cancel</DBtn>
           <div className="flex flex-wrap items-center gap-3">
             {!scheduleId && (
-              <DBtn onClick={handleSaveAnother} disabled={busy || endTimeError}>
-                Save & Add Another
-              </DBtn>
+              <DBtn onClick={handleSaveAnother} disabled={busy || endTimeError}>Save &amp; Add Another</DBtn>
             )}
             <DBtn primary onClick={handleSave} disabled={busy || endTimeError}>
               {busy && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -843,15 +853,587 @@ function ScheduleModal({
   );
 }
 
+// ── Attendance Tab ─────────────────────────────────────────────────────────────
+
+function AttendanceTab({
+  scheduleId, batchStudents, existingAttendance, canEdit, onSaved,
+}: {
+  scheduleId: string;
+  batchStudents: any[];
+  existingAttendance: { studentId: string; isPresent: boolean; note: string | null }[];
+  canEdit: boolean;
+  onSaved: () => void;
+}) {
+  const qc = useQueryClient();
+
+  // Build initial state from existing records OR default all present
+  const initialRows = (): Map<string, { isPresent: boolean; note: string; excluded: boolean }> => {
+    const m = new Map<string, { isPresent: boolean; note: string; excluded: boolean }>();
+    // Start with all batch students (default present)
+    for (const st of batchStudents) {
+      m.set(st.id, { isPresent: true, note: "", excluded: false });
+    }
+    // Override with existing attendance
+    for (const a of existingAttendance) {
+      if (m.has(a.studentId)) {
+        m.set(a.studentId, { isPresent: a.isPresent, note: a.note ?? "", excluded: false });
+      }
+    }
+    return m;
+  };
+
+  const [rows, setRows] = useState<Map<string, { isPresent: boolean; note: string; excluded: boolean }>>(initialRows);
+  const [saving, setSaving] = useState(false);
+
+  const alreadyMarked = existingAttendance.length > 0;
+
+  const saveAttMut = useMutation({
+    mutationFn: () => {
+      const records: { studentId: string; isPresent: boolean; note?: string }[] = [];
+      for (const [studentId, v] of rows) {
+        if (!v.excluded) records.push({ studentId, isPresent: v.isPresent, note: v.note || undefined });
+      }
+      return api.post(`/api/v1/academics/schedules/${scheduleId}/attendance`, { records }).then((r) => r.data);
+    },
+    onSuccess: (res) => {
+      if (!res.success) { toast.error(res.error ?? "Failed to save attendance"); return; }
+      toast.success("Attendance saved");
+      qc.invalidateQueries({ queryKey: ["schedules"] });
+      onSaved();
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to save attendance"),
+  });
+
+  const update = (studentId: string, patch: Partial<{ isPresent: boolean; note: string; excluded: boolean }>) => {
+    setRows((prev) => {
+      const next = new Map(prev);
+      next.set(studentId, { ...prev.get(studentId)!, ...patch });
+      return next;
+    });
+  };
+
+  const activeSts = batchStudents.filter((st) => !rows.get(st.id)?.excluded);
+  const presentCount = activeSts.filter((st) => rows.get(st.id)?.isPresent).length;
+  const pct = activeSts.length > 0 ? Math.round((presentCount / activeSts.length) * 100) : 0;
+
+  if (batchStudents.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <Users className="h-10 w-10 text-gray-200 mb-3" />
+        <p className="font-semibold text-gray-400">No active students in this batch</p>
+        <p className="text-sm text-gray-300 mt-1">Enrol students in the batch first</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* Summary bar */}
+      <div className="flex items-center justify-between gap-3 mb-4 p-3 rounded-xl bg-indigo-50 border border-indigo-100">
+        <div className="flex items-center gap-4">
+          <span className="flex items-center gap-1.5 text-sm font-semibold text-green-700">
+            <UserCheck className="h-4 w-4" /> {presentCount} Present
+          </span>
+          <span className="flex items-center gap-1.5 text-sm font-semibold text-red-600">
+            <UserX className="h-4 w-4" /> {activeSts.length - presentCount} Absent
+          </span>
+        </div>
+        <span style={{
+          fontSize: 16, fontWeight: 900,
+          color: pct >= 75 ? "#16a34a" : pct >= 50 ? "#d97706" : "#dc2626",
+        }}>
+          {pct}% Attendance
+        </span>
+      </div>
+
+      {alreadyMarked && (
+        <div className="mb-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700 font-medium">
+          Attendance already marked. You can update it below.
+        </div>
+      )}
+
+      {/* Student list */}
+      <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
+        {batchStudents.map((st) => {
+          const row = rows.get(st.id) ?? { isPresent: true, note: "", excluded: false };
+          if (row.excluded) return null;
+          return (
+            <div
+              key={st.id}
+              className="flex items-center gap-3 rounded-xl border px-3 py-2 transition-colors"
+              style={{
+                borderColor: row.isPresent ? "#bbf7d0" : "#fecaca",
+                background:  row.isPresent ? "#f0fdf4"  : "#fff5f5",
+              }}
+            >
+              {/* Presence checkbox */}
+              <button
+                type="button"
+                onClick={() => canEdit && update(st.id, { isPresent: !row.isPresent })}
+                style={{
+                  width: 28, height: 28, borderRadius: 8, border: 0, cursor: canEdit ? "pointer" : "default",
+                  display: "grid", placeItems: "center", flexShrink: 0,
+                  background: row.isPresent ? "#16a34a" : "#dc2626",
+                  color: "white",
+                }}
+                title={row.isPresent ? "Mark absent" : "Mark present"}
+              >
+                {row.isPresent
+                  ? <CheckCircle2 style={{ width: 16, height: 16 }} />
+                  : <XCircle style={{ width: 16, height: 16 }} />}
+              </button>
+
+              {/* Name */}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-gray-800 truncate">
+                  {st.firstName} {st.lastName}
+                </p>
+                <p className="text-[11px] text-gray-400">{st.rollNumber ?? st.studentCode}</p>
+              </div>
+
+              {/* Note input */}
+              {canEdit && (
+                <input
+                  type="text"
+                  placeholder="Note…"
+                  value={row.note}
+                  onChange={(e) => update(st.id, { note: e.target.value })}
+                  style={{
+                    flex: "0 0 140px", height: 30, borderRadius: 8,
+                    border: `1px solid ${D.line}`, padding: "0 8px", fontSize: 12,
+                    background: "white", outline: "none", fontFamily: "inherit",
+                  }}
+                />
+              )}
+
+              {/* Remove from marking */}
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => update(st.id, { excluded: true })}
+                  title="Remove from attendance"
+                  style={{
+                    width: 26, height: 26, borderRadius: 8, border: 0,
+                    background: "transparent", cursor: "pointer",
+                    display: "grid", placeItems: "center", color: "#9ca3af",
+                    flexShrink: 0,
+                  }}
+                  className="hover:bg-red-50 hover:text-red-500 transition-colors"
+                >
+                  <Trash2 style={{ width: 14, height: 14 }} />
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {canEdit && (
+        <div className="mt-4 flex justify-end">
+          <DBtn primary onClick={() => saveAttMut.mutate()} disabled={saveAttMut.isPending}>
+            {saveAttMut.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+            Save Attendance
+          </DBtn>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Assignment Tab ─────────────────────────────────────────────────────────────
+
+function AssignmentTab({
+  schedule, batches, subjects, employees, academicYears, canEdit, onSaved,
+}: {
+  schedule: any;
+  batches: any[];
+  subjects: any[];
+  employees: any[];
+  academicYears: any[];
+  canEdit: boolean;
+  onSaved: () => void;
+}) {
+  const qc = useQueryClient();
+  const router = useRouter();
+  const assignment = schedule.assignments?.[0] ?? null;
+
+  const batchIds = schedule.batches?.map((sb: any) => sb.batchId) ?? [];
+  const dateStr  = schedule.date ? schedule.date.split("T")[0] : todayStr();
+
+  // Create assignment form
+  const emptyAssignForm = () => ({
+    academicYear:   schedule.academicYear ?? "",
+    name:           schedule.subject?.name ? `${schedule.subject.name} Assignment` : "",
+    assignmentDate: dateStr,
+    submissionDate: "",
+    batchIds,
+    subjectId:      schedule.subjectId ?? "",
+    employeeId:     schedule.employeeId ?? "",
+    topics:         schedule.topics ?? "",
+    note:           "",
+    scheduleId:     schedule.id,
+  });
+  const [assForm, setAssForm] = useState(emptyAssignForm);
+  const [submissionError, setSubmissionError] = useState(false);
+
+  useEffect(() => {
+    const err = Boolean(
+      assForm.assignmentDate && assForm.submissionDate &&
+      new Date(assForm.submissionDate) < new Date(assForm.assignmentDate)
+    );
+    setSubmissionError(err);
+  }, [assForm.assignmentDate, assForm.submissionDate]);
+
+  const createAssignmentMut = useMutation({
+    mutationFn: (d: any) => api.post("/api/v1/academics/assignments", d).then((r) => r.data),
+    onSuccess: (res) => {
+      if (!res.success) { toast.error(res.error ?? "Failed to create assignment"); return; }
+      toast.success("Assignment created");
+      qc.invalidateQueries({ queryKey: ["schedules"] });
+      qc.invalidateQueries({ queryKey: ["assignments"] });
+      onSaved();
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to create assignment"),
+  });
+
+  const approveSubmissionMut = useMutation({
+    mutationFn: (submissionId: string) =>
+      api.patch(`/api/v1/academics/assignments/${assignment.id}/submissions/${submissionId}`, { status: "GRADED" }).then((r) => r.data),
+    onSuccess: (res) => {
+      if (!res.success) { toast.error(res.error ?? "Failed to update"); return; }
+      toast.success("Submission approved");
+      qc.invalidateQueries({ queryKey: ["schedules"] });
+      onSaved();
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to approve"),
+  });
+
+  const handleCreateAssignment = () => {
+    if (!assForm.name.trim())       { toast.error("Assignment name is required"); return; }
+    if (!assForm.assignmentDate)    { toast.error("Assignment date is required"); return; }
+    if (!assForm.submissionDate)    { toast.error("Submission date is required"); return; }
+    if (submissionError)            { toast.error("Submission date can't be before assignment date"); return; }
+    if (assForm.batchIds.length === 0) { toast.error("At least one batch required"); return; }
+
+    createAssignmentMut.mutate({
+      academicYear:   assForm.academicYear,
+      name:           assForm.name.trim(),
+      assignmentDate: new Date(assForm.assignmentDate).toISOString(),
+      submissionDate: new Date(assForm.submissionDate).toISOString(),
+      batchIds:       assForm.batchIds,
+      subjectId:      assForm.subjectId  || null,
+      employeeId:     assForm.employeeId || null,
+      topics:         assForm.topics.trim() || null,
+      note:           assForm.note.trim()   || null,
+      scheduleId:     schedule.id,
+    });
+  };
+
+  const filteredBatches = assForm.academicYear
+    ? batches.filter((b) => b.academicYear === assForm.academicYear)
+    : batches;
+
+  if (assignment) {
+    // Show linked assignment summary + link to approval page
+    const submissions   = assignment.submissions ?? [];
+    const totalStudents = submissions.length;
+    const submitted     = submissions.filter((s: any) => s.status !== "NOT_SUBMITTED").length;
+    const pct           = totalStudents > 0 ? Math.round((submitted / totalStudents) * 100) : 0;
+    const allReviewed   = totalStudents > 0 && submissions.every((s: any) => s.status === "GRADED");
+
+    return (
+      <div className="space-y-4">
+        {/* Assignment card */}
+        <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+          <div className="flex items-start gap-3">
+            <div style={{ width: 38, height: 38, borderRadius: 11, background: "#4f46e5", display: "grid", placeItems: "center", flexShrink: 0 }}>
+              <BookOpen style={{ width: 17, height: 17, color: "white" }} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-bold text-gray-900 text-sm truncate">{assignment.name}</p>
+              {assignment.submissionDate && (
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Due: {format(new Date(assignment.submissionDate), "dd MMM yyyy")}
+                  {assignment.subject && <> · {assignment.subject.name}</>}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Submission progress bar */}
+          {totalStudents > 0 && (
+            <div className="mt-3">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-gray-500">Submissions</span>
+                <span style={{
+                  fontSize: 13, fontWeight: 800,
+                  color: pct >= 75 ? "#16a34a" : pct >= 50 ? "#d97706" : "#dc2626",
+                }}>
+                  {submitted}/{totalStudents} · {pct}%
+                </span>
+              </div>
+              <div style={{ height: 6, borderRadius: 99, background: "#e0e7ff", overflow: "hidden" }}>
+                <div style={{
+                  height: "100%", borderRadius: 99,
+                  width: `${pct}%`,
+                  background: pct >= 75 ? "#16a34a" : pct >= 50 ? "#d97706" : "#dc2626",
+                  transition: "width .3s",
+                }} />
+              </div>
+            </div>
+          )}
+
+          {totalStudents === 0 && (
+            <p className="text-xs text-gray-400 mt-2">No students linked to submissions yet</p>
+          )}
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex flex-col gap-2">
+          {canEdit && !allReviewed && submitted > 0 && (
+            <button
+              onClick={() => router.push(`/dashboard/academics/assignments/${assignment.id}`)}
+              style={{
+                width: "100%", minHeight: 44, border: 0, borderRadius: 12,
+                background: "linear-gradient(135deg,#28245f,#4f46e5)",
+                color: "white", fontWeight: 800, font: "inherit", fontSize: 14,
+                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                boxShadow: "0 8px 20px rgba(79,70,229,.28)",
+              }}
+            >
+              <CheckCircle2 style={{ width: 16, height: 16 }} />
+              Review & Approve Submissions
+            </button>
+          )}
+          <button
+            onClick={() => router.push(`/dashboard/academics/assignments/${assignment.id}`)}
+            style={{
+              width: "100%", minHeight: 40, borderRadius: 12,
+              border: `1px solid ${D.line}`, background: "white",
+              color: D.ink, fontWeight: 700, font: "inherit", fontSize: 13,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+            }}
+          >
+            <ExternalLink style={{ width: 14, height: 14, color: D.muted }} />
+            Open Assignment Page
+          </button>
+        </div>
+
+        {allReviewed && (
+          <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-3">
+            <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+            <p className="text-sm font-semibold text-green-700">All submissions reviewed</p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // No assignment → show create form
+  if (!canEdit) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <BookOpen className="h-10 w-10 text-gray-200 mb-3" />
+        <p className="font-semibold text-gray-400">No assignment linked to this session</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p className="text-xs text-gray-500 mb-4 font-medium">No assignment linked to this session yet. Create one below.</p>
+      <div className="space-y-3">
+        <DField label="Assignment Name" required>
+          <DInput placeholder="e.g. Practice Problems – Chapter 5" value={assForm.name} onChange={(e) => setAssForm({ ...assForm, name: e.target.value })} />
+        </DField>
+        <div className="grid grid-cols-2 gap-3">
+          <DField label="Assignment Date" required>
+            <DInput type="date" value={assForm.assignmentDate} onChange={(e) => setAssForm({ ...assForm, assignmentDate: e.target.value })} />
+          </DField>
+          <DField label="Submission Date" required>
+            <DInput type="date" error={submissionError} value={assForm.submissionDate} onChange={(e) => setAssForm({ ...assForm, submissionDate: e.target.value })} />
+            {submissionError && <p style={{ fontSize: 11, color: "#ef4444", margin: 0 }}>Can't be before assignment date</p>}
+          </DField>
+        </div>
+        <DField label="Batch(es)" required>
+          <BatchMultiSelect batches={filteredBatches} selected={assForm.batchIds} onChange={(ids) => setAssForm({ ...assForm, batchIds: ids })} />
+        </DField>
+        <div className="grid grid-cols-2 gap-3">
+          <DField label="Subject">
+            <DSelect value={assForm.subjectId} onChange={(e) => setAssForm({ ...assForm, subjectId: e.target.value })}>
+              <option value="">— Subject —</option>
+              {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </DSelect>
+          </DField>
+          <DField label="Faculty">
+            <DSelect value={assForm.employeeId} onChange={(e) => setAssForm({ ...assForm, employeeId: e.target.value })}>
+              <option value="">— Faculty —</option>
+              {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+            </DSelect>
+          </DField>
+        </div>
+        <DField label="Topics">
+          <DInput placeholder="Topics covered…" value={assForm.topics} onChange={(e) => setAssForm({ ...assForm, topics: e.target.value })} />
+        </DField>
+        <DField label="Note">
+          <DTextarea placeholder="Additional instructions…" value={assForm.note} onChange={(e) => setAssForm({ ...assForm, note: e.target.value })} style={{ minHeight: 64 }} />
+        </DField>
+        <div className="flex justify-end">
+          <DBtn primary onClick={handleCreateAssignment} disabled={createAssignmentMut.isPending}>
+            {createAssignmentMut.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+            Create Assignment
+          </DBtn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Schedule Detail Modal ─────────────────────────────────────────────────────
+
+function ScheduleDetailModal({
+  scheduleId, onClose, batches, subjects, employees, academicYears, canEdit,
+}: {
+  scheduleId: string | null;
+  onClose: () => void;
+  batches: any[];
+  subjects: any[];
+  employees: any[];
+  academicYears: any[];
+  canEdit: boolean;
+}) {
+  const [activeTab, setActiveTab] = useState<"attendance" | "assignment">("attendance");
+
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ["schedule-detail", scheduleId],
+    queryFn: () =>
+      api.get(`/api/v1/academics/schedules/${scheduleId}/attendance-detail`).then((r) => r.data.data),
+    enabled: Boolean(scheduleId),
+    staleTime: 0,
+  });
+
+  if (!scheduleId) return null;
+
+  const schedule      = data;
+  const batchStudents = data?.batchStudents ?? [];
+  const attendance    = data?.attendances   ?? [];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(17,24,39,0.55)" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        className="w-full bg-white flex flex-col"
+        style={{
+          maxWidth: 600, borderRadius: 22,
+          boxShadow: "0 32px 90px rgba(0,0,0,.3)",
+          maxHeight: "88vh", overflow: "hidden",
+        }}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3 shrink-0 border-b" style={{ padding: "20px 24px", borderColor: D.line }}>
+          <div className="flex-1 min-w-0">
+            {isLoading || !schedule ? (
+              <div className="h-5 w-48 bg-gray-100 rounded animate-pulse" />
+            ) : (
+              <>
+                <p style={{ fontSize: 11, fontWeight: 800, color: "#6366f1", textTransform: "uppercase", letterSpacing: ".06em", margin: "0 0 4px" }}>
+                  {fmtDateHeading(schedule.date?.split("T")[0] ?? "")} · {fmtTime(schedule.startTime)} – {fmtTime(schedule.endTime)}
+                </p>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: D.ink, lineHeight: 1.2 }}>
+                  {schedule.subject?.name ?? "No subject"}
+                  <span style={{ color: D.muted, fontWeight: 600, fontSize: 14 }}> · {schedule.batches?.map((sb: any) => sb.batch?.name).join(", ")}</span>
+                </h2>
+                {schedule.employee && (
+                  <p style={{ margin: "4px 0 0", fontSize: 12, color: D.muted, display: "flex", alignItems: "center", gap: 4 }}>
+                    <User style={{ width: 12, height: 12 }} /> {schedule.employee.firstName} {schedule.employee.lastName}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-gray-100 border-0 bg-transparent cursor-pointer"
+            style={{ marginTop: 2, flexShrink: 0 }}
+          >
+            <X className="h-5 w-5 text-gray-400" />
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex border-b shrink-0" style={{ borderColor: D.line }}>
+          {(["attendance", "assignment"] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              style={{
+                flex: 1, height: 46, border: 0, background: "transparent",
+                cursor: "pointer", font: "inherit",
+                fontSize: 13, fontWeight: 800,
+                color: activeTab === tab ? D.nav2 : D.muted,
+                borderBottom: activeTab === tab ? `2px solid ${D.nav2}` : "2px solid transparent",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                transition: "color .15s",
+              }}
+            >
+              {tab === "attendance"
+                ? <><Users style={{ width: 15, height: 15 }} /> Attendance</>
+                : <><BookOpen style={{ width: 15, height: 15 }} /> Assignment</>}
+            </button>
+          ))}
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto" style={{ padding: "20px 24px" }}>
+          {isLoading ? (
+            <div className="flex items-center justify-center h-32">
+              <Loader2 className="h-6 w-6 animate-spin text-indigo-400" />
+            </div>
+          ) : activeTab === "attendance" ? (
+            <AttendanceTab
+              scheduleId={scheduleId}
+              batchStudents={batchStudents}
+              existingAttendance={attendance}
+              canEdit={canEdit}
+              onSaved={() => refetch()}
+            />
+          ) : (
+            <AssignmentTab
+              schedule={schedule}
+              batches={batches}
+              subjects={subjects}
+              employees={employees}
+              academicYears={academicYears}
+              canEdit={canEdit}
+              onSaved={() => refetch()}
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Schedule row ──────────────────────────────────────────────────────────────
 
-function ScheduleRow({ s, canEdit, onEdit, onDelete, onStatus }: {
+function ScheduleRow({ s, canEdit, onEdit, onDelete, onStatus, onClick }: {
   s: any; canEdit: boolean;
-  onEdit: (s: any) => void; onDelete: (id: string) => void; onStatus: (id: string, status: string) => void;
+  onEdit: (s: any) => void;
+  onDelete: (id: string) => void;
+  onStatus: (id: string, status: string) => void;
+  onClick: (s: any) => void;
 }) {
   const batchNames = s.batches?.map((sb: any) => sb.batch?.name).filter(Boolean).join(", ") ?? "—";
+  const assignments = (s.assignments ?? []) as { id: string; submissions: { status: string }[] }[];
+
   return (
-    <tr className="hover:bg-gray-50/60 transition-colors group">
+    <tr
+      className="hover:bg-indigo-50/40 transition-colors group cursor-pointer"
+      onClick={() => onClick(s)}
+    >
       <td className="px-3 py-2.5 whitespace-nowrap">
         <p className="text-xs font-semibold text-gray-800">{fmtTime(s.startTime)}</p>
         <p className="text-[11px] text-gray-400">{fmtTime(s.endTime)}</p>
@@ -872,32 +1454,30 @@ function ScheduleRow({ s, canEdit, onEdit, onDelete, onStatus }: {
           ? <span className="flex items-center gap-1 text-xs text-gray-600"><User className="h-3 w-3 shrink-0" />{s.employee.firstName} {s.employee.lastName}</span>
           : <span className="text-gray-300 text-xs">—</span>}
       </td>
+      {/* Attendance % */}
       <td className="px-3 py-2.5 whitespace-nowrap">
-        {s.location
-          ? <span className="flex items-center gap-1 text-xs text-gray-600"><MapPin className="h-3 w-3 shrink-0" />{s.location.name}</span>
-          : <span className="text-gray-300 text-xs">—</span>}
+        <AttendancePct attendances={s.attendances ?? []} />
       </td>
-      <td className="px-3 py-2.5 max-w-[140px] hidden lg:table-cell">
+      {/* Assignment */}
+      <td className="px-3 py-2.5 whitespace-nowrap">
+        <AssignmentBadge assignments={assignments} />
+      </td>
+      <td className="px-3 py-2.5 max-w-[120px] hidden lg:table-cell">
         <p className="text-xs text-gray-500 truncate" title={s.topics ?? ""}>
           {s.topics || <span className="text-gray-300">—</span>}
         </p>
       </td>
       <td className="px-3 py-2.5 whitespace-nowrap"><StatusBadge status={s.status} /></td>
       {canEdit && (
-        <td className="px-3 py-2.5 whitespace-nowrap">
+        <td className="px-3 py-2.5 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
             <button onClick={() => onEdit(s)} className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700 border-0 bg-transparent cursor-pointer" title="Edit">
               <Pencil className="h-3.5 w-3.5" />
             </button>
             {s.status === "UPCOMING" && (
-              <>
-                <button onClick={() => onStatus(s.id, "COMPLETED")} className="p-1.5 rounded hover:bg-green-50 text-gray-400 hover:text-green-600 border-0 bg-transparent cursor-pointer" title="Mark Completed">
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                </button>
-                <button onClick={() => onStatus(s.id, "CANCELLED")} className="p-1.5 rounded hover:bg-amber-50 text-gray-400 hover:text-amber-500 border-0 bg-transparent cursor-pointer" title="Cancel">
-                  <XCircle className="h-3.5 w-3.5" />
-                </button>
-              </>
+              <button onClick={() => onStatus(s.id, "CANCELLED")} className="p-1.5 rounded hover:bg-amber-50 text-gray-400 hover:text-amber-500 border-0 bg-transparent cursor-pointer" title="Cancel">
+                <XCircle className="h-3.5 w-3.5" />
+              </button>
             )}
             <button onClick={() => onDelete(s.id)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 border-0 bg-transparent cursor-pointer" title="Delete">
               <Trash2 className="h-3.5 w-3.5" />
@@ -916,7 +1496,6 @@ export default function SchedulePage() {
   const qc = useQueryClient();
   const canEdit = user?.role === "SUPER_ADMIN" || user?.role === "HR_ADMIN";
 
-  // Filter state
   const [view,           setView]           = useState("ALL");
   const [filterStatus,   setFilterStatus]   = useState("ALL");
   const [filterDateFrom, setFilterDateFrom] = useState("");
@@ -924,18 +1503,20 @@ export default function SchedulePage() {
   const [filterYear,     setFilterYear]     = useState("");
   const [filterBatch,    setFilterBatch]    = useState("");
   const [filterGrade,    setFilterGrade]    = useState("");
-  const [filterFaculty,  setFilterFaculty]  = useState("");
-  const [filterLocation, setFilterLocation] = useState("");
+  const [filterFaculty,    setFilterFaculty]    = useState("");
+  const [filterLocation,   setFilterLocation]   = useState("");
+  const [filterAttendance, setFilterAttendance] = useState("ALL"); // ALL | COMPLETE | INCOMPLETE
+  const [filterAssignment, setFilterAssignment] = useState("ALL"); // ALL | COMPLETE | INCOMPLETE
 
-  // UI state
   const [showStats,         setShowStats]         = useState(false);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [modalOpen,         setModalOpen]          = useState(false);
   const [editTarget,        setEditTarget]          = useState<any | null>(null);
   const [deleteId,          setDeleteId]            = useState<string | null>(null);
   const [searchQuery,       setSearchQuery]         = useState("");
+  const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null);
+  const [collapsedDates, setCollapsedDates] = useState<Set<string>>(new Set());
 
-  // Reference data
   const { data: yearsData }     = useQuery({ queryKey: ["academic-years"],   queryFn: () => api.get("/api/v1/academics/academic-years").then((r) => r.data.data) });
   const { data: gradesData }    = useQuery({ queryKey: ["grades"],           queryFn: () => api.get("/api/v1/academics/grades").then((r) => r.data) });
   const { data: locationsData } = useQuery({ queryKey: ["locations"],        queryFn: () => api.get("/api/v1/academics/locations").then((r) => r.data) });
@@ -958,7 +1539,6 @@ export default function SchedulePage() {
 
   const defaultYear = years.find((y) => y.isActive && !y.isArchived)?.name ?? years.find((y) => !y.isArchived)?.name ?? "";
 
-  // Schedule query
   const params = new URLSearchParams();
   if (view !== "ALL")         params.set("view",         view);
   if (filterStatus !== "ALL") params.set("status",       filterStatus);
@@ -989,30 +1569,42 @@ export default function SchedulePage() {
   const schedules: any[]    = scheduleData?.data ?? [];
   const allSchedules: any[] = statsData?.data    ?? [];
 
-  // Stat card values
-  const todayStr   = format(new Date(), "yyyy-MM-dd");
+  const todayStr2   = format(new Date(), "yyyy-MM-dd");
   const weekStart  = startOfWeek(new Date(), { weekStartsOn: 1 });
   const weekEnd    = endOfWeek(new Date(),   { weekStartsOn: 1 });
-  const todayCount    = schedules.filter((s) => format(parseISO(s.date), "yyyy-MM-dd") === todayStr).length;
+  const todayCount    = schedules.filter((s) => format(parseISO(s.date), "yyyy-MM-dd") === todayStr2).length;
   const weekCount     = schedules.filter((s) => { const d = parseISO(s.date); return d >= weekStart && d <= weekEnd; }).length;
   const facultyCount  = new Set(schedules.map((s: any) => s.employeeId).filter(Boolean)).size;
   const roomsCount    = new Set(schedules.map((s: any) => s.locationId).filter(Boolean)).size;
 
-  // Client-side search
-  const displayedSchedules = searchQuery.trim()
-    ? schedules.filter((s: any) => {
-        const q = searchQuery.toLowerCase();
-        const batchNames = s.batches?.map((sb: any) => sb.batch?.name ?? "").join(" ") ?? "";
-        const faculty = s.employee ? `${s.employee.firstName} ${s.employee.lastName}` : "";
-        return (
-          batchNames.toLowerCase().includes(q) ||
-          (s.subject?.name ?? "").toLowerCase().includes(q) ||
-          faculty.toLowerCase().includes(q) ||
-          (s.topics ?? "").toLowerCase().includes(q) ||
-          (s.location?.name ?? "").toLowerCase().includes(q)
-        );
-      })
-    : schedules;
+  const displayedSchedules = schedules.filter((s: any) => {
+    // Search filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const batchNames = s.batches?.map((sb: any) => sb.batch?.name ?? "").join(" ") ?? "";
+      const faculty    = s.employee ? `${s.employee.firstName} ${s.employee.lastName}` : "";
+      const matches =
+        batchNames.toLowerCase().includes(q) ||
+        (s.subject?.name ?? "").toLowerCase().includes(q) ||
+        faculty.toLowerCase().includes(q) ||
+        (s.topics ?? "").toLowerCase().includes(q) ||
+        (s.location?.name ?? "").toLowerCase().includes(q);
+      if (!matches) return false;
+    }
+    // Attendance filter
+    if (filterAttendance !== "ALL") {
+      const marked = (s.attendances ?? []).length > 0;
+      if (filterAttendance === "COMPLETE"   && !marked) return false;
+      if (filterAttendance === "INCOMPLETE" &&  marked) return false;
+    }
+    // Assignment filter
+    if (filterAssignment !== "ALL") {
+      const hasAssignment = (s.assignments ?? []).length > 0;
+      if (filterAssignment === "COMPLETE"   && !hasAssignment) return false;
+      if (filterAssignment === "INCOMPLETE" &&  hasAssignment) return false;
+    }
+    return true;
+  });
 
   const grouped = displayedSchedules.reduce<Record<string, any[]>>((acc, s) => {
     const k = groupKey(s.date);
@@ -1022,7 +1614,6 @@ export default function SchedulePage() {
   }, {});
   const dateKeys = Object.keys(grouped).sort();
 
-  // Mutations
   const statusMut = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
       api.patch(`/api/v1/academics/schedules/${id}/status`, { status }).then((r) => r.data),
@@ -1060,15 +1651,19 @@ export default function SchedulePage() {
   };
 
   const exportCSV = () => {
-    const headers = ["Date","Day","Start","End","Duration","Batches","Subject","Faculty","Location","Topics","Status"];
-    const rows = schedules.map((s) => [
-      format(parseISO(s.date), "dd/MM/yyyy"), format(parseISO(s.date), "EEEE"),
-      fmtTime(s.startTime), fmtTime(s.endTime), calcDuration(s.startTime, s.endTime),
-      s.batches?.map((sb: any) => sb.batch?.name).join(" | ") ?? "",
-      s.subject?.name ?? "",
-      s.employee ? `${s.employee.firstName} ${s.employee.lastName}` : "",
-      s.location?.name ?? "", s.topics ?? "", s.status,
-    ]);
+    const headers = ["Date","Day","Start","End","Duration","Batches","Subject","Faculty","Topics","Attendance%","Assignments","Status"];
+    const rows = schedules.map((s) => {
+      const atts = s.attendances ?? [];
+      const pct  = atts.length > 0 ? Math.round((atts.filter((a: any) => a.isPresent).length / atts.length) * 100) + "%" : "—";
+      return [
+        format(parseISO(s.date), "dd/MM/yyyy"), format(parseISO(s.date), "EEEE"),
+        fmtTime(s.startTime), fmtTime(s.endTime), calcDuration(s.startTime, s.endTime),
+        s.batches?.map((sb: any) => sb.batch?.name).join(" | ") ?? "",
+        s.subject?.name ?? "",
+        s.employee ? `${s.employee.firstName} ${s.employee.lastName}` : "",
+        s.topics ?? "", pct, s.assignments?.length ?? 0, s.status,
+      ];
+    });
     const csv  = [headers, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url  = URL.createObjectURL(blob);
@@ -1077,10 +1672,12 @@ export default function SchedulePage() {
   };
 
   const hasFilters = view !== "ALL" || filterStatus !== "ALL" || filterDateFrom || filterDateTo ||
-    filterYear || filterBatch || filterGrade || filterFaculty || filterLocation;
+    filterYear || filterBatch || filterGrade || filterFaculty || filterLocation ||
+    filterAttendance !== "ALL" || filterAssignment !== "ALL";
   const clearFilters = () => {
     setView("ALL"); setFilterStatus("ALL"); setFilterDateFrom(""); setFilterDateTo("");
     setFilterYear(""); setFilterBatch(""); setFilterGrade(""); setFilterFaculty(""); setFilterLocation("");
+    setFilterAttendance("ALL"); setFilterAssignment("ALL");
   };
 
   const filterLabelStyle: React.CSSProperties = {
@@ -1089,7 +1686,6 @@ export default function SchedulePage() {
 
   const filterPanel = (
     <div style={{ display: "grid", gap: 20 }}>
-      {/* Show chips */}
       <div>
         <p style={filterLabelStyle}>Show</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -1115,8 +1711,9 @@ export default function SchedulePage() {
         <label style={filterLabelStyle}>Status</label>
         <DSelect value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
           <option value="ALL">All statuses</option>
-          <option value="UPCOMING">Scheduled</option>
+          <option value="UPCOMING">Upcoming</option>
           <option value="COMPLETED">Completed</option>
+          <option value="CONCLUDED">Concluded</option>
           <option value="CANCELLED">Cancelled</option>
         </DSelect>
       </div>
@@ -1171,6 +1768,24 @@ export default function SchedulePage() {
         </DSelect>
       </div>
 
+      <div>
+        <label style={filterLabelStyle}>Attendance</label>
+        <DSelect value={filterAttendance} onChange={(e) => setFilterAttendance(e.target.value)}>
+          <option value="ALL">All</option>
+          <option value="COMPLETE">Marked</option>
+          <option value="INCOMPLETE">Not Marked</option>
+        </DSelect>
+      </div>
+
+      <div>
+        <label style={filterLabelStyle}>Assignment</label>
+        <DSelect value={filterAssignment} onChange={(e) => setFilterAssignment(e.target.value)}>
+          <option value="ALL">All</option>
+          <option value="COMPLETE">Given</option>
+          <option value="INCOMPLETE">Not Given</option>
+        </DSelect>
+      </div>
+
       {hasFilters && (
         <button
           onClick={clearFilters}
@@ -1190,7 +1805,7 @@ export default function SchedulePage() {
   return (
     <div className="flex flex-col h-full min-h-0" style={{ background: D.bg }}>
 
-      {/* ── page-head ────────────────────────────────────────────────────────── */}
+      {/* Page head */}
       <div
         className="bg-white border-b shrink-0 flex flex-wrap items-center justify-between gap-4"
         style={{ borderColor: D.line, padding: "22px 32px" }}
@@ -1208,7 +1823,6 @@ export default function SchedulePage() {
           </div>
         </div>
         <div className="flex items-center flex-wrap gap-[10px]">
-          {/* Mobile: filter icon */}
           <button
             className="sm:hidden"
             onClick={() => setMobileFiltersOpen(true)}
@@ -1244,7 +1858,7 @@ export default function SchedulePage() {
         </div>
       </div>
 
-      {/* ── layout ───────────────────────────────────────────────────────────── */}
+      {/* Layout */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
 
         {/* Desktop filter sidebar */}
@@ -1273,13 +1887,8 @@ export default function SchedulePage() {
                 <h2 style={{
                   margin: 0, color: "#9aa3b4", fontSize: 13, fontWeight: 900,
                   letterSpacing: ".08em", textTransform: "uppercase",
-                }}>
-                  Filters
-                </h2>
-                <button
-                  onClick={() => setMobileFiltersOpen(false)}
-                  className="p-1 rounded hover:bg-gray-100 border-0 bg-transparent cursor-pointer"
-                >
+                }}>Filters</h2>
+                <button onClick={() => setMobileFiltersOpen(false)} className="p-1 rounded hover:bg-gray-100 border-0 bg-transparent cursor-pointer">
                   <X className="h-4 w-4 text-gray-400" />
                 </button>
               </div>
@@ -1305,7 +1914,7 @@ export default function SchedulePage() {
                 {/* Toolbar */}
                 <div
                   className="grid items-center gap-[14px] mb-[18px]"
-                  style={{ gridTemplateColumns: "minmax(0,1fr) auto auto" }}
+                  style={{ gridTemplateColumns: "minmax(0,1fr) auto" }}
                 >
                   <div style={{
                     minHeight: 48, borderRadius: 14, border: `1px solid ${D.line}`, background: "white",
@@ -1323,10 +1932,7 @@ export default function SchedulePage() {
                       }}
                     />
                     {searchQuery && (
-                      <button
-                        onClick={() => setSearchQuery("")}
-                        className="border-0 bg-transparent cursor-pointer p-0 flex items-center"
-                      >
+                      <button onClick={() => setSearchQuery("")} className="border-0 bg-transparent cursor-pointer p-0 flex items-center">
                         <X style={{ width: 15, height: 15, color: D.muted }} />
                       </button>
                     )}
@@ -1334,15 +1940,9 @@ export default function SchedulePage() {
                   <span style={{ color: D.muted, fontWeight: 850, whiteSpace: "nowrap", fontSize: 14 }}>
                     {displayedSchedules.length} schedule{displayedSchedules.length !== 1 ? "s" : ""}
                   </span>
-                  {canEdit && (
-                    <DBtn primary onClick={() => { setEditTarget(null); setModalOpen(true); }}>
-                      <Plus style={{ width: 16, height: 16 }} />
-                      <span className="hidden sm:inline">New Schedule</span>
-                    </DBtn>
-                  )}
                 </div>
 
-                {/* Stat grid */}
+                {/* Stat cards */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-[14px] mb-[18px]">
                   {[
                     { label: "Today",            value: todayCount   },
@@ -1373,7 +1973,6 @@ export default function SchedulePage() {
                   </div>
                 ) : dateKeys.length === 0 ? (
                   <>
-                    {/* Empty state */}
                     <div style={{
                       background: "white", border: "1px dashed #cbd5e1", borderRadius: 18,
                       minHeight: 360, display: "grid", placeItems: "center",
@@ -1397,82 +1996,101 @@ export default function SchedulePage() {
                         )}
                       </div>
                     </div>
-
-                    {/* Quick grid */}
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-[14px]" style={{ marginTop: 18 }}>
                       {[
-                        { title: "Calendar View",    desc: "Switch to day, week, or month planning." },
-                        { title: "Faculty Load",      desc: "Check conflicts before assigning classes." },
-                        { title: "Room Availability", desc: "View location usage before saving." },
+                        { title: "Attendance Tracking", desc: "Click any session to mark attendance for all students." },
+                        { title: "Assignment Linking",   desc: "Create and link assignments directly from the session." },
+                        { title: "Faculty Load",         desc: "Check conflicts before assigning classes." },
                       ].map(({ title, desc }) => (
-                        <div
-                          key={title}
-                          style={{ background: "white", border: `1px solid ${D.line}`, borderRadius: 16, padding: 18 }}
-                        >
+                        <div key={title} style={{ background: "white", border: `1px solid ${D.line}`, borderRadius: 16, padding: 18 }}>
                           <strong style={{ display: "block", fontSize: 15, color: D.ink }}>{title}</strong>
-                          <span style={{ display: "block", color: D.muted, marginTop: 5, fontSize: 13, fontWeight: 700 }}>
-                            {desc}
-                          </span>
+                          <span style={{ display: "block", color: D.muted, marginTop: 5, fontSize: 13, fontWeight: 700 }}>{desc}</span>
                         </div>
                       ))}
                     </div>
                   </>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-                    {dateKeys.map((dateKey) => (
-                      <div key={dateKey}>
-                        <div className="flex items-center gap-3" style={{ marginBottom: 8 }}>
-                          <div style={{
-                            width: 24, height: 24, borderRadius: "50%", background: "#eef2ff",
-                            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                          }}>
-                            <Calendar style={{ width: 14, height: 14, color: "#4f46e5" }} />
+                    {dateKeys.map((dateKey) => {
+                      const isCollapsed = collapsedDates.has(dateKey);
+                      const toggleCollapse = () => {
+                        setCollapsedDates((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(dateKey)) next.delete(dateKey); else next.add(dateKey);
+                          return next;
+                        });
+                      };
+                      return (
+                        <div key={dateKey}>
+                          <div
+                            className="flex items-center gap-3"
+                            style={{ marginBottom: isCollapsed ? 0 : 8, cursor: "pointer", userSelect: "none" }}
+                            onClick={toggleCollapse}
+                          >
+                            <div style={{
+                              width: 24, height: 24, borderRadius: "50%", background: "#eef2ff",
+                              display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                            }}>
+                              <Calendar style={{ width: 14, height: 14, color: "#4f46e5" }} />
+                            </div>
+                            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: D.ink }}>
+                              {fmtDateHeading(dateKey)}
+                            </h3>
+                            <span style={{
+                              fontSize: 12, color: D.muted, background: "#f1f5f9",
+                              borderRadius: 999, padding: "2px 10px", flexShrink: 0,
+                            }}>
+                              {grouped[dateKey].length} lecture{grouped[dateKey].length !== 1 ? "s" : ""}
+                            </span>
+                            <div style={{ flex: 1, height: 1, background: "#e5e7eb" }} />
+                            {isCollapsed
+                              ? <ChevronRight style={{ width: 16, height: 16, color: D.muted, flexShrink: 0 }} />
+                              : <ChevronDown  style={{ width: 16, height: 16, color: D.muted, flexShrink: 0 }} />
+                            }
                           </div>
-                          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: D.ink }}>
-                            {fmtDateHeading(dateKey)}
-                          </h3>
-                          <span style={{
-                            fontSize: 12, color: D.muted, background: "#f1f5f9",
-                            borderRadius: 999, padding: "2px 10px", flexShrink: 0,
-                          }}>
-                            {grouped[dateKey].length} lecture{grouped[dateKey].length !== 1 ? "s" : ""}
-                          </span>
-                          <div style={{ flex: 1, height: 1, background: "#e5e7eb" }} />
+                          {!isCollapsed && (
+                            <div style={{
+                              background: "white", borderRadius: 18, border: `1px solid ${D.line}`,
+                              boxShadow: "0 8px 22px rgba(20,23,53,.05)", overflow: "hidden",
+                            }}>
+                              <div style={{ overflowX: "auto" }}>
+                                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                  <thead>
+                                    <tr style={{ borderBottom: `1px solid ${D.line}`, background: "#f8fafc" }}>
+                                      <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">Time</th>
+                                      <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">Dur.</th>
+                                      <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">Batch(es)</th>
+                                      <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">Subject</th>
+                                      <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">Faculty</th>
+                                      <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">
+                                        <span className="flex items-center gap-1"><Percent style={{ width: 10, height: 10 }} />Attend.</span>
+                                      </th>
+                                      <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">
+                                        <span className="flex items-center gap-1"><ClipboardList style={{ width: 10, height: 10 }} />Assign.</span>
+                                      </th>
+                                      <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left hidden lg:table-cell">Topics</th>
+                                      <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">Status</th>
+                                      {canEdit && <th className="px-3 py-2 w-28" />}
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-50">
+                                    {grouped[dateKey].map((s) => (
+                                      <ScheduleRow
+                                        key={s.id} s={s} canEdit={canEdit}
+                                        onEdit={openEdit}
+                                        onDelete={(id) => setDeleteId(id)}
+                                        onStatus={(id, status) => statusMut.mutate({ id, status })}
+                                        onClick={(s) => setSelectedScheduleId(s.id)}
+                                      />
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <div style={{
-                          background: "white", borderRadius: 18, border: `1px solid ${D.line}`,
-                          boxShadow: "0 8px 22px rgba(20,23,53,.05)", overflow: "hidden",
-                        }}>
-                          <div style={{ overflowX: "auto" }}>
-                            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                              <thead>
-                                <tr style={{ borderBottom: `1px solid ${D.line}`, background: "#f8fafc" }}>
-                                  <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">Time</th>
-                                  <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">Dur.</th>
-                                  <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">Batch(es)</th>
-                                  <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">Subject</th>
-                                  <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">Faculty</th>
-                                  <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">Location</th>
-                                  <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left hidden lg:table-cell">Topics</th>
-                                  <th className="px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-left">Status</th>
-                                  {canEdit && <th className="px-3 py-2 w-28" />}
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-50">
-                                {grouped[dateKey].map((s) => (
-                                  <ScheduleRow
-                                    key={s.id} s={s} canEdit={canEdit}
-                                    onEdit={openEdit}
-                                    onDelete={(id) => setDeleteId(id)}
-                                    onStatus={(id, status) => statusMut.mutate({ id, status })}
-                                  />
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </>
@@ -1481,7 +2099,7 @@ export default function SchedulePage() {
         </main>
       </div>
 
-      {/* ── Modals ───────────────────────────────────────────────────────────── */}
+      {/* Schedule create/edit modal */}
       <ScheduleModal
         key={editTarget?.id ?? "new"}
         open={modalOpen}
@@ -1491,6 +2109,18 @@ export default function SchedulePage() {
         locations={locations} academicYears={years}
       />
 
+      {/* Detail modal */}
+      <ScheduleDetailModal
+        scheduleId={selectedScheduleId}
+        onClose={() => setSelectedScheduleId(null)}
+        batches={batches}
+        subjects={subjects}
+        employees={employees}
+        academicYears={years}
+        canEdit={canEdit}
+      />
+
+      {/* Delete confirm */}
       {deleteId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div style={{

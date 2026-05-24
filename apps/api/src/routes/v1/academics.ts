@@ -4,14 +4,17 @@ import { prisma } from "@cadb/db";
 import { authenticate } from "../../middleware/authenticate.js";
 
 const batchSchema = z.object({
-  name:         z.string().min(1),
-  description:  z.string().optional(),
-  locationId:   z.string().optional().nullable(),
-  academicYear: z.string().min(1),
-  startDate:    z.string().optional(),
-  schoolId:     z.string().optional().nullable(),
-  gradeId:      z.string().optional().nullable(),
-  isActive:     z.boolean().optional(),
+  name:           z.string().min(1),
+  description:    z.string().optional(),
+  locationId:     z.string().optional().nullable(),
+  academicYear:   z.string().min(1),
+  startDate:      z.string().optional(),
+  schoolId:       z.string().optional().nullable(),
+  gradeId:        z.string().optional().nullable(),
+  schoolIds:      z.string().array().optional().default([]),
+  courseIds:      z.string().array().optional().default([]),
+  targetStrength: z.number().int().positive().optional().nullable(),
+  isActive:       z.boolean().optional(),
 });
 
 const subjectSchema = z.object({
@@ -164,7 +167,7 @@ export async function academicsRoutes(fastify: FastifyInstance) {
     const where: any = { isArchived: archived === "true" ? true : false };
     if (academicYear) where.academicYear = academicYear;
     if (locationId)   where.locationId   = locationId;
-    if (schoolId)     where.schoolId     = schoolId;
+    if (schoolId)     where.OR = [{ schoolId }, { schoolIds: { has: schoolId } }];
     if (gradeId)      where.gradeId      = gradeId;
 
     const batches = await prisma.batch.findMany({
@@ -208,9 +211,11 @@ export async function academicsRoutes(fastify: FastifyInstance) {
     const parsed = batchSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
-    const { startDate, ...rest } = parsed.data;
+    const { startDate, schoolIds, ...rest } = parsed.data;
+    // Sync schoolId (primary FK) from first of schoolIds if provided
+    const schoolId = rest.schoolId ?? (schoolIds?.length ? schoolIds[0] : undefined);
     const batch = await prisma.batch.create({
-      data: { ...rest, startDate: startDate ? new Date(startDate) : undefined },
+      data: { ...rest, schoolId, schoolIds: schoolIds ?? [], startDate: startDate ? new Date(startDate) : undefined },
       include: {
         location: { select: { id: true, name: true } },
         school:   { select: { id: true, name: true } },
@@ -226,10 +231,11 @@ export async function academicsRoutes(fastify: FastifyInstance) {
     const parsed = batchSchema.partial().safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
-    const { startDate, ...rest } = parsed.data;
+    const { startDate, schoolIds, ...rest } = parsed.data;
+    const schoolId = rest.schoolId !== undefined ? rest.schoolId : (schoolIds?.length ? schoolIds[0] : undefined);
     const batch = await prisma.batch.update({
       where: { id },
-      data:  { ...rest, startDate: startDate ? new Date(startDate) : undefined },
+      data:  { ...rest, ...(schoolId !== undefined ? { schoolId } : {}), ...(schoolIds ? { schoolIds } : {}), startDate: startDate ? new Date(startDate) : undefined },
       include: {
         location: { select: { id: true, name: true } },
         school:   { select: { id: true, name: true } },

@@ -97,7 +97,7 @@ function DepartmentsTab() {
         <p className="text-sm text-gray-500">{departments?.length ?? 0} departments</p>
         <button
           onClick={() => setAdding(true)}
-          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+          className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90" style={{ backgroundColor: "#2C3E7C" }}
         >
           <Plus className="h-4 w-4" /> Add Department
         </button>
@@ -126,7 +126,7 @@ function DepartmentsTab() {
                 <td className="px-5 py-3 text-sm text-gray-400">—</td>
                 <td className="px-5 py-3">
                   <div className="flex items-center gap-2 justify-end">
-                    <button onClick={() => createMut.mutate()} disabled={!form.name || !form.code || createMut.isPending} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+                    <button onClick={() => createMut.mutate()} disabled={!form.name || !form.code || createMut.isPending} className="rounded-md px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-60" style={{ backgroundColor: "#2C3E7C" }}>
                       {createMut.isPending ? "Saving…" : "Save"}
                     </button>
                     <button onClick={() => { setAdding(false); setForm({ name: "", code: "" }); }} className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs hover:bg-gray-50">Cancel</button>
@@ -157,7 +157,7 @@ function DepartmentsTab() {
                       <div className="flex items-center gap-2 justify-end">
                         {editId === d.id ? (
                           <>
-                            <button onClick={() => updateMut.mutate(d.id)} disabled={updateMut.isPending} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+                            <button onClick={() => updateMut.mutate(d.id)} disabled={updateMut.isPending} className="rounded-md px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-60" style={{ backgroundColor: "#2C3E7C" }}>
                               {updateMut.isPending ? "…" : <Check className="h-3.5 w-3.5" />}
                             </button>
                             <button onClick={() => setEditId(null)} className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs hover:bg-gray-50"><X className="h-3.5 w-3.5" /></button>
@@ -226,7 +226,7 @@ function DesignationsTab() {
         <p className="text-sm text-gray-500">{designations?.length ?? 0} designations</p>
         <button
           onClick={() => setAdding(true)}
-          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+          className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90" style={{ backgroundColor: "#2C3E7C" }}
         >
           <Plus className="h-4 w-4" /> Add Designation
         </button>
@@ -254,7 +254,7 @@ function DesignationsTab() {
                 <td className="px-5 py-3 text-sm text-gray-400">—</td>
                 <td className="px-5 py-3">
                   <div className="flex items-center gap-2 justify-end">
-                    <button onClick={() => createMut.mutate()} disabled={!form.title || createMut.isPending} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+                    <button onClick={() => createMut.mutate()} disabled={!form.title || createMut.isPending} className="rounded-md px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-60" style={{ backgroundColor: "#2C3E7C" }}>
                       {createMut.isPending ? "Saving…" : "Save"}
                     </button>
                     <button onClick={() => { setAdding(false); setForm({ title: "", grade: "" }); }} className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs hover:bg-gray-50">Cancel</button>
@@ -285,7 +285,7 @@ function DesignationsTab() {
                       <div className="flex items-center gap-2 justify-end">
                         {editId === d.id ? (
                           <>
-                            <button onClick={() => updateMut.mutate(d.id)} disabled={updateMut.isPending} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+                            <button onClick={() => updateMut.mutate(d.id)} disabled={updateMut.isPending} className="rounded-md px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-60" style={{ backgroundColor: "#2C3E7C" }}>
                               {updateMut.isPending ? "…" : <Check className="h-3.5 w-3.5" />}
                             </button>
                             <button onClick={() => setEditId(null)} className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs hover:bg-gray-50"><X className="h-3.5 w-3.5" /></button>
@@ -847,7 +847,7 @@ function LeavePoliciesTab() {
           <button
             onClick={() => saveMut.mutate()}
             disabled={saveMut.isPending || !form.name || activeRules.length === 0 || form.grades.length === 0}
-            className="rounded-lg bg-blue-600 text-white px-5 py-2 text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60" style={{ backgroundColor: "#2C3E7C" }}
           >
             {saveMut.isPending ? "Saving…" : editing === "new" ? "Create Policy" : "Save Changes"}
           </button>
@@ -866,7 +866,7 @@ function LeavePoliciesTab() {
         </p>
         <button
           onClick={startNew}
-          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+          className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90" style={{ backgroundColor: "#2C3E7C" }}
         >
           <Plus className="h-4 w-4" /> New Policy
         </button>
@@ -929,7 +929,7 @@ function LeavePoliciesTab() {
                       <button
                         onClick={() => applyMut.mutate({ id: policy.id, year: applyYear })}
                         disabled={applyMut.isPending}
-                        className="rounded-lg bg-green-600 text-white px-3 py-1.5 text-xs font-semibold hover:bg-green-700 disabled:opacity-50 inline-flex items-center gap-1"
+                        className="rounded-md px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-60 inline-flex items-center gap-1" style={{ backgroundColor: "#2C3E7C" }}
                       >
                         <Play className="h-3 w-3" /> {applyMut.isPending ? "Applying…" : "Apply"}
                       </button>
@@ -1087,7 +1087,7 @@ function CustomRolesTab() {
         <p className="text-sm text-gray-500">{customRoles.length} custom role{customRoles.length !== 1 ? "s" : ""}</p>
         <button
           onClick={() => setShowCreate(true)}
-          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+          className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90" style={{ backgroundColor: "#2C3E7C" }}
         >
           <Plus className="h-4 w-4" /> New Role
         </button>
@@ -1127,7 +1127,7 @@ function CustomRolesTab() {
             <button
               onClick={() => createMut.mutate()}
               disabled={!form.label || !form.name || form.departmentIds.length === 0 || createMut.isPending}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              className="rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60" style={{ backgroundColor: "#2C3E7C" }}
             >
               {createMut.isPending ? "Creating…" : "Create Role"}
             </button>
@@ -1176,7 +1176,7 @@ function CustomRolesTab() {
                     <button
                       onClick={() => updateMut.mutate(role.name)}
                       disabled={!editForm.label || editForm.departmentIds.length === 0 || updateMut.isPending}
-                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                      className="rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60" style={{ backgroundColor: "#2C3E7C" }}
                     >
                       {updateMut.isPending ? "Saving…" : "Save Changes"}
                     </button>
@@ -1267,7 +1267,7 @@ function WorkLocationsTab() {
         </div>
         <button
           onClick={() => setAdding(true)}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+          className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white hover:opacity-90" style={{ backgroundColor: "#2C3E7C" }}
         >
           <Plus className="h-3.5 w-3.5" /> Add Location
         </button>
@@ -1289,7 +1289,7 @@ function WorkLocationsTab() {
           <button
             onClick={() => addMutation.mutate(newName.trim())}
             disabled={!newName.trim() || addMutation.isPending}
-            className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+            className="rounded-md px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-60" style={{ backgroundColor: "#2C3E7C" }}
           >
             <Check className="h-3.5 w-3.5" />
           </button>
@@ -1384,7 +1384,7 @@ function ClaimTypesTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-gray-500">{types.length} claim type{types.length !== 1 ? "s" : ""}</p>
-        <button onClick={() => setAdding(true)} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
+        <button onClick={() => setAdding(true)} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-white hover:opacity-90" style={{ backgroundColor: "#2C3E7C" }}>
           <Plus className="h-4 w-4" /> Add Claim Type
         </button>
       </div>
@@ -1404,7 +1404,7 @@ function ClaimTypesTab() {
           </div>
           <div className="flex gap-2 justify-end">
             <button onClick={() => setAdding(false)} className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">Cancel</button>
-            <button onClick={() => createMut.mutate()} disabled={!form.label.trim() || createMut.isPending} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+            <button onClick={() => createMut.mutate()} disabled={!form.label.trim() || createMut.isPending} className="rounded-md px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60" style={{ backgroundColor: "#2C3E7C" }}>
               Create
             </button>
           </div>

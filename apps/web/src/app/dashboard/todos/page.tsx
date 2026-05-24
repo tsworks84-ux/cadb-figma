@@ -9,6 +9,8 @@ import {
   Plus, Search, Calendar, ChevronLeft, ChevronRight,
   Clock, AlertTriangle, Link2, Link2Off, X, MoreHorizontal,
   CheckCircle2, Circle, Pencil, Trash2, List, CalendarDays, Tag,
+  BarChart3, Target, Zap, TrendingUp, Play, Square,
+  Flag, FileText, Users, Award,
 } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -106,7 +108,13 @@ const DEFAULT_FORM: TodoFormData = {
   category: "General", priority: "MEDIUM", reminderType: "NONE", reminderAt: "",
 };
 
-// ── Modal ─────────────────────────────────────────────────────────────────────
+// ── New Task Modal ────────────────────────────────────────────────────────────
+
+const PRIORITY_COLORS: Record<TodoPriority, { active: string; inactive: string }> = {
+  HIGH:   { active: "bg-red-50 text-red-700 border-red-400",    inactive: "bg-white text-gray-600 border-gray-200 hover:bg-gray-50" },
+  MEDIUM: { active: "bg-orange-50 text-orange-700 border-orange-400", inactive: "bg-white text-gray-600 border-gray-200 hover:bg-gray-50" },
+  LOW:    { active: "bg-blue-50 text-blue-700 border-blue-400",  inactive: "bg-white text-gray-600 border-gray-200 hover:bg-gray-50" },
+};
 
 function TodoModal({
   modalTitle,
@@ -126,84 +134,104 @@ function TodoModal({
     setForm((p) => ({ ...p, [k]: v }));
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-lg bg-white rounded-2xl shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-lg font-semibold text-gray-900">{modalTitle}</h2>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-          >
-            <X className="h-5 w-5" />
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <h2 className="text-xl font-semibold text-gray-900">{modalTitle}</h2>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+            <X size={20} className="text-gray-500" />
           </button>
         </div>
 
-        <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+        {/* Content */}
+        <div className="p-6 space-y-5">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Task title *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Task Title</label>
             <input
               autoFocus
-              className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="What do you need to do?"
+              className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2"
+              placeholder="What needs to be done?"
               value={form.title}
               onChange={(e) => set("title", e.target.value)}
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Description</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
             <textarea
-              className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-              placeholder="Add description (optional)"
-              rows={2}
+              className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 resize-none"
+              placeholder="Add details about this task..."
+              rows={3}
               value={form.description}
               onChange={(e) => set("description", e.target.value)}
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Due date</label>
+              <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700 mb-2">
+                <Calendar size={15} /> Due Date
+              </label>
               <input
                 type="date"
-                className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2"
                 value={form.dueDate}
                 onChange={(e) => set("dueDate", e.target.value)}
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Due time</label>
+              <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700 mb-2">
+                <Clock size={15} /> Due Time
+              </label>
               <input
                 type="time"
-                className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2"
                 value={form.dueTime}
                 onChange={(e) => set("dueTime", e.target.value)}
               />
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Category</label>
-            <select
-              className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-              value={form.category}
-              onChange={(e) => set("category", e.target.value)}
-            >
-              {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700 mb-2">
+                <Tag size={15} /> Category
+              </label>
+              <select
+                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 bg-white"
+                value={form.category}
+                onChange={(e) => set("category", e.target.value)}
+              >
+                {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700 mb-2">
+                <Flag size={15} /> Priority
+              </label>
+              <div className="flex gap-2">
+                {(["HIGH", "MEDIUM", "LOW"] as TodoPriority[]).map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => set("priority", p)}
+                    className={`flex-1 py-2.5 rounded-lg text-xs font-medium border-2 transition-all ${
+                      form.priority === p ? PRIORITY_COLORS[p].active : PRIORITY_COLORS[p].inactive
+                    }`}
+                  >
+                    {PRIORITY_META[p].label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
           {form.dueDate && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Reminder</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Reminder</label>
               <select
-                className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 bg-white"
                 value={form.reminderType}
                 onChange={(e) => set("reminderType", e.target.value as ReminderType)}
               >
@@ -216,50 +244,470 @@ function TodoModal({
 
           {form.reminderType === "CUSTOM" && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Custom reminder time</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Custom reminder time</label>
               <input
                 type="datetime-local"
-                className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2"
                 value={form.reminderAt}
                 onChange={(e) => set("reminderAt", e.target.value)}
               />
             </div>
           )}
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Priority</label>
-            <div className="flex gap-2">
-              {(["HIGH", "MEDIUM", "LOW"] as TodoPriority[]).map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => set("priority", p)}
-                  className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-all ${
-                    form.priority === p
-                      ? PRIORITY_META[p].active
-                      : "bg-white text-gray-500 border-gray-200 hover:border-gray-300"
-                  }`}
-                >
-                  {PRIORITY_META[p].label}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100">
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-xl transition-colors"
+            className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
             Cancel
           </button>
           <button
             disabled={!form.title.trim() || loading}
             onClick={() => form.title.trim() && onSubmit(form)}
-            className="px-5 py-2 text-sm font-medium bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="px-5 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            style={{ backgroundColor: "#2C3E7C" }}
           >
-            {loading ? "Saving..." : "Save Task"}
+            {loading ? "Saving..." : modalTitle === "Edit Task" ? "Save Task" : "Create Task"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Task Stats Modal ──────────────────────────────────────────────────────────
+
+function TaskStatsModal({ todos, onClose }: { todos: Todo[]; onClose: () => void }) {
+  const completed = todos.filter((t) => t.completed).length;
+  const total = todos.length;
+  const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+  // Last 7 days activity
+  const weeklyData = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - i));
+    const key = toDateStr(d);
+    const dayTodos = todos.filter((t) => t.dueDate && toDateStr(new Date(t.dueDate)) === key);
+    return {
+      day: d.toLocaleDateString([], { weekday: "short" }),
+      completed: dayTodos.filter((t) => t.completed).length,
+      total: dayTodos.length,
+    };
+  });
+  const maxVal = Math.max(...weeklyData.map((d) => d.total), 1);
+
+  // Category breakdown from real todos
+  const categoryData = CATEGORIES.map((cat) => {
+    const count = todos.filter((t) => t.category === cat).length;
+    return { category: cat, count, percentage: total > 0 ? Math.round((count / total) * 100) : 0 };
+  }).filter((c) => c.count > 0);
+
+  const CATEGORY_COLORS = ["#2C3E7C", "#F2994A", "#A8D08D", "#E07A5F", "#9B59B6", "#3498DB", "#1ABC9C"];
+
+  const achievements = [
+    { title: "Task Master",   description: "Complete 50 tasks",          icon: Award,  earned: completed >= 50 },
+    { title: "Productive",    description: "Achieve 80%+ completion rate", icon: TrendingUp, earned: completionRate >= 80 },
+    { title: "Early Bird",    description: "Complete 5 tasks before 9 AM", icon: Clock,  earned: false },
+    { title: "Perfect Week",  description: "Complete all tasks in a week",  icon: Target, earned: false },
+  ];
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">Your Statistics</h2>
+            <p className="text-sm text-gray-500 mt-1">Insights into your productivity</p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+            <X size={20} className="text-gray-500" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-6 space-y-6">
+          {/* Overview Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {[
+              { label: "Completed",       value: completed,           sub: "All time",           bg: "from-blue-50 to-blue-100",     border: "border-blue-200",     icon: <CheckCircle2 className="text-blue-600" size={20} />,   text: "text-blue-900" },
+              { label: "Completion Rate", value: `${completionRate}%`, sub: "Of all tasks",       bg: "from-green-50 to-green-100",   border: "border-green-200",    icon: <TrendingUp className="text-green-600" size={20} />,    text: "text-green-900" },
+              { label: "Pending",         value: total - completed,   sub: "To be done",         bg: "from-orange-50 to-orange-100", border: "border-orange-200",   icon: <Clock className="text-orange-600" size={20} />,        text: "text-orange-900" },
+              { label: "Focus Score",     value: completionRate,      sub: "Out of 100",         bg: "from-purple-50 to-purple-100", border: "border-purple-200",   icon: <Target className="text-purple-600" size={20} />,       text: "text-purple-900" },
+            ].map(({ label, value, sub, bg, border, icon, text }) => (
+              <div key={label} className={`bg-gradient-to-br ${bg} rounded-lg p-4 border ${border}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  {icon}
+                  <p className={`text-sm font-medium ${text}`}>{label}</p>
+                </div>
+                <p className={`text-3xl font-semibold ${text}`}>{value}</p>
+                <p className={`text-xs mt-1 opacity-70 ${text}`}>{sub}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Weekly Activity */}
+          <div className="bg-white rounded-lg border border-gray-200 p-5">
+            <h3 className="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <Calendar size={18} /> Weekly Activity
+            </h3>
+            <div className="flex items-end justify-between gap-2 h-40">
+              {weeklyData.map((data, i) => (
+                <div key={i} className="flex-1 flex flex-col items-center gap-2">
+                  <div className="w-full flex flex-col items-center justify-end" style={{ height: "120px" }}>
+                    {data.total > 0 && (
+                      <div className="w-full flex flex-col justify-end" style={{ height: "100%" }}>
+                        <div
+                          className="w-full rounded-t-md"
+                          style={{
+                            height: `${(data.total / maxVal) * 100}%`,
+                            backgroundColor: "#2C3E7C",
+                            opacity: data.completed > 0 ? 1 : 0.3,
+                          }}
+                        />
+                      </div>
+                    )}
+                    {data.total === 0 && <div className="w-full h-1 bg-gray-100 rounded" />}
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs font-medium text-gray-900">{data.completed}</p>
+                    <p className="text-xs text-gray-500">{data.day}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-center gap-4 mt-4 pt-4 border-t border-gray-200">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded" style={{ backgroundColor: "#2C3E7C" }} />
+                <span className="text-xs text-gray-600">Completed tasks</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Category Breakdown */}
+          {categoryData.length > 0 && (
+            <div className="bg-white rounded-lg border border-gray-200 p-5">
+              <h3 className="text-base font-semibold text-gray-900 mb-4">Tasks by Category</h3>
+              <div className="space-y-4">
+                {categoryData.map((item, i) => (
+                  <div key={item.category}>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-sm font-medium text-gray-900">{item.category}</span>
+                      <span className="text-sm text-gray-500">{item.count} tasks ({item.percentage}%)</span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className="h-2 rounded-full transition-all"
+                        style={{ width: `${item.percentage}%`, backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Achievements */}
+          <div className="bg-white rounded-lg border border-gray-200 p-5">
+            <h3 className="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <Award size={18} /> Achievements
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {achievements.map(({ title, description, icon: Icon, earned }) => (
+                <div
+                  key={title}
+                  className={`p-4 rounded-lg border-2 transition-all ${
+                    earned ? "bg-gradient-to-br from-yellow-50 to-orange-50 border-yellow-300" : "bg-gray-50 border-gray-200"
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${earned ? "bg-yellow-100" : "bg-gray-200"}`}>
+                      <Icon size={20} className={earned ? "text-yellow-600" : "text-gray-400"} />
+                    </div>
+                    <div className="flex-1">
+                      <p className={`text-sm font-semibold ${earned ? "text-gray-900" : "text-gray-500"}`}>{title}</p>
+                      <p className={`text-xs mt-1 ${earned ? "text-gray-600" : "text-gray-400"}`}>{description}</p>
+                    </div>
+                    {earned && <CheckCircle2 className="text-green-600 shrink-0" size={20} />}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Tip */}
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200 p-5">
+            <h3 className="text-base font-semibold text-gray-900 mb-2">Productivity Tip</h3>
+            <p className="text-sm text-gray-700">
+              {completionRate >= 80
+                ? "Excellent work! You're completing most of your tasks. Keep maintaining this pace."
+                : "Try breaking large tasks into smaller ones and tackling high-priority items first thing in the morning."}
+            </p>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end p-6 border-t border-gray-200">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg text-sm font-medium text-white"
+            style={{ backgroundColor: "#2C3E7C" }}
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Log Time Modal ────────────────────────────────────────────────────────────
+
+function LogTimeModal({ onClose }: { onClose: () => void }) {
+  const [timeData, setTimeData] = useState({
+    date: new Date().toISOString().split("T")[0],
+    task: "",
+    category: "Lectures",
+    startTime: "",
+    endTime: "",
+    hours: "",
+    minutes: "",
+    batch: "",
+    description: "",
+  });
+
+  const categories = ["Lectures", "Doubt Solving", "Exam Paper Work", "Content Creation", "Evaluation Work", "PTM", "Training", "Others"];
+  const batches = ["Grade 1A", "Grade 1B", "Grade 2A", "Grade 2B", "Grade 3A", "Grade 3B", "Grade 4A", "Grade 4B", "Grade 5A", "Grade 5B"];
+  const showBatch = ["Lectures", "PTM", "Doubt Solving"].includes(timeData.category);
+
+  useEffect(() => {
+    if (timeData.startTime && timeData.endTime) {
+      const start = new Date(`2000-01-01T${timeData.startTime}`);
+      const end = new Date(`2000-01-01T${timeData.endTime}`);
+      const diff = end.getTime() - start.getTime();
+      if (diff > 0) {
+        const totalMin = Math.floor(diff / 60000);
+        setTimeData((p) => ({ ...p, hours: String(Math.floor(totalMin / 60)), minutes: String(totalMin % 60) }));
+      }
+    }
+  }, [timeData.startTime, timeData.endTime]);
+
+  const quickDurations = [
+    { label: "15m", hours: "0", minutes: "15" },
+    { label: "30m", hours: "0", minutes: "30" },
+    { label: "45m", hours: "0", minutes: "45" },
+    { label: "1h",  hours: "1", minutes: "0"  },
+    { label: "1.5h",hours: "1", minutes: "30" },
+    { label: "2h",  hours: "2", minutes: "0"  },
+    { label: "3h",  hours: "3", minutes: "0"  },
+  ];
+
+  const hasPreview = timeData.hours || timeData.minutes || timeData.startTime || timeData.endTime;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <h2 className="text-xl font-semibold text-gray-900">Log Time</h2>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+            <X size={20} className="text-gray-500" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-6 space-y-5">
+          {/* Date */}
+          <div>
+            <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700 mb-2">
+              <Calendar size={15} /> Date
+            </label>
+            <input
+              type="date"
+              value={timeData.date}
+              onChange={(e) => setTimeData({ ...timeData, date: e.target.value })}
+              className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2"
+            />
+          </div>
+
+          {/* Task Title */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Task Title</label>
+            <input
+              type="text"
+              placeholder="e.g., Lecture — Mathematics 101"
+              value={timeData.task}
+              onChange={(e) => setTimeData({ ...timeData, task: e.target.value })}
+              className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2"
+            />
+          </div>
+
+          {/* Category */}
+          <div>
+            <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700 mb-2">
+              <Tag size={15} /> Category
+            </label>
+            <select
+              value={timeData.category}
+              onChange={(e) => setTimeData({ ...timeData, category: e.target.value })}
+              className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 bg-white"
+            >
+              {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+
+          {/* Batch (conditional) */}
+          {showBatch && (
+            <div>
+              <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700 mb-2">
+                <Users size={15} /> Batch / Class
+                <span className="text-xs text-gray-500 font-normal">(Optional)</span>
+              </label>
+              <select
+                value={timeData.batch}
+                onChange={(e) => setTimeData({ ...timeData, batch: e.target.value })}
+                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 bg-white"
+              >
+                <option value="">Select batch</option>
+                {batches.map((b) => <option key={b} value={b}>{b}</option>)}
+              </select>
+            </div>
+          )}
+
+          {/* Start / End Time */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700 mb-2">
+                <Clock size={15} /> Start Time
+              </label>
+              <input
+                type="time"
+                value={timeData.startTime}
+                onChange={(e) => setTimeData({ ...timeData, startTime: e.target.value })}
+                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2"
+              />
+            </div>
+            <div>
+              <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700 mb-2">
+                <Clock size={15} /> End Time
+              </label>
+              <input
+                type="time"
+                value={timeData.endTime}
+                onChange={(e) => setTimeData({ ...timeData, endTime: e.target.value })}
+                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2"
+              />
+            </div>
+          </div>
+
+          {/* Duration */}
+          <div>
+            <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700 mb-2">
+              <Clock size={15} /> Duration
+              {timeData.startTime && timeData.endTime && (
+                <span className="text-xs text-gray-500 font-normal">(Auto-calculated)</span>
+              )}
+            </label>
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <input
+                  type="number" min="0" max="23" placeholder="Hours"
+                  value={timeData.hours}
+                  onChange={(e) => setTimeData({ ...timeData, hours: e.target.value })}
+                  className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2"
+                />
+                <p className="text-xs text-gray-500 mt-1">Hours</p>
+              </div>
+              <div className="flex-1">
+                <input
+                  type="number" min="0" max="59" step="15" placeholder="Minutes"
+                  value={timeData.minutes}
+                  onChange={(e) => setTimeData({ ...timeData, minutes: e.target.value })}
+                  className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2"
+                />
+                <p className="text-xs text-gray-500 mt-1">Minutes</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Description */}
+          <div>
+            <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700 mb-2">
+              <FileText size={15} /> Description
+              <span className="text-xs text-gray-500 font-normal">(Optional)</span>
+            </label>
+            <textarea
+              placeholder="Add any additional notes about this work..."
+              value={timeData.description}
+              onChange={(e) => setTimeData({ ...timeData, description: e.target.value })}
+              rows={3}
+              className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 resize-none"
+            />
+          </div>
+
+          {/* Quick Select */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Quick Select</label>
+            <div className="flex gap-2 flex-wrap">
+              {quickDurations.map(({ label, hours, minutes }) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => setTimeData({ ...timeData, hours, minutes })}
+                  className={`px-3 py-1.5 border rounded-md text-sm font-medium transition-colors ${
+                    timeData.hours === hours && timeData.minutes === minutes
+                      ? "text-white border-transparent"
+                      : "border-gray-200 text-gray-700 hover:bg-gray-50"
+                  }`}
+                  style={timeData.hours === hours && timeData.minutes === minutes ? { backgroundColor: "#2C3E7C" } : {}}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Preview */}
+          {hasPreview && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-1.5">
+              {timeData.startTime && timeData.endTime && (
+                <p className="text-sm text-gray-700">
+                  <span className="font-medium">Time: </span>{timeData.startTime} – {timeData.endTime}
+                </p>
+              )}
+              {(timeData.hours || timeData.minutes) && (
+                <p className="text-sm text-gray-700">
+                  <span className="font-medium">Duration: </span>
+                  {parseInt(timeData.hours || "0") > 0 && `${timeData.hours}h `}
+                  {parseInt(timeData.minutes || "0") > 0 && `${timeData.minutes}m`}
+                  {!parseInt(timeData.hours || "0") && !parseInt(timeData.minutes || "0") && "0h"}
+                </p>
+              )}
+              {timeData.batch && (
+                <p className="text-sm text-gray-700">
+                  <span className="font-medium">Batch: </span>{timeData.batch}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg text-sm font-medium text-white"
+            style={{ backgroundColor: "#2C3E7C" }}
+          >
+            Log Time
           </button>
         </div>
       </div>
@@ -533,16 +981,28 @@ function TodayFocus({ todos }: { todos: Todo[] }) {
 export default function TodosPage() {
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
+  const [activeTab, setActiveTab] = useState<"tasks" | "timesheet">("tasks");
   const [view, setView] = useState<"list" | "calendar">("list");
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [editingTodo, setEditingTodo] = useState<Todo | null>(null);
+  const [timerRunning, setTimerRunning] = useState(false);
+  const [timerSeconds, setTimerSeconds] = useState(0);
+  const [timerTask, setTimerTask] = useState("");
+  const [showStats, setShowStats] = useState(false);
+  const [showLogTime, setShowLogTime] = useState(false);
 
   useEffect(() => {
     const cal = searchParams.get("calendar");
     if (cal === "connected") toast.success("Google Calendar connected!");
     if (cal === "error") toast.error("Failed to connect Google Calendar");
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!timerRunning) return;
+    const interval = setInterval(() => setTimerSeconds((s) => s + 1), 1000);
+    return () => clearInterval(interval);
+  }, [timerRunning]);
 
   const { data, isLoading } = useQuery({
     queryKey: ["todos"],
@@ -690,117 +1150,181 @@ export default function TodosPage() {
   const overdueKeys = grouped.sortedKeys.filter((k) => isPastDay(k));
   const upcomingKeys = grouped.sortedKeys.filter((k) => !isPastDay(k));
 
+  // Sidebar computed values
+  const todayTodos = todos.filter((t) => t.dueDate && isSameDay(new Date(t.dueDate), today));
+  const todayDone = todayTodos.filter((t) => t.completed).length;
+  const todayTotal = todayTodos.length;
+  const focusPct = todayTotal > 0 ? Math.round((todayDone / todayTotal) * 100) : 0;
+  const upcomingList = todos
+    .filter((t) => !t.completed && t.dueDate)
+    .sort((a, b) => new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime())
+    .slice(0, 5);
+  const productivity = todos.length > 0 ? Math.round((stats.completed / todos.length) * 100) : 0;
+
+  function formatTimer(s: number) {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  }
+
   const STAT_CARDS = [
-    { label: "Due Today", value: stats.dueToday, bg: "bg-blue-50",   icon: <Calendar className="h-4 w-4 text-blue-600" /> },
-    { label: "Pending",   value: stats.pending,  bg: "bg-orange-50", icon: <Clock className="h-4 w-4 text-orange-600" /> },
-    { label: "Completed", value: stats.completed, bg: "bg-green-50", icon: <CheckCircle2 className="h-4 w-4 text-green-600" /> },
-    { label: "Overdue",   value: stats.overdue,  bg: "bg-red-50",    icon: <AlertTriangle className="h-4 w-4 text-red-500" /> },
+    { label: "Due Today",  value: stats.dueToday,   bg: "bg-blue-50",   icon: <Calendar className="h-5 w-5 text-blue-600" /> },
+    { label: "Pending",    value: stats.pending,     bg: "bg-orange-50", icon: <Clock className="h-5 w-5 text-orange-600" /> },
+    { label: "Completed",  value: stats.completed,   bg: "bg-green-50",  icon: <CheckCircle2 className="h-5 w-5 text-green-600" /> },
+    { label: "Overdue",    value: stats.overdue,     bg: "bg-red-50",    icon: <AlertTriangle className="h-5 w-5 text-red-500" /> },
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-6 py-8">
-
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">My Tasks</h1>
-            <p className="text-sm text-gray-400 mt-0.5">Manage and track your personal to-dos</p>
-          </div>
-          <div className="flex items-center gap-2">
-            {calendarConnected ? (
-              <button
-                onClick={() => {
-                  api.delete("/api/v1/auth/google/calendar/disconnect").then(() => {
-                    queryClient.invalidateQueries({ queryKey: ["todos"] });
-                    toast.success("Calendar disconnected");
-                  });
-                }}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs text-green-700 bg-green-50 border border-green-200 rounded-xl hover:bg-green-100 transition-colors"
-              >
-                <Link2 className="h-3.5 w-3.5" /> Google Calendar
-              </button>
-            ) : (
-              <a
-                href={`${API_BASE}/api/v1/auth/google/calendar/connect`}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors shadow-sm"
-              >
-                <Link2Off className="h-3.5 w-3.5" /> Connect Calendar
-              </a>
-            )}
-            <button
-              onClick={() => setShowCreate(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-xl hover:bg-blue-700 transition-colors shadow-sm"
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <div
+              className="w-8 h-8 rounded-md flex items-center justify-center"
+              style={{ backgroundColor: "#2C3E7C" }}
             >
-              <Plus className="h-4 w-4" /> New Task
-            </button>
-          </div>
-        </div>
-
-        {/* Stat Cards */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
-          {STAT_CARDS.map(({ label, value, bg, icon }) => (
-            <div key={label} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-500">{label}</span>
-                <span className={`p-2 rounded-xl ${bg}`}>{icon}</span>
-              </div>
-              <p className="text-3xl font-bold text-gray-900 mt-2">{value}</p>
+              <CheckCircle2 className="text-white" size={18} />
             </div>
+            <div>
+              <p className="text-sm text-gray-500 uppercase tracking-wide">Personal</p>
+              <h1 className="text-2xl font-semibold text-gray-900">My To-Do</h1>
+            </div>
+          </div>
+          <p className="text-sm text-gray-600 mt-1">Organize your work and track your time</p>
+        </div>
+        <div className="flex gap-2 flex-wrap md:flex-nowrap w-full md:w-auto items-center">
+          {calendarConnected ? (
+            <button
+              onClick={() => {
+                api.delete("/api/v1/auth/google/calendar/disconnect").then(() => {
+                  queryClient.invalidateQueries({ queryKey: ["todos"] });
+                  toast.success("Calendar disconnected");
+                });
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs text-green-700 bg-green-50 border border-green-200 rounded-md hover:bg-green-100 transition-colors"
+            >
+              <Link2 size={14} /> Google Calendar
+            </button>
+          ) : (
+            <a
+              href={`${API_BASE}/api/v1/auth/google/calendar/connect`}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+            >
+              <Link2Off size={14} /> Connect Calendar
+            </a>
+          )}
+          <button
+            onClick={() => setShowStats(true)}
+            className="flex-1 md:flex-initial px-4 py-2 border border-gray-200 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center justify-center gap-2"
+          >
+            <BarChart3 size={18} />
+            <span className="hidden sm:inline">Stats</span>
+          </button>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex-1 md:flex-initial px-4 py-2 rounded-md text-sm font-medium text-white flex items-center justify-center gap-2"
+            style={{ backgroundColor: "#2C3E7C" }}
+          >
+            <Plus size={18} />
+            <span className="hidden sm:inline">New Task</span>
+            <span className="sm:hidden">New</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="border-b border-gray-200">
+        <div className="flex">
+          {([
+            { id: "tasks",     label: "My Tasks",   Icon: CheckCircle2 },
+            { id: "timesheet", label: "Timesheet",  Icon: Clock },
+          ] as const).map(({ id, label, Icon }) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              className={`px-4 py-2.5 text-sm font-medium flex items-center gap-2 transition-colors border-b-2 -mb-px ${
+                activeTab === id
+                  ? "text-gray-900"
+                  : "border-transparent text-gray-600 hover:text-gray-900"
+              }`}
+              style={activeTab === id ? { borderBottomColor: "#2C3E7C" } : {}}
+            >
+              <Icon size={16} />
+              {label}
+            </button>
           ))}
         </div>
+      </div>
 
-        {/* Search + View toggle */}
-        <div className="flex items-center gap-3 mb-6">
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search tasks..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+      {/* ── My Tasks Tab ── */}
+      {activeTab === "tasks" && (
+        <div className="space-y-6">
+          {/* Stats Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {STAT_CARDS.map(({ label, value, bg, icon }) => (
+              <div key={label} className="bg-white rounded-lg border border-gray-200 p-5">
+                <div className="flex items-center justify-between mb-2">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${bg}`}>
+                    {icon}
+                  </div>
+                </div>
+                <p className="text-3xl font-semibold text-gray-900 mb-1">{value}</p>
+                <p className="text-sm text-gray-600">{label}</p>
+              </div>
+            ))}
           </div>
-          <div className="flex items-center bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-            <button
-              onClick={() => setView("list")}
-              className={`flex items-center gap-1.5 px-3 py-2 text-sm transition-colors ${
-                view === "list" ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50"
-              }`}
-            >
-              <List className="h-4 w-4" /> List View
-            </button>
-            <button
-              onClick={() => setView("calendar")}
-              className={`flex items-center gap-1.5 px-3 py-2 text-sm transition-colors ${
-                view === "calendar" ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50"
-              }`}
-            >
-              <CalendarDays className="h-4 w-4" /> Calendar View
-            </button>
-          </div>
-        </div>
 
-        {/* Loading */}
-        {isLoading && (
-          <div className="flex items-center justify-center py-24">
-            <div className="animate-spin h-6 w-6 border-2 border-blue-500 border-t-transparent rounded-full" />
-          </div>
-        )}
+          {/* Main content grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Task list — left 2/3 */}
+            <div className="lg:col-span-2 space-y-4">
+              {/* Search + view toggle */}
+              <div className="bg-white rounded-lg border border-gray-200 p-4">
+                <div className="flex gap-3">
+                  <div className="flex-1 relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                    <input
+                      type="text"
+                      placeholder="Search tasks..."
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-offset-0"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setView("list")}
+                      className={`px-3 py-2 rounded-md text-sm font-medium ${view === "list" ? "text-white" : "text-gray-700 border border-gray-200 hover:bg-gray-50"}`}
+                      style={view === "list" ? { backgroundColor: "#2C3E7C" } : {}}
+                    >
+                      <List size={18} />
+                    </button>
+                    <button
+                      onClick={() => setView("calendar")}
+                      className={`px-3 py-2 rounded-md text-sm font-medium ${view === "calendar" ? "text-white" : "text-gray-700 border border-gray-200 hover:bg-gray-50"}`}
+                      style={view === "calendar" ? { backgroundColor: "#2C3E7C" } : {}}
+                    >
+                      <Calendar size={18} />
+                    </button>
+                  </div>
+                </div>
+              </div>
 
-        {/* Content */}
-        {!isLoading && (
-          <div className={view === "list" ? "flex gap-6 items-start" : ""}>
-            <div className="flex-1 min-w-0">
+              {/* Loading */}
+              {isLoading && (
+                <div className="bg-white rounded-lg border border-gray-200 flex items-center justify-center py-20">
+                  <div className="animate-spin h-6 w-6 border-2 border-blue-500 border-t-transparent rounded-full" />
+                </div>
+              )}
 
               {/* List View */}
-              {view === "list" && (
+              {!isLoading && view === "list" && (
                 <div className="space-y-4">
-
-                  {/* Overdue group */}
+                  {/* Overdue */}
                   {overdueKeys.length > 0 && (
-                    <div className="bg-white rounded-2xl border border-red-100 shadow-sm overflow-hidden">
+                    <div className="bg-white rounded-lg border border-red-100 overflow-hidden">
                       <div className="flex items-center gap-2 px-4 py-3 border-b border-red-50 bg-red-50/50">
                         <AlertTriangle className="h-4 w-4 text-red-500" />
                         <span className="text-sm font-semibold text-red-600">Overdue</span>
@@ -810,9 +1334,7 @@ export default function TodosPage() {
                       </div>
                       {overdueKeys.flatMap((k) =>
                         grouped.byDate[k].map((t) => (
-                          <TaskRow
-                            key={t.id}
-                            todo={t}
+                          <TaskRow key={t.id} todo={t}
                             onToggle={() => toggle(t.id, !t.completed)}
                             onEdit={() => setEditingTodo(t)}
                             onDelete={() => deleteMut.mutate(t.id)}
@@ -824,7 +1346,7 @@ export default function TodosPage() {
 
                   {/* Date groups */}
                   {upcomingKeys.map((key) => (
-                    <div key={key} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                    <div key={key} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
                       <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-50">
                         <Calendar className="h-4 w-4 text-blue-500" />
                         <span className="text-sm font-semibold text-gray-700">{formatDateLabel(key)}</span>
@@ -833,9 +1355,7 @@ export default function TodosPage() {
                         </span>
                       </div>
                       {grouped.byDate[key].map((t) => (
-                        <TaskRow
-                          key={t.id}
-                          todo={t}
+                        <TaskRow key={t.id} todo={t}
                           onToggle={() => toggle(t.id, !t.completed)}
                           onEdit={() => setEditingTodo(t)}
                           onDelete={() => deleteMut.mutate(t.id)}
@@ -846,7 +1366,7 @@ export default function TodosPage() {
 
                   {/* No due date */}
                   {grouped.noDue.length > 0 && (
-                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
                       <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-50">
                         <Clock className="h-4 w-4 text-gray-400" />
                         <span className="text-sm font-semibold text-gray-500">No Due Date</span>
@@ -855,9 +1375,7 @@ export default function TodosPage() {
                         </span>
                       </div>
                       {grouped.noDue.map((t) => (
-                        <TaskRow
-                          key={t.id}
-                          todo={t}
+                        <TaskRow key={t.id} todo={t}
                           onToggle={() => toggle(t.id, !t.completed)}
                           onEdit={() => setEditingTodo(t)}
                           onDelete={() => deleteMut.mutate(t.id)}
@@ -868,7 +1386,7 @@ export default function TodosPage() {
 
                   {/* Completed */}
                   {grouped.done.length > 0 && (
-                    <details className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden group/details">
+                    <details className="bg-white rounded-lg border border-gray-200 overflow-hidden group/details">
                       <summary className="flex items-center gap-2 px-4 py-3 cursor-pointer list-none hover:bg-gray-50">
                         <CheckCircle2 className="h-4 w-4 text-green-500" />
                         <span className="text-sm font-semibold text-gray-500">Completed</span>
@@ -877,9 +1395,7 @@ export default function TodosPage() {
                         </span>
                       </summary>
                       {grouped.done.map((t) => (
-                        <TaskRow
-                          key={t.id}
-                          todo={t}
+                        <TaskRow key={t.id} todo={t}
                           onToggle={() => toggle(t.id, false)}
                           onEdit={() => setEditingTodo(t)}
                           onDelete={() => deleteMut.mutate(t.id)}
@@ -889,7 +1405,7 @@ export default function TodosPage() {
                   )}
 
                   {filtered.length === 0 && (
-                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm flex flex-col items-center justify-center py-20">
+                    <div className="bg-white rounded-lg border border-gray-200 flex flex-col items-center justify-center py-20">
                       <CheckCircle2 className="h-12 w-12 text-gray-200 mb-3" />
                       <p className="text-gray-500 font-medium">
                         {search ? "No tasks found" : "All clear!"}
@@ -903,18 +1419,186 @@ export default function TodosPage() {
               )}
 
               {/* Calendar View */}
-              {view === "calendar" && <CalendarView todos={todos} />}
+              {!isLoading && view === "calendar" && <CalendarView todos={todos} />}
             </div>
 
-            {/* Today Focus Sidebar */}
-            {view === "list" && (
-              <div className="w-64 shrink-0">
-                <TodayFocus todos={todos} />
+            {/* Sidebar — right 1/3 */}
+            <div className="space-y-4">
+              {/* Today's Focus */}
+              <div className="bg-white rounded-lg border border-gray-200 p-5">
+                <div className="flex items-center gap-2 mb-3">
+                  <Target size={18} style={{ color: "#2C3E7C" }} />
+                  <h3 className="text-sm font-semibold text-gray-900">Today's Focus</h3>
+                </div>
+                <div className="mb-3">
+                  <div className="flex items-baseline gap-2 mb-2">
+                    <span className="text-3xl font-semibold text-gray-900">{todayDone}</span>
+                    <span className="text-sm text-gray-500">of {todayTotal} tasks done</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div
+                      className="h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${focusPct}%`, backgroundColor: "#2C3E7C" }}
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500">
+                  {focusPct === 100 && todayTotal > 0
+                    ? "Great job! All tasks completed!"
+                    : todayTotal === 0
+                    ? "No tasks due today."
+                    : "Keep going! You're doing great."}
+                </p>
               </div>
+
+              {/* Productivity */}
+              <div className="bg-white rounded-lg border border-gray-200 p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                    <Zap size={18} className="text-yellow-500" />
+                    Productivity
+                  </h3>
+                  <TrendingUp size={16} className="text-green-600" />
+                </div>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-3xl font-semibold text-gray-900">{productivity}</span>
+                  <span className="text-sm text-gray-500">/ 100</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-1.5">
+                  <div
+                    className="h-1.5 rounded-full"
+                    style={{
+                      width: `${productivity}%`,
+                      backgroundColor: productivity >= 70 ? "#10b981" : productivity >= 40 ? "#F2994A" : "#E07A5F",
+                    }}
+                  />
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  {productivity >= 70 ? "Excellent work!" : productivity >= 40 ? "Good progress" : "Getting started"}
+                </p>
+              </div>
+
+              {/* Upcoming */}
+              <div className="bg-white rounded-lg border border-gray-200 p-5">
+                <h3 className="text-sm font-semibold text-gray-900 mb-3">Upcoming</h3>
+                <div className="space-y-3">
+                  {upcomingList.length === 0 ? (
+                    <p className="text-sm text-gray-400 text-center py-4">No upcoming tasks</p>
+                  ) : (
+                    upcomingList.map((t) => {
+                      const overdue = !!t.dueDate && isPastDay(toDateStr(new Date(t.dueDate)));
+                      const pm = PRIORITY_META[t.priority];
+                      return (
+                        <div key={t.id} className="flex items-start gap-2.5">
+                          <span className={`mt-1.5 h-2 w-2 rounded-full shrink-0 ${pm.dot}`} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-gray-900 truncate">{t.title}</p>
+                            {t.dueDate && (
+                              <p className={`text-xs mt-0.5 ${overdue ? "text-red-500" : "text-gray-500"}`}>
+                                {overdue ? "Overdue · " : ""}
+                                {new Date(t.dueDate).toLocaleDateString([], { month: "short", day: "numeric" })}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Timesheet Tab ── */}
+      {activeTab === "timesheet" && (
+        <div className="space-y-6">
+          {/* Summary stats */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {[
+              { label: "This Week", value: "0h",  bg: "bg-blue-50",   icon: <Clock className="h-5 w-5 text-blue-600" /> },
+              { label: "Approved",  value: "0",   bg: "bg-green-50",  icon: <CheckCircle2 className="h-5 w-5 text-green-600" /> },
+              { label: "Pending",   value: "0",   bg: "bg-orange-50", icon: <AlertTriangle className="h-5 w-5 text-orange-600" /> },
+            ].map(({ label, value, bg, icon }) => (
+              <div key={label} className="bg-white rounded-lg border border-gray-200 p-5">
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${bg}`}>
+                    {icon}
+                  </div>
+                  <div>
+                    <p className="text-2xl font-semibold text-gray-900">{value}</p>
+                    <p className="text-sm text-gray-600">{label}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Quick Timer */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-semibold text-gray-900">Quick Timer</h3>
+              <span className="text-2xl font-mono font-semibold" style={{ color: "#2C3E7C" }}>
+                {formatTimer(timerSeconds)}
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <input
+                type="text"
+                placeholder="What are you working on?"
+                value={timerTask}
+                onChange={(e) => setTimerTask(e.target.value)}
+                className="flex-1 px-4 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-offset-0"
+              />
+              {timerRunning ? (
+                <button
+                  onClick={() => { setTimerRunning(false); setTimerSeconds(0); setTimerTask(""); }}
+                  className="px-4 py-2 rounded-md text-sm font-medium text-white flex items-center gap-2 bg-red-500 hover:bg-red-600"
+                >
+                  <Square size={16} />
+                  Stop
+                </button>
+              ) : (
+                <button
+                  onClick={() => timerTask.trim() && setTimerRunning(true)}
+                  disabled={!timerTask.trim()}
+                  className="px-4 py-2 rounded-md text-sm font-medium text-white flex items-center gap-2 disabled:opacity-50"
+                  style={{ backgroundColor: "#2C3E7C" }}
+                >
+                  <Play size={16} />
+                  Start
+                </button>
+              )}
+            </div>
+            {timerRunning && (
+              <p className="text-xs text-gray-500 mt-2">
+                Tracking: <span className="font-medium text-gray-700">{timerTask}</span>
+              </p>
             )}
           </div>
-        )}
-      </div>
+
+          {/* Recent Entries */}
+          <div className="bg-white rounded-lg border border-gray-200">
+            <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+              <h3 className="text-base font-semibold text-gray-900">Recent Entries</h3>
+              <button
+                onClick={() => setShowLogTime(true)}
+                className="px-4 py-2 rounded-md text-sm font-medium text-white flex items-center gap-2"
+                style={{ backgroundColor: "#2C3E7C" }}
+              >
+                <Plus size={16} />
+                Log Time
+              </button>
+            </div>
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <Clock className="h-12 w-12 text-gray-200 mb-3" />
+              <p className="text-gray-500 font-medium">No timesheet entries yet</p>
+              <p className="text-sm text-gray-400 mt-1">Use the timer above to start tracking your work.</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Create Modal */}
       {showCreate && (
@@ -935,6 +1619,16 @@ export default function TodosPage() {
           onClose={() => setEditingTodo(null)}
           loading={updateMut.isPending}
         />
+      )}
+
+      {/* Stats Modal */}
+      {showStats && (
+        <TaskStatsModal todos={todos} onClose={() => setShowStats(false)} />
+      )}
+
+      {/* Log Time Modal */}
+      {showLogTime && (
+        <LogTimeModal onClose={() => setShowLogTime(false)} />
       )}
     </div>
   );

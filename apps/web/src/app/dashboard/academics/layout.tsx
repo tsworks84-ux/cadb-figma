@@ -2,7 +2,7 @@
 
 import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
-import { AcademicsTopNav } from "@/components/academics/AcademicsTopNav";
+import { AcademicsTopNav, AcademicsMobileTabStrip } from "@/components/academics/AcademicsTopNav";
 import { School } from "lucide-react";
 
 export default function AcademicsLayout({ children }: { children: React.ReactNode }) {
@@ -32,7 +32,8 @@ export default function AcademicsLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex flex-col h-screen overflow-hidden">
       <AcademicsTopNav />
-      <main className="flex-1 overflow-y-auto bg-gray-50">
+      <AcademicsMobileTabStrip />
+      <main className="flex-1 overflow-y-auto" style={{ background: "#f4f6fa" }}>
         {children}
       </main>
     </div>

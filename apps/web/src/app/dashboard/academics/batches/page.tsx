@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { X, Archive, ArchiveRestore, Trash2, Pencil, Check, ChevronRight } from "lucide-react";
+import { X, Archive, ArchiveRestore, Trash2, Pencil, Check, ChevronRight, ChevronDown } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 
@@ -80,6 +80,78 @@ function ActionBtn({
   );
 }
 
+// ── MultiPicker — checkbox dropdown ───────────────────────────────────────────
+function MultiPicker({ options, selected, onChange, placeholder = "None" }: {
+  options: { id: string; name: string }[];
+  selected: string[];
+  onChange: (ids: string[]) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const toggle = (id: string) =>
+    onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  const labels = options.filter((o) => selected.includes(o.id)).map((o) => o.name);
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{ ...inputBase, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", gap: 8 }}
+      >
+        <span style={{ color: selected.length ? D.ink : "#9ca3af", fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, textAlign: "left" }}>
+          {selected.length === 0 ? placeholder : labels.join(", ")}
+        </span>
+        <ChevronDown style={{ width: 14, height: 14, color: D.muted, flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+      </button>
+
+      {open && (
+        <>
+          <div style={{ position: "fixed", inset: 0, zIndex: 15 }} onClick={() => setOpen(false)} />
+          <div style={{
+            position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 20,
+            background: "white", border: `1px solid ${D.line}`, borderRadius: 12, padding: 8,
+            boxShadow: "0 8px 24px rgba(0,0,0,.1)", maxHeight: 220, overflowY: "auto",
+          }}>
+            {options.map((o) => (
+              <label
+                key={o.id}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", cursor: "pointer", borderRadius: 8 }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "#f5f7ff"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+              >
+                <input type="checkbox" checked={selected.includes(o.id)} onChange={() => toggle(o.id)} style={{ accentColor: "#4f46e5" }} />
+                <span style={{ fontSize: 13, color: D.ink }}>{o.name}</span>
+              </label>
+            ))}
+            {options.length === 0 && (
+              <p style={{ padding: "8px 10px", fontSize: 13, color: D.muted }}>No options available</p>
+            )}
+            <div style={{ padding: "6px 10px 2px", borderTop: `1px solid ${D.line}`, marginTop: 4 }}>
+              <button type="button" onClick={() => setOpen(false)} style={{ fontSize: 12, fontWeight: 700, color: "#4f46e5", background: "none", border: "none", cursor: "pointer" }}>
+                Done
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Form type ─────────────────────────────────────────────────────────────────
+type BatchForm = {
+  name: string; description: string; locationId: string; academicYear: string;
+  startDate: string; gradeId: string; targetStrength: string;
+  schoolIds: string[]; courseIds: string[];
+};
+
+const blankForm = (): BatchForm => ({
+  name: "", description: "", locationId: "", academicYear: "",
+  startDate: "", gradeId: "", targetStrength: "",
+  schoolIds: [], courseIds: [],
+});
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function BatchesPage() {
   const { user } = useAuthStore();
@@ -87,14 +159,9 @@ export default function BatchesPage() {
   const qc = useQueryClient();
   const router = useRouter();
 
-  const blankForm = {
-    name: "", description: "", locationId: "", academicYear: "",
-    startDate: "", schoolId: "", gradeId: "", targetStrength: "", course: "",
-  };
-  const [modalOpen, setModalOpen]             = useState(false);
-  const [form, setForm]                       = useState(blankForm);
-  const [editId, setEditId]                   = useState<string | null>(null);
-  const [editForm, setEditForm]               = useState({ name: "", description: "", locationId: "", academicYear: "", startDate: "", schoolId: "", gradeId: "" });
+  const [form, setForm] = useState<BatchForm>(blankForm());
+  const [modalOpen, setModalOpen]       = useState(false);
+  const [editBatch, setEditBatch]       = useState<any | null>(null); // null = create mode
   const [toolbarSearch, setToolbarSearch]     = useState("");
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
 
@@ -142,11 +209,35 @@ export default function BatchesPage() {
     queryFn: () => api.get("/api/v1/academics/locations").then((r) => r.data.data),
     staleTime: 10 * 60 * 1000,
   });
+  const { data: courses = [] } = useQuery({
+    queryKey: ["courses"],
+    queryFn: () => api.get("/api/v1/academics/settings/courses").then((r) => r.data.data),
+    staleTime: 10 * 60 * 1000,
+  });
 
   useEffect(() => {
     const active = (academicYears as any[]).filter((y) => !y.isArchived);
     if (active.length > 0 && !filterYear) setFilterYear(active[0].name);
   }, [(academicYears as any[]).length]);
+
+  // ── Helpers ───────────────────────────────────────────────────────────────────
+  const openCreate = () => { setForm(blankForm()); setEditBatch(null); setModalOpen(true); };
+  const openEdit   = (b: any) => {
+    setEditBatch(b);
+    setForm({
+      name:           b.name ?? "",
+      description:    b.description ?? "",
+      locationId:     b.location?.id ?? "",
+      academicYear:   b.academicYear ?? "",
+      startDate:      b.startDate ? b.startDate.slice(0, 10) : "",
+      gradeId:        b.grade?.id ?? "",
+      targetStrength: b.targetStrength != null ? String(b.targetStrength) : "",
+      schoolIds:      b.schoolIds ?? (b.school?.id ? [b.school.id] : []),
+      courseIds:      b.courseIds ?? [],
+    });
+    setModalOpen(true);
+  };
+  const closeModal = () => { setModalOpen(false); setEditBatch(null); };
 
   // ── Mutations ─────────────────────────────────────────────────────────────────
   const invalidate = () => {
@@ -154,29 +245,27 @@ export default function BatchesPage() {
     qc.invalidateQueries({ queryKey: ["batches-filtered"] });
   };
 
+  const buildPayload = () => ({
+    name:           form.name,
+    description:    form.description || undefined,
+    academicYear:   form.academicYear,
+    locationId:     form.locationId  || null,
+    gradeId:        form.gradeId     || null,
+    startDate:      form.startDate   || undefined,
+    targetStrength: form.targetStrength ? parseInt(form.targetStrength) : null,
+    schoolIds:      form.schoolIds,
+    courseIds:      form.courseIds,
+  });
+
   const createMut = useMutation({
-    mutationFn: () => api.post("/api/v1/academics/batches", {
-      name:        form.name,
-      description: form.description || undefined,
-      academicYear: form.academicYear,
-      locationId:  form.locationId  || null,
-      schoolId:    form.schoolId    || null,
-      gradeId:     form.gradeId     || null,
-      startDate:   form.startDate   || undefined,
-    }),
-    onSuccess: () => { toast.success("Batch created"); setModalOpen(false); setForm(blankForm); invalidate(); },
+    mutationFn: () => api.post("/api/v1/academics/batches", buildPayload()),
+    onSuccess: () => { toast.success("Batch created"); closeModal(); invalidate(); },
     onError:   (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
   });
 
   const updateMut = useMutation({
-    mutationFn: (id: string) => api.patch(`/api/v1/academics/batches/${id}`, {
-      ...editForm,
-      locationId: editForm.locationId || null,
-      schoolId:   editForm.schoolId   || null,
-      gradeId:    editForm.gradeId    || null,
-      startDate:  editForm.startDate  || undefined,
-    }),
-    onSuccess: () => { toast.success("Updated"); setEditId(null); invalidate(); },
+    mutationFn: () => api.patch(`/api/v1/academics/batches/${editBatch!.id}`, buildPayload()),
+    onSuccess: () => { toast.success("Updated"); closeModal(); invalidate(); },
     onError:   (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
   });
 
@@ -211,25 +300,29 @@ export default function BatchesPage() {
       })
     : allBatches;
 
-  // ── Helpers ───────────────────────────────────────────────────────────────────
-  const gradeName  = (id: string) => (grades    as any[]).find((g) => g.id === id)?.name ?? id;
-  const locName    = (id: string) => (locations as any[]).find((l) => l.id === id)?.name ?? id;
+  // ── Preview ───────────────────────────────────────────────────────────────────
+  const locName     = (id: string) => (locations as any[]).find((l) => l.id === id)?.name ?? id;
+  const schoolNames = (ids: string[]) => ids.map((id) => (schools as any[]).find((s) => s.id === id)?.name ?? id).join(", ") || "None";
+  const courseNames = (ids: string[]) => ids.map((id) => (courses as any[]).find((c) => c.id === id)?.name ?? id).join(", ") || "None";
+  const gradeName   = (id: string) => (grades as any[]).find((g) => g.id === id)?.name ?? id;
 
-  // ── Live preview rows ─────────────────────────────────────────────────────────
   const previewReady = !!(form.name && form.academicYear);
-  const previewRows  = [
-    { label: "Name",            value: form.name || "Not set" },
-    { label: "Academic Year",   value: form.academicYear || "—" },
-    { label: "Grade",           value: form.gradeId ? gradeName(form.gradeId) : "None" },
-    { label: "Location",        value: form.locationId ? locName(form.locationId) : "None" },
+  const previewRows = [
+    { label: "Name",          value: form.name || "Not set" },
+    { label: "Academic Year", value: form.academicYear || "—" },
+    { label: "Schools",       value: schoolNames(form.schoolIds) },
+    { label: "Courses",       value: courseNames(form.courseIds) },
+    { label: "Grade",         value: form.gradeId ? gradeName(form.gradeId) : "None" },
+    { label: "Location",      value: form.locationId ? locName(form.locationId) : "None" },
     { label: "Target Strength", value: form.targetStrength ? `${form.targetStrength} students` : "—" },
-    { label: "Status",          value: previewReady ? "Ready to create" : "Required fields missing" },
+    { label: "Status",        value: previewReady ? "Ready" : "Required fields missing" },
   ];
+
+  const isBusy = createMut.isPending || updateMut.isPending;
 
   // ── Sidebar content ───────────────────────────────────────────────────────────
   const sidebarContent = (
     <div style={{ padding: "22px 18px", overflowY: "auto" }}>
-      {/* Statistics */}
       <p style={{ margin: "0 0 14px", color: "#9aa3b4", fontSize: 13, fontWeight: 900, letterSpacing: ".08em", textTransform: "uppercase" }}>
         Statistics
       </p>
@@ -247,7 +340,6 @@ export default function BatchesPage() {
         ))}
       </div>
 
-      {/* Filters */}
       <p style={{ margin: "0 0 14px", color: "#9aa3b4", fontSize: 13, fontWeight: 900, letterSpacing: ".08em", textTransform: "uppercase" }}>
         Filters
       </p>
@@ -339,7 +431,7 @@ export default function BatchesPage() {
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <DBtn>Stats</DBtn>
           <DBtn>Export</DBtn>
-          {canEdit && <DBtn primary onClick={() => setModalOpen(true)}>+ New Batch</DBtn>}
+          {canEdit && <DBtn primary onClick={openCreate}>+ New Batch</DBtn>}
         </div>
       </div>
 
@@ -387,7 +479,7 @@ export default function BatchesPage() {
             <span style={{ color: D.muted, fontWeight: 850, whiteSpace: "nowrap" }}>
               {batches.length} batch{batches.length !== 1 ? "es" : ""}
             </span>
-            {canEdit && <DBtn primary onClick={() => setModalOpen(true)}>+ New Batch</DBtn>}
+            {canEdit && <DBtn primary onClick={openCreate}>+ New Batch</DBtn>}
           </div>
 
           {/* Stat cards */}
@@ -419,22 +511,10 @@ export default function BatchesPage() {
                   </div>
                   <h2 style={{ margin: 0, fontSize: 22 }}>No batches yet</h2>
                   <p style={{ margin: "8px auto 18px", color: D.muted, maxWidth: 470, lineHeight: 1.5, fontWeight: 650 }}>
-                    Create your first batch to group students by course, grade, school, location, and academic year. Batch strength and schedule health will appear here.
+                    Create your first batch to group students by course, grade, school, location, and academic year.
                   </p>
-                  {canEdit && <DBtn primary onClick={() => setModalOpen(true)}>+ Create Batch</DBtn>}
+                  {canEdit && <DBtn primary onClick={openCreate}>+ Create Batch</DBtn>}
                 </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
-                {[
-                  { title: "Capacity Planning",  desc: "Monitor seats, strength, and batch utilization." },
-                  { title: "Student Allocation", desc: "Assign students after admission or move them later." },
-                  { title: "Schedule Ready",     desc: "Use batches directly in schedules and assignments." },
-                ].map((q) => (
-                  <div key={q.title} style={{ background: "white", border: `1px solid ${D.line}`, borderRadius: 16, padding: 18 }}>
-                    <strong style={{ display: "block", fontSize: 15 }}>{q.title}</strong>
-                    <span style={{ display: "block", color: D.muted, marginTop: 5, fontSize: 13, fontWeight: 700 }}>{q.desc}</span>
-                  </div>
-                ))}
               </div>
             </>
           ) : (
@@ -444,7 +524,8 @@ export default function BatchesPage() {
                   <tr style={{ background: "#f8fafc", borderBottom: `1px solid ${D.line}` }}>
                     <th style={thStyle}>Batch</th>
                     <th style={thStyle} className="hidden sm:table-cell">Year</th>
-                    <th style={thStyle} className="hidden lg:table-cell">School / Grade</th>
+                    <th style={thStyle} className="hidden lg:table-cell">Schools</th>
+                    <th style={thStyle} className="hidden lg:table-cell">Courses</th>
                     <th style={thStyle} className="hidden md:table-cell">Location</th>
                     <th style={thStyle}>Students</th>
                     <th style={thStyle} className="hidden sm:table-cell">Status</th>
@@ -457,17 +538,11 @@ export default function BatchesPage() {
                       key={b.id}
                       b={b}
                       i={i}
-                      editId={editId}
-                      editForm={editForm}
-                      setEditForm={setEditForm}
-                      setEditId={setEditId}
                       canEdit={canEdit}
-                      academicYears={academicYears as any[]}
                       schools={schools as any[]}
-                      grades={grades as any[]}
-                      locations={locations as any[]}
+                      courses={courses as any[]}
                       onNavigate={() => router.push(`/dashboard/academics/batches/${b.id}`)}
-                      onUpdate={() => updateMut.mutate(b.id)}
+                      onEdit={() => openEdit(b)}
                       onArchive={() => archiveMut.mutate(b.id)}
                       onDelete={() => { if (confirm(`Delete batch "${b.name}"?`)) deleteMut.mutate(b.id); }}
                     />
@@ -479,21 +554,24 @@ export default function BatchesPage() {
         </main>
       </div>
 
-      {/* ── New Batch Modal ───────────────────────────────────────────────────── */}
+      {/* ── Batch Modal (Create & Edit) ───────────────────────────────────────── */}
       {modalOpen && (
         <div
           style={{ position: "fixed", inset: 0, zIndex: 50, display: "grid", placeItems: "center", padding: 28, background: "linear-gradient(135deg, rgba(20,23,53,.72), rgba(40,36,95,.62))" }}
-          onClick={(e) => { if (e.target === e.currentTarget) setModalOpen(false); }}
+          onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}
         >
-          <div style={{ width: "min(960px, 100%)", background: "white", borderRadius: 22, overflow: "hidden", boxShadow: "0 32px 90px rgba(0,0,0,.28)", maxHeight: "90vh", overflowY: "auto" }}>
+          <div style={{ width: "min(1000px, 100%)", background: "white", borderRadius: 22, overflow: "hidden", boxShadow: "0 32px 90px rgba(0,0,0,.28)", maxHeight: "90vh", overflowY: "auto" }}>
 
             {/* Modal head */}
             <div style={{ padding: "24px 28px", borderBottom: `1px solid ${D.line}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 20 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 15 }}>
                 <div style={{ width: 44, height: 44, borderRadius: 14, display: "grid", placeItems: "center", background: "#eef2ff", color: D.nav2, fontWeight: 900 }}>BA</div>
-                <h1 style={{ margin: 0, fontSize: 28 }}>New Batch</h1>
+                <div>
+                  <h1 style={{ margin: 0, fontSize: 26 }}>{editBatch ? "Edit Batch" : "New Batch"}</h1>
+                  {editBatch && <p style={{ margin: "2px 0 0", fontSize: 13, color: D.muted }}>{editBatch.name}</p>}
+                </div>
               </div>
-              <button onClick={() => setModalOpen(false)} style={{ border: "none", background: "none", cursor: "pointer", color: "#9aa3b4", fontSize: 28, lineHeight: 1 }}>×</button>
+              <button onClick={closeModal} style={{ border: "none", background: "none", cursor: "pointer", color: "#9aa3b4", fontSize: 28, lineHeight: 1 }}>×</button>
             </div>
 
             {/* Modal body */}
@@ -513,14 +591,27 @@ export default function BatchesPage() {
                       ))}
                     </DSelect>
                   </DField>
-                  <DField label="School">
-                    <DSelect value={form.schoolId} onChange={(e) => setForm({ ...form, schoolId: e.target.value })}>
-                      <option value="">None</option>
-                      {(schools as any[]).filter((s) => s.isActive).map((s: any) => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
-                    </DSelect>
+
+                  {/* Multi-select Schools */}
+                  <DField label="Schools">
+                    <MultiPicker
+                      options={(schools as any[]).filter((s) => s.isActive).map((s: any) => ({ id: s.id, name: s.name }))}
+                      selected={form.schoolIds}
+                      onChange={(ids) => setForm({ ...form, schoolIds: ids })}
+                      placeholder="Select schools…"
+                    />
                   </DField>
+
+                  {/* Multi-select Courses */}
+                  <DField label="Courses">
+                    <MultiPicker
+                      options={(courses as any[]).filter((c: any) => c.isActive).map((c: any) => ({ id: c.id, name: c.name }))}
+                      selected={form.courseIds}
+                      onChange={(ids) => setForm({ ...form, courseIds: ids })}
+                      placeholder="Select courses…"
+                    />
+                  </DField>
+
                   <DField label="Grade">
                     <DSelect value={form.gradeId} onChange={(e) => setForm({ ...form, gradeId: e.target.value })}>
                       <option value="">None</option>
@@ -543,14 +634,6 @@ export default function BatchesPage() {
                   <DField label="Target Strength">
                     <DInput type="number" placeholder="e.g. 35" value={form.targetStrength} onChange={(e) => setForm({ ...form, targetStrength: e.target.value })} />
                   </DField>
-                  <DField label="Course">
-                    <DSelect value={form.course} onChange={(e) => setForm({ ...form, course: e.target.value })}>
-                      <option value="">Select course</option>
-                      <option>JEE Advanced</option>
-                      <option>NEET</option>
-                      <option>Foundation</option>
-                    </DSelect>
-                  </DField>
                 </div>
                 <div style={{ marginTop: 14 }}>
                   <DField label="Description">
@@ -564,8 +647,8 @@ export default function BatchesPage() {
                 <h2 style={{ margin: "0 0 14px", fontSize: 18 }}>Batch Preview</h2>
                 {previewRows.map((row) => (
                   <div key={row.label} style={{ display: "flex", justifyContent: "space-between", gap: 16, padding: "11px 0", borderTop: "1px solid #eef2f7", color: D.muted, fontSize: 13, fontWeight: 750 }}>
-                    <span>{row.label}</span>
-                    <strong style={{ color: D.ink, textAlign: "right", maxWidth: 180 }}>{row.value}</strong>
+                    <span style={{ flexShrink: 0 }}>{row.label}</span>
+                    <strong style={{ color: D.ink, textAlign: "right", maxWidth: 180, wordBreak: "break-word" }}>{row.value}</strong>
                   </div>
                 ))}
               </div>
@@ -573,9 +656,13 @@ export default function BatchesPage() {
 
             {/* Modal foot */}
             <div style={{ padding: "18px 28px", borderTop: `1px solid ${D.line}`, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-              <DBtn onClick={() => { setModalOpen(false); setForm(blankForm); }}>Cancel</DBtn>
-              <DBtn primary onClick={() => createMut.mutate()} disabled={!form.name || !form.academicYear || createMut.isPending}>
-                {createMut.isPending ? "Creating…" : "Create Batch"}
+              <DBtn onClick={closeModal}>Cancel</DBtn>
+              <DBtn
+                primary
+                disabled={!form.name || !form.academicYear || isBusy}
+                onClick={() => editBatch ? updateMut.mutate() : createMut.mutate()}
+              >
+                {isBusy ? (editBatch ? "Saving…" : "Creating…") : (editBatch ? "Save Changes" : "Create Batch")}
               </DBtn>
             </div>
           </div>
@@ -593,93 +680,72 @@ const thStyle: React.CSSProperties = {
 };
 
 function BatchRow({
-  b, i, editId, editForm, setEditForm, setEditId, canEdit,
-  academicYears, schools, grades, locations,
-  onNavigate, onUpdate, onArchive, onDelete,
+  b, i, canEdit, schools, courses,
+  onNavigate, onEdit, onArchive, onDelete,
 }: {
-  b: any; i: number; editId: string | null;
-  editForm: any; setEditForm: (f: any) => void; setEditId: (id: string | null) => void;
-  canEdit: boolean;
-  academicYears: any[]; schools: any[]; grades: any[]; locations: any[];
-  onNavigate: () => void; onUpdate: () => void; onArchive: () => void; onDelete: () => void;
+  b: any; i: number; canEdit: boolean;
+  schools: any[]; courses: any[];
+  onNavigate: () => void; onEdit: () => void; onArchive: () => void; onDelete: () => void;
 }) {
-  const D = { line: "#e6e8ef", muted: "#7c8598", ink: "#111827", nav2: "#28245f" };
-  const inputBase: React.CSSProperties = {
-    width: "100%", minHeight: 38, border: `1px solid ${D.line}`,
-    borderRadius: 10, padding: "6px 10px", background: "white",
-    color: D.ink, font: "inherit", fontSize: 13, outline: "none", boxSizing: "border-box",
-  };
+  const D = { line: "#e6e8ef", muted: "#7c8598", ink: "#111827" };
 
-  const isEditing = editId === b.id;
+  // Resolve display names for multi-school/course
+  const schoolIds: string[] = b.schoolIds?.length ? b.schoolIds : (b.school?.id ? [b.school.id] : []);
+  const courseIds: string[] = b.courseIds ?? [];
+  const schoolLabels = schoolIds.map((id: string) => schools.find((s) => s.id === id)?.name ?? id).join(", ");
+  const courseLabels = courseIds.map((id: string) => courses.find((c) => c.id === id)?.name ?? id).join(", ");
 
   return (
     <tr
-      onClick={() => { if (!isEditing) onNavigate(); }}
+      onClick={onNavigate}
       style={{
         borderTop: i === 0 ? "none" : `1px solid ${D.line}`,
         cursor: "pointer", opacity: b.isArchived ? 0.65 : 1,
       }}
-      onMouseEnter={(e) => { if (!isEditing) e.currentTarget.style.background = "#f5f7ff"; }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = "#f5f7ff"; }}
       onMouseLeave={(e) => { e.currentTarget.style.background = "white"; }}
     >
       {/* Name */}
-      <td style={{ padding: "14px 16px" }} onClick={(e) => isEditing && e.stopPropagation()}>
-        {isEditing ? (
-          <input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} style={{ ...inputBase, maxWidth: 200 }} />
-        ) : (
-          <div>
-            <p style={{ margin: 0, fontWeight: 700, color: D.ink }}>{b.name}</p>
-            {b.description && <p style={{ margin: "2px 0 0", fontSize: 12, color: D.muted }}>{b.description}</p>}
-            <div className="sm:hidden" style={{ display: "flex", flexWrap: "wrap", gap: "0 10px", marginTop: 2, fontSize: 12, color: D.muted }}>
-              <span>{b.academicYear}</span>
-              {b.school && <span>{b.school.name}</span>}
-              {b.grade && <span>{b.grade.name}</span>}
-              {b.location && <span>{b.location.name}</span>}
-            </div>
+      <td style={{ padding: "14px 16px" }}>
+        <div>
+          <p style={{ margin: 0, fontWeight: 700, color: D.ink }}>{b.name}</p>
+          {b.description && <p style={{ margin: "2px 0 0", fontSize: 12, color: D.muted }}>{b.description}</p>}
+          <div className="sm:hidden" style={{ display: "flex", flexWrap: "wrap", gap: "0 10px", marginTop: 2, fontSize: 12, color: D.muted }}>
+            <span>{b.academicYear}</span>
+            {schoolLabels && <span>{schoolLabels}</span>}
+            {b.grade && <span>{b.grade.name}</span>}
+            {b.location && <span>{b.location.name}</span>}
           </div>
-        )}
+        </div>
       </td>
 
       {/* Year */}
-      <td className="hidden sm:table-cell" style={{ padding: "14px 16px", color: D.muted }} onClick={(e) => isEditing && e.stopPropagation()}>
-        {isEditing ? (
-          <select value={editForm.academicYear} onChange={(e) => setEditForm({ ...editForm, academicYear: e.target.value })} style={{ ...inputBase, maxWidth: 150 }}>
-            <option value="">Select year</option>
-            {academicYears.filter((y) => !y.isArchived).map((y) => <option key={y.id} value={y.name}>{y.name}</option>)}
-          </select>
-        ) : b.academicYear}
+      <td className="hidden sm:table-cell" style={{ padding: "14px 16px", color: D.muted }}>
+        {b.academicYear}
       </td>
 
-      {/* School / Grade */}
-      <td className="hidden lg:table-cell" style={{ padding: "14px 16px" }} onClick={(e) => isEditing && e.stopPropagation()}>
-        {isEditing ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <select value={editForm.schoolId} onChange={(e) => setEditForm({ ...editForm, schoolId: e.target.value })} style={{ ...inputBase, maxWidth: 160 }}>
-              <option value="">None</option>
-              {schools.filter((s) => s.isActive).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-            <select value={editForm.gradeId} onChange={(e) => setEditForm({ ...editForm, gradeId: e.target.value })} style={{ ...inputBase, maxWidth: 160 }}>
-              <option value="">None</option>
-              {grades.filter((g) => g.isActive).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-            </select>
-          </div>
+      {/* Schools */}
+      <td className="hidden lg:table-cell" style={{ padding: "14px 16px" }}>
+        {schoolLabels ? (
+          <span style={{ fontSize: 13, color: D.ink }}>{schoolLabels}</span>
         ) : (
-          <div>
-            {b.school && <p style={{ margin: 0, fontSize: 13, color: D.ink }}>{b.school.name}</p>}
-            {b.grade  && <p style={{ margin: "2px 0 0", fontSize: 12, color: D.muted }}>{b.grade.name}</p>}
-            {!b.school && !b.grade && <span style={{ color: "#d1d5db", fontSize: 13 }}>—</span>}
-          </div>
+          <span style={{ color: "#d1d5db", fontSize: 13 }}>—</span>
+        )}
+        {b.grade && <p style={{ margin: "2px 0 0", fontSize: 12, color: D.muted }}>{b.grade.name}</p>}
+      </td>
+
+      {/* Courses */}
+      <td className="hidden lg:table-cell" style={{ padding: "14px 16px" }}>
+        {courseLabels ? (
+          <span style={{ fontSize: 13, color: D.ink }}>{courseLabels}</span>
+        ) : (
+          <span style={{ color: "#d1d5db", fontSize: 13 }}>—</span>
         )}
       </td>
 
       {/* Location */}
-      <td className="hidden md:table-cell" style={{ padding: "14px 16px" }} onClick={(e) => isEditing && e.stopPropagation()}>
-        {isEditing ? (
-          <select value={editForm.locationId} onChange={(e) => setEditForm({ ...editForm, locationId: e.target.value })} style={{ ...inputBase, maxWidth: 150 }}>
-            <option value="">None</option>
-            {locations.filter((l) => l.isActive).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
-        ) : b.location ? (
+      <td className="hidden md:table-cell" style={{ padding: "14px 16px" }}>
+        {b.location ? (
           <span style={{ fontSize: 13, color: D.muted }}>{b.location.name}</span>
         ) : (
           <span style={{ color: "#d1d5db", fontSize: 13 }}>—</span>
@@ -707,25 +773,9 @@ function BatchRow({
       {/* Actions */}
       <td style={{ padding: "14px 16px" }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}>
-          {isEditing ? (
+          {canEdit ? (
             <>
-              <ActionBtn primary onClick={onUpdate} title="Save"><Check style={{ width: 14, height: 14 }} /></ActionBtn>
-              <ActionBtn onClick={() => setEditId(null)} title="Cancel"><X style={{ width: 14, height: 14 }} /></ActionBtn>
-            </>
-          ) : canEdit ? (
-            <>
-              <ActionBtn
-                onClick={() => {
-                  setEditId(b.id);
-                  setEditForm({
-                    name: b.name, description: b.description ?? "",
-                    locationId: b.location?.id ?? "", academicYear: b.academicYear,
-                    startDate: b.startDate ? b.startDate.slice(0, 10) : "",
-                    schoolId: b.school?.id ?? "", gradeId: b.grade?.id ?? "",
-                  });
-                }}
-                title="Edit"
-              >
+              <ActionBtn onClick={onEdit} title="Edit">
                 <Pencil style={{ width: 14, height: 14 }} />
               </ActionBtn>
               <ActionBtn onClick={onArchive} title={b.isArchived ? "Unarchive" : "Archive"}>

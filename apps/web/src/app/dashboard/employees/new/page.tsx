@@ -586,7 +586,7 @@ function CredentialsDialog({ employeeId, employeeCode, temporaryPassword, person
         </div>
         <div className="flex gap-2 px-6 pb-6">
           <button onClick={onGoToList} className="rounded-lg border border-gray-200 px-4 py-2.5 text-sm font-medium hover:bg-gray-50">Employee List</button>
-          <button onClick={onViewProfile} className="flex-1 rounded-lg bg-blue-600 py-2.5 text-sm font-semibold text-white hover:bg-blue-700">View / Complete Profile →</button>
+          <button onClick={onViewProfile} className="flex-1 rounded-lg py-2.5 text-sm font-semibold text-white" style={{ backgroundColor: "#2C3E7C" }}>View / Complete Profile →</button>
           <button onClick={onAddAnother} className="rounded-lg border border-gray-200 px-4 py-2.5 text-sm font-medium hover:bg-gray-50">Add Another</button>
         </div>
       </div>
@@ -816,7 +816,7 @@ export default function NewEmployeePage() {
             </button>
             <div>
               <h1 className="text-xl font-bold text-gray-900">Add Employee</h1>
-              <p className="text-xs text-gray-400 mt-0.5">Create the employee profile, login identity, and contact record in a focused three-step flow.</p>
+              <p className="text-xs text-gray-400 mt-0.5">Add a new employee to your team, send login details, and conduct a successful step-by-step onboarding.</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -832,7 +832,8 @@ export default function NewEmployeePage() {
               type="button"
               onClick={step < STEPS.length - 1 ? nextStep : () => handleCreate(false)}
               disabled={createMutation.isPending || draftMutation.isPending}
-              className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60 transition-colors"
+              className="flex items-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 transition-colors"
+              style={{ backgroundColor: "#2C3E7C" }}
             >
               {createMutation.isPending ? <><Loader2 className="h-4 w-4 animate-spin" /> Creating…</> : step < STEPS.length - 1 ? <>Next Step <ChevronRight className="h-4 w-4" /></> : "Create Employee"}
             </button>
@@ -840,35 +841,36 @@ export default function NewEmployeePage() {
         </div>
 
         {/* ── Step indicator ── */}
-        <div className="bg-white border-b border-gray-100 px-6 py-0 shrink-0">
-          <div className="flex">
+        <div className="bg-white border-b border-gray-100 px-6 py-5 shrink-0">
+          <div className="flex items-center justify-between max-w-lg mx-auto">
             {STEPS.map((s, i) => {
+              const StepIcon = s.icon;
               const isActive   = i === step;
               const isComplete = i < step;
               return (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => setStep(i)}
-                  className={`flex items-center gap-3 px-6 py-4 border-b-2 transition-colors ${
-                    isActive
-                      ? "border-blue-600 bg-blue-600 text-white"
-                      : isComplete
-                      ? "border-transparent text-gray-500 hover:border-gray-200"
-                      : "border-transparent text-gray-400 hover:border-gray-200"
-                  } ${i > 0 ? "ml-px" : ""}`}
-                  style={{ flex: 1 }}
-                >
-                  <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
-                    isActive ? "bg-white text-blue-600" : isComplete ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
-                  }`}>
-                    {isComplete ? <Check className="h-3.5 w-3.5" /> : i + 1}
-                  </span>
-                  <div className="text-left">
-                    <p className={`text-sm font-semibold leading-tight ${isActive ? "text-white" : isComplete ? "text-gray-700" : "text-gray-500"}`}>{s.label}</p>
-                    <p className={`text-xs leading-tight mt-0.5 ${isActive ? "text-blue-200" : "text-gray-400"}`}>{s.sub}</p>
+                <div key={s.id} className="flex items-center flex-1">
+                  <div className="flex flex-col items-center flex-1">
+                    <button
+                      type="button"
+                      onClick={() => setStep(i)}
+                      className={`w-10 h-10 rounded-full flex items-center justify-center mb-2 transition-colors ${
+                        isComplete ? "bg-green-100" : ""
+                      }`}
+                      style={isActive ? { backgroundColor: "#2C3E7C" } : isComplete ? {} : { backgroundColor: "#f3f4f6" }}
+                    >
+                      {isComplete
+                        ? <CheckCircle2 className="text-green-600" size={20} />
+                        : <StepIcon className={isActive ? "text-white" : "text-gray-500"} size={20} />
+                      }
+                    </button>
+                    <p className={`text-xs font-medium text-center ${isActive ? "text-gray-900" : "text-gray-500"}`}>
+                      {s.label}
+                    </p>
                   </div>
-                </button>
+                  {i < STEPS.length - 1 && (
+                    <div className={`flex-1 h-0.5 mx-2 mb-5 ${isComplete ? "bg-green-400" : "bg-gray-200"}`} />
+                  )}
+                </div>
               );
             })}
           </div>
@@ -884,6 +886,13 @@ export default function NewEmployeePage() {
               {/* Step 0: Identity & Contact */}
               {step === 0 && (
                 <>
+                  <div className="flex items-center gap-3 p-4 rounded-lg mb-2" style={{ backgroundColor: "#2C3E7C" }}>
+                    <CheckCircle2 className="text-white shrink-0" size={22} />
+                    <div className="text-white">
+                      <p className="font-semibold text-sm">Identity & Contact</p>
+                      <p className="text-xs text-blue-200">Basics of the new employee</p>
+                    </div>
+                  </div>
                   <SectionCard title="Legal Name" hint="Shown on HR records">
                     <div className="grid grid-cols-3 gap-4">
                       <div>
@@ -971,9 +980,14 @@ export default function NewEmployeePage() {
               {step === 1 && (
                 <div className="rounded-xl border border-gray-100 bg-white overflow-hidden">
                   {/* Card header */}
-                  <div className="px-6 py-5 border-b border-gray-100">
-                    <h2 className="text-sm font-bold text-gray-800">Employment Details</h2>
-                    <p className="text-xs text-gray-400 mt-1">Grouped by job assignment, reporting line, and access. No single form column floating in empty space.</p>
+                  <div className="px-6 py-5 border-b border-gray-100" style={{ backgroundColor: "#2C3E7C" }}>
+                    <div className="flex items-center gap-3">
+                      <CheckCircle2 className="text-white shrink-0" size={22} />
+                      <div className="text-white">
+                        <p className="font-semibold text-sm">Employment Details</p>
+                        <p className="text-xs text-blue-200">Required for job assignment, reporting line, and access</p>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Job Assignment */}
@@ -1098,6 +1112,13 @@ export default function NewEmployeePage() {
               {/* Step 2: Salary Setup */}
               {step === 2 && (
                 <>
+                  <div className="flex items-center gap-3 p-4 rounded-lg" style={{ backgroundColor: "#2C3E7C" }}>
+                    <CheckCircle2 className="text-white shrink-0" size={22} />
+                    <div className="text-white">
+                      <p className="font-semibold text-sm">Salary Setup</p>
+                      <p className="text-xs text-blue-200">Configure compensation structure</p>
+                    </div>
+                  </div>
                   <div className="flex items-start gap-2 rounded-xl bg-blue-50 border border-blue-200 px-4 py-3">
                     <AlertTriangle className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />
                     <p className="text-xs text-blue-700">
@@ -1298,7 +1319,8 @@ export default function NewEmployeePage() {
               type="button"
               onClick={step < STEPS.length - 1 ? nextStep : () => handleCreate(false)}
               disabled={createMutation.isPending}
-              className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60 transition-colors"
+              className="flex items-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 transition-colors"
+              style={{ backgroundColor: "#2C3E7C" }}
             >
               {createMutation.isPending ? <><Loader2 className="h-4 w-4 animate-spin" /> Creating…</> : nextLabel}
               {step < STEPS.length - 1 && !createMutation.isPending && <ChevronRight className="h-4 w-4" />}

@@ -9,8 +9,10 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import {
-  Plus, X, Upload, FileText, Eye, Trash2, CheckCircle,
+  Plus, X, Upload, FileText, Eye, Trash2, CheckCircle, CheckCircle2,
   XCircle, Clock, Banknote, AlertTriangle, ChevronDown, Settings, Paperclip,
+  Receipt, Calendar, IndianRupee, Tag, AlertCircle, Download,
+  Users, ChevronRight,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 
@@ -76,7 +78,7 @@ function currentMonthKeyFn() {
 function getFYStart() {
   const now = new Date();
   const fyYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
-  return new Date(fyYear, 3, 1); // April 1st
+  return new Date(fyYear, 3, 1);
 }
 
 function Modal({ title, onClose, children, wide }: {
@@ -305,7 +307,6 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
   return (
     <Modal title={`Claim ${claim.claimNumber}`} onClose={onClose} wide>
       <div className="space-y-5">
-        {/* Status + header */}
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="font-semibold text-gray-900 text-lg">{claim.title}</p>
@@ -314,7 +315,6 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
           <Badge status={claim.status} />
         </div>
 
-        {/* Fields */}
         <div className="grid grid-cols-2 gap-4 rounded-xl bg-gray-50 border border-gray-100 p-4">
           <Field label="Claimed Amount" value={formatCurrency(claim.claimedAmount)} />
           {claim.approvedAmount != null && (
@@ -345,7 +345,6 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
           </div>
         )}
 
-        {/* Receipts */}
         <div>
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
@@ -388,7 +387,6 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
           )}
         </div>
 
-        {/* Approval form for admin */}
         {isAdmin && isSubmitted && showApprovalForm && (
           <div className={`rounded-xl border p-4 space-y-3 ${approvalAction === "APPROVED" ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}`}>
             <p className="text-sm font-semibold text-gray-800">
@@ -441,7 +439,6 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
           </div>
         )}
 
-        {/* Action buttons */}
         <div className="flex gap-2 justify-end pt-1 border-t border-gray-100">
           {isDraft && (isOwnClaim || !isAdmin) && (
             <button
@@ -462,7 +459,8 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
               onClick={() => submitMutation.mutate()}
               disabled={submitMutation.isPending || needsReceipt}
               title={needsReceipt ? `Attach a receipt first (required above ${formatCurrency(threshold)})` : undefined}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90"
+              style={{ backgroundColor: "#2C3E7C" }}
             >
               {submitMutation.isPending ? "Submitting…" : "Submit for Approval"}
             </button>
@@ -504,6 +502,290 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
   );
 }
 
+// ─── Claim Approval Modal (Team Claims review) ────────────────────────────────
+
+function ClaimApprovalModal({ claimId, onClose }: { claimId: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [decision, setDecision] = useState<"APPROVED" | "REJECTED" | null>(null);
+  const [approvedAmount, setApprovedAmount] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const { data: claim, isLoading } = useQuery({
+    queryKey: ["claim", claimId],
+    queryFn: () => api.get(`/api/v1/claims/${claimId}`).then((r) => r.data.data),
+    enabled: !!claimId,
+  });
+
+  const decisionMutation = useMutation({
+    mutationFn: () => api.patch(`/api/v1/claims/${claimId}/decision`, {
+      action: decision,
+      approvedAmount: decision === "APPROVED" ? (parseFloat(approvedAmount) || undefined) : undefined,
+      note: notes.trim() || undefined,
+    }),
+    onSuccess: () => {
+      toast.success(decision === "APPROVED" ? "Claim approved" : "Claim rejected");
+      qc.invalidateQueries({ queryKey: ["pending-claims"] });
+      qc.invalidateQueries({ queryKey: ["claim", claimId] });
+      qc.invalidateQueries({ queryKey: ["admin-all-claims"] });
+      onClose();
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Decision failed"),
+  });
+
+  if (isLoading || !claim) {
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-xl max-w-2xl w-full p-8 text-center text-gray-400">Loading…</div>
+      </div>
+    );
+  }
+
+  const empName = claim.employee
+    ? `${claim.employee.firstName} ${claim.employee.lastName}`
+    : "Employee";
+  const initials = empName.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase();
+  const canSubmit = decision !== null && notes.trim().length > 0;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <h2 className="text-xl font-semibold text-gray-900">Review Claim</h2>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+            <X size={20} className="text-gray-500" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {/* Employee Info */}
+          <div className="bg-gray-50 rounded-lg p-4">
+            <div className="flex items-center gap-3">
+              <div
+                className="w-12 h-12 rounded-full flex items-center justify-center text-white font-medium text-sm"
+                style={{ backgroundColor: "#2C3E7C" }}
+              >
+                {initials}
+              </div>
+              <div>
+                <p className="font-semibold text-gray-900">{empName}</p>
+                <p className="text-sm text-gray-500">
+                  {claim.employee?.department?.name ?? claim.claimNumber}
+                </p>
+              </div>
+              <div className="ml-auto">
+                <Badge status={claim.status} />
+              </div>
+            </div>
+          </div>
+
+          {/* Claim Details grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <p className="text-xs text-gray-500 mb-1">Claim Type</p>
+              <p className="text-sm font-medium text-gray-900">{claim.claimType}</p>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <p className="text-xs text-gray-500 mb-1">Amount Claimed</p>
+              <p className="text-lg font-semibold text-gray-900">{formatCurrency(claim.claimedAmount)}</p>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <p className="text-xs text-gray-500 mb-1">Claim Title</p>
+              <p className="text-sm font-medium text-gray-900">{claim.title}</p>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <p className="text-xs text-gray-500 mb-1">Submitted On</p>
+              <p className="text-sm font-medium text-gray-900">{formatDate(claim.createdAt)}</p>
+            </div>
+          </div>
+
+          {/* Description */}
+          {claim.description && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                <FileText size={16} />
+                Description
+              </label>
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <p className="text-sm text-gray-700">{claim.description}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Approved amount override (when approving) */}
+          {decision === "APPROVED" && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Approved Amount (₹)
+              </label>
+              <input
+                type="number"
+                value={approvedAmount}
+                onChange={(e) => setApprovedAmount(e.target.value)}
+                placeholder={String(claim.claimedAmount)}
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-green-400 outline-none"
+              />
+              <p className="text-xs text-gray-400 mt-1">Leave blank to approve the full claimed amount.</p>
+            </div>
+          )}
+
+          {/* Attachments */}
+          {claim.receipts && claim.receipts.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Supporting Documents ({claim.receipts.length})
+              </label>
+              <div className="space-y-2">
+                {claim.receipts.map((r: any) => (
+                  <div
+                    key={r.id}
+                    className="flex items-center justify-between px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileText size={16} className="text-gray-400 shrink-0" />
+                      <span className="text-sm text-gray-700 truncate">{r.fileName}</span>
+                    </div>
+                    <a
+                      href={`${API_BASE}${r.fileUrl}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1.5 hover:bg-gray-200 rounded text-gray-600 shrink-0"
+                    >
+                      <Download size={16} />
+                    </a>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Decision Buttons */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-3">Your Decision</label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => setDecision("APPROVED")}
+                className={`p-4 rounded-lg border-2 transition-all flex items-center gap-3 ${
+                  decision === "APPROVED"
+                    ? "border-green-500 bg-green-50"
+                    : "border-gray-200 hover:border-green-300"
+                }`}
+              >
+                <CheckCircle2
+                  size={24}
+                  className={decision === "APPROVED" ? "text-green-600" : "text-gray-400"}
+                />
+                <div className="text-left">
+                  <p className={`text-sm font-medium ${decision === "APPROVED" ? "text-green-900" : "text-gray-700"}`}>
+                    Approve
+                  </p>
+                  <p className="text-xs text-gray-500">Authorize reimbursement</p>
+                </div>
+              </button>
+
+              <button
+                onClick={() => setDecision("REJECTED")}
+                className={`p-4 rounded-lg border-2 transition-all flex items-center gap-3 ${
+                  decision === "REJECTED"
+                    ? "border-red-500 bg-red-50"
+                    : "border-gray-200 hover:border-red-300"
+                }`}
+              >
+                <XCircle
+                  size={24}
+                  className={decision === "REJECTED" ? "text-red-600" : "text-gray-400"}
+                />
+                <div className="text-left">
+                  <p className={`text-sm font-medium ${decision === "REJECTED" ? "text-red-900" : "text-gray-700"}`}>
+                    Reject
+                  </p>
+                  <p className="text-xs text-gray-500">Decline claim</p>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Manager Notes */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+              <FileText size={16} />
+              Manager Notes <span className="text-red-600">*</span>
+              <span className="text-xs text-gray-500 font-normal">(Required for record purposes)</span>
+            </label>
+            <textarea
+              placeholder={
+                decision === "APPROVED"
+                  ? "Add notes for approval record (e.g., verified receipts, amount is reasonable)…"
+                  : decision === "REJECTED"
+                  ? "Please provide a clear reason for rejection…"
+                  : "Make a decision above to add notes…"
+              }
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={3}
+              disabled={!decision}
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 resize-none disabled:bg-gray-50 disabled:text-gray-400"
+            />
+          </div>
+
+          {/* Contextual messages */}
+          {decision === "APPROVED" && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-2">
+              <CheckCircle2 className="text-green-600 shrink-0 mt-0.5" size={18} />
+              <div>
+                <p className="text-sm font-medium text-green-900">Claim will be processed for payment</p>
+                <p className="text-xs text-green-700 mt-1">
+                  The approved amount will be included in the next payroll cycle.
+                </p>
+              </div>
+            </div>
+          )}
+          {decision === "REJECTED" && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-2">
+              <AlertCircle className="text-red-600 shrink-0 mt-0.5" size={18} />
+              <div>
+                <p className="text-sm font-medium text-red-900">This action will notify the employee</p>
+                <p className="text-xs text-red-700 mt-1">
+                  Please provide a clear reason to help the employee understand your decision.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => decisionMutation.mutate()}
+            disabled={!canSubmit || decisionMutation.isPending}
+            className={`px-4 py-2 rounded-lg text-sm font-medium text-white disabled:bg-gray-300 disabled:cursor-not-allowed ${
+              decision === "APPROVED"
+                ? "bg-green-600 hover:bg-green-700"
+                : decision === "REJECTED"
+                ? "bg-red-600 hover:bg-red-700"
+                : ""
+            }`}
+          >
+            {decisionMutation.isPending
+              ? "Saving…"
+              : decision === "APPROVED"
+              ? "Approve Claim"
+              : decision === "REJECTED"
+              ? "Reject Claim"
+              : "Submit Decision"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── New Claim Modal ──────────────────────────────────────────────────────────
 
 function NewClaimModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
@@ -512,7 +794,6 @@ function NewClaimModal({ onClose, onCreated }: { onClose: () => void; onCreated:
     resolver: zodResolver(claimSchema),
   });
   const amount = parseFloat(watch("claimedAmount") as any) || 0;
-  const selectedType = watch("claimType");
 
   const { data: thresholdData } = useQuery({
     queryKey: ["claim-threshold"],
@@ -539,44 +820,136 @@ function NewClaimModal({ onClose, onCreated }: { onClose: () => void; onCreated:
   });
 
   return (
-    <Modal title="New Claim" onClose={onClose}>
-      <form onSubmit={handleSubmit((d) => createMutation.mutate(d))} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Claim Type <span className="text-red-500">*</span></label>
-          <select {...register("claimType")} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-blue-400 outline-none">
-            <option value="">Select type</option>
-            {claimTypes.map((t) => <option key={t.name} value={t.name}>{t.label}</option>)}
-          </select>
-          {errors.claimType && <p className="text-xs text-red-500 mt-1">{errors.claimType.message}</p>}
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Title <span className="text-red-500">*</span></label>
-          <input {...register("title")} placeholder="Brief description" className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 outline-none" />
-          {errors.title && <p className="text-xs text-red-500 mt-1">{errors.title.message}</p>}
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Amount (₹) <span className="text-red-500">*</span></label>
-          <input type="number" step="0.01" {...register("claimedAmount")} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 outline-none" />
-          {errors.claimedAmount && <p className="text-xs text-red-500 mt-1">{errors.claimedAmount.message}</p>}
-          {needsDoc && (
-            <p className="text-xs text-orange-600 mt-1 flex items-center gap-1">
-              <Paperclip className="h-3.5 w-3.5" />
-              Claims above ₹{threshold.toLocaleString("en-IN")} require a supporting document.
-            </p>
-          )}
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Description <span className="text-gray-400 font-normal">(optional)</span></label>
-          <textarea {...register("description")} rows={2} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-blue-400 outline-none" />
-        </div>
-        <div className="flex gap-2 justify-end pt-1">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">Cancel</button>
-          <button type="submit" disabled={createMutation.isPending} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 font-semibold">
-            {createMutation.isPending ? "Creating…" : "Create Draft"}
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <h2 className="text-xl font-semibold text-gray-900">New Claim</h2>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+            <X size={20} className="text-gray-500" />
           </button>
         </div>
-      </form>
-    </Modal>
+
+        <form onSubmit={handleSubmit((d) => createMutation.mutate(d))}>
+          <div className="p-6 space-y-5">
+            {/* Claim Type */}
+            <div>
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+                <Tag size={16} />
+                Claim Type <span className="text-red-500">*</span>
+              </label>
+              <select
+                {...register("claimType")}
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 bg-white text-sm"
+              >
+                <option value="">Select claim type</option>
+                {claimTypes.map((t) => (
+                  <option key={t.name} value={t.name}>{t.label}</option>
+                ))}
+              </select>
+              {errors.claimType && <p className="text-xs text-red-500 mt-1">{errors.claimType.message}</p>}
+            </div>
+
+            {/* Title */}
+            <div>
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+                <FileText size={16} />
+                Title <span className="text-red-500">*</span>
+              </label>
+              <input
+                {...register("title")}
+                placeholder="Brief description of the expense"
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 text-sm"
+              />
+              {errors.title && <p className="text-xs text-red-500 mt-1">{errors.title.message}</p>}
+            </div>
+
+            {/* Amount */}
+            <div>
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+                <IndianRupee size={16} />
+                Amount (INR) <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="0.00"
+                {...register("claimedAmount")}
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 text-sm"
+              />
+              {errors.claimedAmount && <p className="text-xs text-red-500 mt-1">{errors.claimedAmount.message}</p>}
+            </div>
+
+            {/* Description */}
+            <div>
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+                <FileText size={16} />
+                Description
+                <span className="text-xs text-gray-500 font-normal">(optional)</span>
+              </label>
+              <textarea
+                {...register("description")}
+                placeholder="Provide details about this expense (e.g., purpose, location, event)…"
+                rows={3}
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 resize-none text-sm"
+              />
+            </div>
+
+            {/* Receipt Required Notice */}
+            {needsDoc && (
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 flex items-start gap-2">
+                <AlertCircle className="text-orange-600 shrink-0 mt-0.5" size={18} />
+                <div>
+                  <p className="text-sm font-medium text-orange-900">Receipt Required</p>
+                  <p className="text-xs text-orange-700 mt-1">
+                    Supporting documents are mandatory for claims above {formatCurrency(threshold)}. You'll be able to attach receipts after creating the draft.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Claim Summary Preview */}
+            {amount > 0 && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h4 className="text-sm font-semibold text-gray-900 mb-2">Claim Summary</h4>
+                <div className="space-y-1 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Amount</span>
+                    <span className="font-semibold text-gray-900">₹{amount.toLocaleString("en-IN")}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Receipt needed</span>
+                    <span className={`font-medium ${needsDoc ? "text-orange-600" : "text-green-600"}`}>
+                      {needsDoc ? "Yes" : "No"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={createMutation.isPending}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-white hover:opacity-90 disabled:opacity-60"
+              style={{ backgroundColor: "#2C3E7C" }}
+            >
+              {createMutation.isPending ? "Creating…" : "Create Draft"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 
@@ -614,7 +987,7 @@ function MonthGroup({ monthKey, claims, onOpen, prefetch, showEmployee = false }
         </div>
       </button>
       {open && (
-        <div className="border-t border-gray-100">
+        <div className="border-t border-gray-100 overflow-x-auto">
           <table className="w-full">
             <tbody className="divide-y divide-gray-50">
               {claims.map((claim: any) => (
@@ -638,7 +1011,7 @@ function MonthGroup({ monthKey, claims, onOpen, prefetch, showEmployee = false }
                     </td>
                   )}
                   <td className="px-5 py-4">
-                    <button onClick={() => onOpen(claim.id)} className="text-xs text-blue-600 hover:underline font-medium">
+                    <button onClick={() => onOpen(claim.id)} className="text-xs font-medium hover:underline" style={{ color: "#2C3E7C" }}>
                       View →
                     </button>
                   </td>
@@ -689,19 +1062,20 @@ function ThresholdSetting() {
 
   return (
     <div className="inline-flex items-center gap-2 border border-blue-200 rounded-lg px-3 py-1.5 bg-blue-50">
-      <span className="text-xs text-blue-700 font-medium">Threshold ₹</span>
+      <span className="text-xs font-medium" style={{ color: "#2C3E7C" }}>Threshold ₹</span>
       <input
         type="number"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        className="w-24 text-xs rounded border border-blue-200 px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-400"
+        className="w-24 text-xs rounded border border-blue-200 px-2 py-1 focus:outline-none focus:ring-1"
         onKeyDown={(e) => { if (e.key === "Enter") updateMutation.mutate(); if (e.key === "Escape") setEditing(false); }}
         autoFocus
       />
       <button
         onClick={() => updateMutation.mutate()}
         disabled={updateMutation.isPending}
-        className="text-xs font-semibold text-white bg-blue-600 rounded px-2 py-1 hover:bg-blue-700 disabled:opacity-50"
+        className="text-xs font-semibold text-white rounded px-2 py-1 disabled:opacity-50"
+        style={{ backgroundColor: "#2C3E7C" }}
       >Save</button>
       <button onClick={() => setEditing(false)} className="text-xs text-gray-500 hover:text-gray-700">✕</button>
     </div>
@@ -715,9 +1089,11 @@ export default function ClaimsPage() {
   const isAdmin = user?.role === "SUPER_ADMIN" || user?.role === "HR_ADMIN";
   const qc = useQueryClient();
 
+  const [activeTab, setActiveTab] = useState<"my" | "team">("my");
   const [showNewClaim, setShowNewClaim] = useState(false);
   const [selectedClaimId, setSelectedClaimId] = useState<string | null>(null);
-  const [adminTab, setAdminTab] = useState<"pending" | "all">("pending");
+  const [reviewClaimId, setReviewClaimId] = useState<string | null>(null);
+  const [teamSubTab, setTeamSubTab] = useState<"pending" | "all">("pending");
 
   function prefetchClaim(id: string) {
     qc.prefetchQuery({
@@ -740,297 +1116,401 @@ export default function ClaimsPage() {
   const { data: allClaims } = useQuery({
     queryKey: ["admin-all-claims"],
     queryFn: () => api.get("/api/v1/claims/admin/all").then((r) => r.data.data),
-    enabled: isAdmin && adminTab === "all",
+    enabled: isAdmin && activeTab === "team" && teamSubTab === "all",
   });
 
   function openClaim(id: string) {
     setShowNewClaim(false);
+    setReviewClaimId(null);
     setSelectedClaimId(id);
   }
 
   const pendingCount = pendingClaims?.length ?? 0;
 
+  // Stats for My Claims
+  const curKey  = currentMonthKeyFn();
+  const fyStart = getFYStart();
+  const allMy   = myClaims ?? [];
+  const thisMonthList = allMy.filter((c: any) => claimMonthKey(c) === curKey);
+  const fyList        = allMy.filter((c: any) => new Date(c.createdAt) >= fyStart);
+  const pendingMyList = allMy.filter((c: any) => c.status === "SUBMITTED");
+  const approvedList  = allMy.filter((c: any) => c.status === "APPROVED" || c.status === "PAID");
+
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-2xl font-bold text-gray-900">Reimbursement Claims</h1>
-        <div className="flex items-center gap-3 flex-wrap">
+      <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <div
+              className="w-8 h-8 rounded-md flex items-center justify-center shrink-0"
+              style={{ backgroundColor: "#2C3E7C" }}
+            >
+              <Receipt className="text-white" size={18} />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500 uppercase tracking-wide">Finance</p>
+              <h1 className="text-2xl font-semibold text-gray-900">Reimbursement Claims</h1>
+            </div>
+          </div>
+          <p className="text-sm md:text-base text-gray-600 mt-1">
+            Submit and track expense reimbursements
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap md:flex-nowrap">
           {isAdmin && <ThresholdSetting />}
           <button
             onClick={() => setShowNewClaim(true)}
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+            style={{ backgroundColor: "#2C3E7C" }}
           >
-            <Plus className="h-4 w-4" /> New Claim
+            <Plus size={18} />
+            New Claim
           </button>
         </div>
       </div>
 
-      {/* Admin section */}
-      {isAdmin && (
-        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-          <div className="flex items-center gap-1 px-5 py-0 border-b border-gray-100">
-            {(["pending", "all"] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setAdminTab(tab)}
-                className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                  adminTab === tab ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-800"
-                }`}
-              >
-                {tab === "pending" ? (
-                  <span className="flex items-center gap-1.5">
-                    Pending Approvals
-                    {pendingCount > 0 && (
-                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-orange-100 text-orange-700 text-xs font-bold">
-                        {pendingCount}
-                      </span>
-                    )}
-                  </span>
-                ) : "All Claims"}
-              </button>
-            ))}
+      {/* Tabs */}
+      <div className="border-b border-gray-200">
+        <div className="flex gap-1">
+          <button
+            onClick={() => setActiveTab("my")}
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === "my"
+                ? "border-[#2C3E7C] text-[#2C3E7C]"
+                : "border-transparent text-gray-500 hover:text-gray-800"
+            }`}
+          >
+            <IndianRupee size={16} />
+            My Claims
+          </button>
+          {isAdmin && (
+            <button
+              onClick={() => setActiveTab("team")}
+              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === "team"
+                  ? "border-[#2C3E7C] text-[#2C3E7C]"
+                  : "border-transparent text-gray-500 hover:text-gray-800"
+              }`}
+            >
+              <Users size={16} />
+              Team Claims
+              {pendingCount > 0 && (
+                <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded-full text-xs font-semibold text-white" style={{ backgroundColor: "#F2994A" }}>
+                  {pendingCount}
+                </span>
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── My Claims Tab ── */}
+      {activeTab === "my" && (
+        <div className="space-y-6">
+          {/* Stat cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="bg-white rounded-lg border border-gray-200 p-4">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-8 h-8 rounded-md flex items-center justify-center" style={{ backgroundColor: "#EEF1F8" }}>
+                  <Calendar size={16} style={{ color: "#2C3E7C" }} />
+                </div>
+                <p className="text-xs text-gray-500 font-medium">This Month</p>
+              </div>
+              <p className="text-xl font-bold text-gray-900">
+                {formatCurrency(thisMonthList.reduce((s: number, c: any) => s + c.claimedAmount, 0))}
+              </p>
+              <p className="text-xs text-gray-400 mt-0.5">{thisMonthList.length} claim{thisMonthList.length !== 1 ? "s" : ""}</p>
+            </div>
+
+            <div className="bg-white rounded-lg border border-gray-200 p-4">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-8 h-8 rounded-md flex items-center justify-center" style={{ backgroundColor: "#EEF1F8" }}>
+                  <Receipt size={16} style={{ color: "#2C3E7C" }} />
+                </div>
+                <p className="text-xs text-gray-500 font-medium">This FY</p>
+              </div>
+              <p className="text-xl font-bold text-gray-900">
+                {formatCurrency(fyList.reduce((s: number, c: any) => s + c.claimedAmount, 0))}
+              </p>
+              <p className="text-xs text-gray-400 mt-0.5">{fyList.length} claim{fyList.length !== 1 ? "s" : ""}</p>
+            </div>
+
+            <div className="bg-white rounded-lg border border-gray-200 p-4">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-8 h-8 rounded-md flex items-center justify-center bg-amber-50">
+                  <Clock size={16} className="text-amber-600" />
+                </div>
+                <p className="text-xs text-gray-500 font-medium">Pending</p>
+              </div>
+              <p className="text-xl font-bold text-amber-600">{pendingMyList.length}</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {pendingMyList.length > 0 ? formatCurrency(pendingMyList.reduce((s: number, c: any) => s + c.claimedAmount, 0)) : "No pending claims"}
+              </p>
+            </div>
+
+            <div className="bg-white rounded-lg border border-gray-200 p-4">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-8 h-8 rounded-md flex items-center justify-center bg-green-50">
+                  <CheckCircle2 size={16} className="text-green-600" />
+                </div>
+                <p className="text-xs text-gray-500 font-medium">Approved</p>
+              </div>
+              <p className="text-xl font-bold text-green-700">
+                {formatCurrency(approvedList.reduce((s: number, c: any) => s + (c.approvedAmount ?? c.claimedAmount), 0))}
+              </p>
+              <p className="text-xs text-gray-400 mt-0.5">{approvedList.length} claim{approvedList.length !== 1 ? "s" : ""}</p>
+            </div>
           </div>
 
-          {adminTab === "pending" && (
-            <div className="divide-y divide-gray-50">
-              {!pendingClaims?.length ? (
-                <p className="px-6 py-10 text-sm text-center text-gray-400">No claims pending approval.</p>
-              ) : (
-                pendingClaims.map((claim: any) => (
-                  <div key={claim.id} onMouseEnter={() => prefetchClaim(claim.id)} className="px-5 py-4 flex items-center gap-4 hover:bg-gray-50">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-semibold text-gray-900">{claim.employee.firstName} {claim.employee.lastName}</span>
-                        <span className="text-xs text-gray-400">{claim.employee.department?.name}</span>
-                        <span className="text-xs font-mono text-gray-400">{claim.claimNumber}</span>
-                      </div>
-                      <p className="text-sm text-gray-600 mt-0.5">{claim.title}</p>
-                      <div className="flex items-center gap-3 mt-1">
-                        <span className="text-xs text-gray-500">{claim.claimType}</span>
-                        <span className="text-sm font-semibold text-gray-900">{formatCurrency(claim.claimedAmount)}</span>
-                        <span className="text-xs text-gray-400">{formatDate(claim.createdAt)}</span>
-                        {claim.receipts?.length > 0 && (
-                          <span className="inline-flex items-center gap-1 text-xs text-blue-600">
-                            <Paperclip className="h-3 w-3" />{claim.receipts.length} doc{claim.receipts.length > 1 ? "s" : ""}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => openClaim(claim.id)}
-                      className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
-                    >
-                      Review →
-                    </button>
-                  </div>
-                ))
-              )}
+          {/* My Claims table */}
+          <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100">
+              <h2 className="font-semibold text-gray-900">My Claims</h2>
             </div>
-          )}
 
-          {adminTab === "all" && (
-            <div>
-              {!allClaims?.length ? (
-                <p className="px-6 py-10 text-sm text-center text-gray-400">No claims found.</p>
-              ) : (() => {
-                const curKey = currentMonthKeyFn();
-                const groups = new Map<string, any[]>();
-                for (const claim of allClaims) {
-                  const key = claimMonthKey(claim);
-                  if (!groups.has(key)) groups.set(key, []);
-                  groups.get(key)!.push(claim);
-                }
-                const sortedKeys     = [...groups.keys()].sort((a, b) => b.localeCompare(a));
-                const curMonthClaims = groups.get(curKey) ?? [];
-                const pastKeys       = sortedKeys.filter((k) => k !== curKey);
+            {!myClaims?.length ? (
+              <p className="px-6 py-10 text-center text-sm text-gray-400">
+                No claims yet. Click <strong>+ New Claim</strong> to get started.
+              </p>
+            ) : (() => {
+              const groups = new Map<string, any[]>();
+              for (const claim of myClaims) {
+                const key = claimMonthKey(claim);
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key)!.push(claim);
+              }
+              const sortedKeys     = [...groups.keys()].sort((a, b) => b.localeCompare(a));
+              const curMonthClaims = groups.get(curKey) ?? [];
+              const pastKeys       = sortedKeys.filter((k) => k !== curKey);
 
-                return (
-                  <>
-                    {/* Current month — expanded */}
-                    {curMonthClaims.length > 0 && (
-                      <div>
-                        <div className="px-6 py-2.5 bg-blue-50 border-b border-blue-100 flex items-center justify-between">
-                          <span className="text-xs font-semibold text-blue-700 uppercase tracking-wide">
-                            {monthLabel(curKey)} · Current
-                          </span>
-                          <span className="text-sm font-semibold text-blue-800">
-                            {formatCurrency(curMonthClaims.reduce((s, c: any) => s + c.claimedAmount, 0))} claimed
-                          </span>
-                        </div>
+              return (
+                <>
+                  {curMonthClaims.length > 0 && (
+                    <div>
+                      <div className="px-6 py-2.5 border-b flex items-center justify-between" style={{ backgroundColor: "#EEF1F8" }}>
+                        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#2C3E7C" }}>
+                          {monthLabel(curKey)} · Current
+                        </span>
+                        <span className="text-sm font-semibold" style={{ color: "#2C3E7C" }}>
+                          {formatCurrency(curMonthClaims.reduce((s: number, c: any) => s + c.claimedAmount, 0))} claimed
+                        </span>
+                      </div>
+                      <div className="overflow-x-auto">
                         <table className="w-full">
                           <thead>
-                            <tr className="border-b border-gray-100 bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
-                              <th className="px-5 py-3">Employee</th>
-                              <th className="px-5 py-3">Claim #</th>
-                              <th className="px-5 py-3">Type</th>
-                              <th className="px-5 py-3">Title</th>
-                              <th className="px-5 py-3">Amount</th>
-                              <th className="px-5 py-3">Status</th>
-                              <th className="px-5 py-3">Date</th>
-                              <th className="px-5 py-3"></th>
+                            <tr className="border-b border-gray-100 bg-gray-50">
+                              {["Claim #", "Type", "Title", "Amount", "Status", "Date", "Docs", ""].map((h) => (
+                                <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>
+                              ))}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-50">
                             {curMonthClaims.map((claim: any) => (
                               <tr key={claim.id} onMouseEnter={() => prefetchClaim(claim.id)} className="hover:bg-gray-50">
-                                <td className="px-5 py-3 text-sm font-medium text-gray-800">{claim.employee.firstName} {claim.employee.lastName}</td>
-                                <td className="px-5 py-3 text-xs font-mono text-gray-400">{claim.claimNumber}</td>
-                                <td className="px-5 py-3 text-xs text-gray-500">{claim.claimType}</td>
-                                <td className="px-5 py-3 text-sm text-gray-800 max-w-xs truncate">{claim.title}</td>
-                                <td className="px-5 py-3 text-sm font-semibold">{formatCurrency(claim.claimedAmount)}</td>
-                                <td className="px-5 py-3"><Badge status={claim.status} /></td>
-                                <td className="px-5 py-3 text-xs text-gray-400">{formatDate(claim.createdAt)}</td>
-                                <td className="px-5 py-3">
-                                  <button onClick={() => openClaim(claim.id)} className="text-xs text-blue-600 hover:underline">View</button>
+                                <td className="px-5 py-4 text-xs font-mono text-gray-400">{claim.claimNumber}</td>
+                                <td className="px-5 py-4 text-xs text-gray-500">{claim.claimType}</td>
+                                <td className="px-5 py-4 text-sm text-gray-800 max-w-xs truncate">{claim.title}</td>
+                                <td className="px-5 py-4 text-sm font-semibold text-gray-900">{formatCurrency(claim.claimedAmount)}</td>
+                                <td className="px-5 py-4"><Badge status={claim.status} /></td>
+                                <td className="px-5 py-4 text-xs text-gray-400">{formatDate(claim.createdAt)}</td>
+                                <td className="px-5 py-4">
+                                  {claim.receipts?.length > 0
+                                    ? <span className="inline-flex items-center gap-1 text-xs" style={{ color: "#2C3E7C" }}><Paperclip className="h-3 w-3" />{claim.receipts.length}</span>
+                                    : <span className="text-xs text-gray-300">—</span>}
+                                </td>
+                                <td className="px-5 py-4">
+                                  <button onClick={() => openClaim(claim.id)} className="text-xs font-medium hover:underline" style={{ color: "#2C3E7C" }}>
+                                    {claim.status === "DRAFT" ? "Manage →" : "View →"}
+                                  </button>
                                 </td>
                               </tr>
                             ))}
                           </tbody>
                         </table>
                       </div>
-                    )}
+                    </div>
+                  )}
 
-                    {/* Past months — collapsible */}
-                    {pastKeys.map((key) => (
-                      <MonthGroup
-                        key={key}
-                        monthKey={key}
-                        claims={groups.get(key)!}
-                        onOpen={openClaim}
-                        prefetch={prefetchClaim}
-                        showEmployee
-                      />
-                    ))}
-                  </>
-                );
-              })()}
-            </div>
-          )}
+                  {pastKeys.map((key) => (
+                    <MonthGroup
+                      key={key}
+                      monthKey={key}
+                      claims={groups.get(key)!}
+                      onOpen={openClaim}
+                      prefetch={prefetchClaim}
+                    />
+                  ))}
+
+                  {curMonthClaims.length === 0 && pastKeys.length === 0 && (
+                    <p className="px-6 py-10 text-center text-sm text-gray-400">No claims this month.</p>
+                  )}
+                </>
+              );
+            })()}
+          </div>
         </div>
       )}
 
-      {/* My Claims — summary stats */}
-      {(() => {
-        const curKey  = currentMonthKeyFn();
-        const fyStart = getFYStart();
-        const all     = myClaims ?? [];
-        const thisMonthList = all.filter((c: any) => claimMonthKey(c) === curKey);
-        const fyList        = all.filter((c: any) => new Date(c.createdAt) >= fyStart);
-        const pendingList   = all.filter((c: any) => c.status === "SUBMITTED");
-        const approvedList  = all.filter((c: any) => c.status === "APPROVED" || c.status === "PAID");
-        return (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="rounded-xl border border-gray-200 bg-white p-4">
-              <p className="text-xs text-gray-500 mb-1">This Month</p>
-              <p className="text-xl font-bold text-gray-900">{formatCurrency(thisMonthList.reduce((s: number, c: any) => s + c.claimedAmount, 0))}</p>
-              <p className="text-xs text-gray-400 mt-0.5">{thisMonthList.length} claim{thisMonthList.length !== 1 ? "s" : ""}</p>
-            </div>
-            <div className="rounded-xl border border-gray-200 bg-white p-4">
-              <p className="text-xs text-gray-500 mb-1">This FY (Apr–Mar)</p>
-              <p className="text-xl font-bold text-gray-900">{formatCurrency(fyList.reduce((s: number, c: any) => s + c.claimedAmount, 0))}</p>
-              <p className="text-xs text-gray-400 mt-0.5">{fyList.length} claim{fyList.length !== 1 ? "s" : ""}</p>
-            </div>
-            <div className="rounded-xl border border-gray-200 bg-white p-4">
-              <p className="text-xs text-gray-500 mb-1">Pending Approval</p>
-              <p className="text-xl font-bold text-amber-600">{pendingList.length}</p>
-              <p className="text-xs text-gray-400 mt-0.5">
-                {pendingList.length > 0 ? formatCurrency(pendingList.reduce((s: number, c: any) => s + c.claimedAmount, 0)) : "—"}
-              </p>
-            </div>
-            <div className="rounded-xl border border-gray-200 bg-white p-4">
-              <p className="text-xs text-gray-500 mb-1">Total Approved</p>
-              <p className="text-xl font-bold text-green-700">{formatCurrency(approvedList.reduce((s: number, c: any) => s + (c.approvedAmount ?? c.claimedAmount), 0))}</p>
-              <p className="text-xs text-gray-400 mt-0.5">{approvedList.length} claim{approvedList.length !== 1 ? "s" : ""}</p>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* My Claims — grouped by month */}
-      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-100">
-          <h2 className="font-semibold text-gray-900">My Claims</h2>
-        </div>
-
-        {!myClaims?.length ? (
-          <p className="px-6 py-10 text-center text-sm text-gray-400">No claims yet. Click <strong>+ New Claim</strong> to get started.</p>
-        ) : (() => {
-          const curKey = currentMonthKeyFn();
-          const groups = new Map<string, any[]>();
-          for (const claim of myClaims) {
-            const key = claimMonthKey(claim);
-            if (!groups.has(key)) groups.set(key, []);
-            groups.get(key)!.push(claim);
-          }
-          const sortedKeys       = [...groups.keys()].sort((a, b) => b.localeCompare(a));
-          const curMonthClaims   = groups.get(curKey) ?? [];
-          const pastKeys         = sortedKeys.filter((k) => k !== curKey);
-          const curMonthTotal    = curMonthClaims.reduce((s, c: any) => s + c.claimedAmount, 0);
-
-          return (
-            <>
-              {/* Current month — always expanded */}
-              {curMonthClaims.length > 0 && (
-                <div>
-                  <div className="px-6 py-2.5 bg-blue-50 border-b border-blue-100 flex items-center justify-between">
-                    <span className="text-xs font-semibold text-blue-700 uppercase tracking-wide">
-                      {monthLabel(curKey)} · Current
+      {/* ── Team Claims Tab ── */}
+      {activeTab === "team" && isAdmin && (
+        <div className="space-y-4">
+          {/* Sub-tabs */}
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="flex items-center gap-1 px-5 py-0 border-b border-gray-100">
+              {(["pending", "all"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setTeamSubTab(tab)}
+                  className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                    teamSubTab === tab
+                      ? "border-[#2C3E7C] text-[#2C3E7C]"
+                      : "border-transparent text-gray-500 hover:text-gray-800"
+                  }`}
+                >
+                  {tab === "pending" ? (
+                    <span className="flex items-center gap-1.5">
+                      Pending Approvals
+                      {pendingCount > 0 && (
+                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold text-white" style={{ backgroundColor: "#F2994A" }}>
+                          {pendingCount}
+                        </span>
+                      )}
                     </span>
-                    <span className="text-sm font-semibold text-blue-800">{formatCurrency(curMonthTotal)} claimed</span>
-                  </div>
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-gray-100 bg-gray-50">
-                        {["Claim #", "Type", "Title", "Amount", "Status", "Date", "Docs", "Action"].map((h) => (
-                          <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {curMonthClaims.map((claim: any) => (
-                        <tr key={claim.id} onMouseEnter={() => prefetchClaim(claim.id)} className="hover:bg-gray-50">
-                          <td className="px-5 py-4 text-xs font-mono text-gray-400">{claim.claimNumber}</td>
-                          <td className="px-5 py-4 text-xs text-gray-500">{claim.claimType}</td>
-                          <td className="px-5 py-4 text-sm text-gray-800 max-w-xs truncate">{claim.title}</td>
-                          <td className="px-5 py-4 text-sm font-semibold text-gray-900">{formatCurrency(claim.claimedAmount)}</td>
-                          <td className="px-5 py-4"><Badge status={claim.status} /></td>
-                          <td className="px-5 py-4 text-xs text-gray-400">{formatDate(claim.createdAt)}</td>
-                          <td className="px-5 py-4">
-                            {claim.receipts?.length > 0
-                              ? <span className="inline-flex items-center gap-1 text-xs text-blue-600"><Paperclip className="h-3 w-3" />{claim.receipts.length}</span>
-                              : <span className="text-xs text-gray-300">—</span>}
-                          </td>
-                          <td className="px-5 py-4">
-                            <button onClick={() => openClaim(claim.id)} className="text-xs text-blue-600 hover:underline font-medium">
-                              {claim.status === "DRAFT" ? "Manage →" : "View →"}
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {/* Past months — collapsible */}
-              {pastKeys.map((key) => (
-                <MonthGroup
-                  key={key}
-                  monthKey={key}
-                  claims={groups.get(key)!}
-                  onOpen={openClaim}
-                  prefetch={prefetchClaim}
-                />
+                  ) : "All Claims"}
+                </button>
               ))}
+            </div>
 
-              {curMonthClaims.length === 0 && pastKeys.length === 0 && (
-                <p className="px-6 py-10 text-center text-sm text-gray-400">No claims this month.</p>
-              )}
-            </>
-          );
-        })()}
-      </div>
+            {/* Pending sub-tab */}
+            {teamSubTab === "pending" && (
+              <div className="divide-y divide-gray-50">
+                {!pendingClaims?.length ? (
+                  <p className="px-6 py-10 text-sm text-center text-gray-400">No claims pending approval.</p>
+                ) : (
+                  pendingClaims.map((claim: any) => (
+                    <div key={claim.id} onMouseEnter={() => prefetchClaim(claim.id)} className="px-5 py-4 flex items-center gap-4 hover:bg-gray-50">
+                      {/* Employee avatar */}
+                      <div
+                        className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-semibold shrink-0"
+                        style={{ backgroundColor: "#2C3E7C" }}
+                      >
+                        {`${claim.employee?.firstName?.[0] ?? ""}${claim.employee?.lastName?.[0] ?? ""}`.toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-semibold text-gray-900">
+                            {claim.employee?.firstName} {claim.employee?.lastName}
+                          </span>
+                          <span className="text-xs text-gray-400">{claim.employee?.department?.name}</span>
+                          <span className="text-xs font-mono text-gray-400">{claim.claimNumber}</span>
+                        </div>
+                        <p className="text-sm text-gray-600 mt-0.5">{claim.title}</p>
+                        <div className="flex items-center gap-3 mt-1 flex-wrap">
+                          <span className="text-xs text-gray-500">{claim.claimType}</span>
+                          <span className="text-sm font-semibold text-gray-900">{formatCurrency(claim.claimedAmount)}</span>
+                          <span className="text-xs text-gray-400">{formatDate(claim.createdAt)}</span>
+                          {claim.receipts?.length > 0 && (
+                            <span className="inline-flex items-center gap-1 text-xs" style={{ color: "#2C3E7C" }}>
+                              <Paperclip className="h-3 w-3" />{claim.receipts.length} doc{claim.receipts.length > 1 ? "s" : ""}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setReviewClaimId(claim.id)}
+                        className="shrink-0 inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+                        style={{ backgroundColor: "#2C3E7C" }}
+                      >
+                        Review <ChevronRight size={14} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            {/* All Claims sub-tab */}
+            {teamSubTab === "all" && (
+              <div>
+                {!allClaims?.length ? (
+                  <p className="px-6 py-10 text-sm text-center text-gray-400">No claims found.</p>
+                ) : (() => {
+                  const groups = new Map<string, any[]>();
+                  for (const claim of allClaims) {
+                    const key = claimMonthKey(claim);
+                    if (!groups.has(key)) groups.set(key, []);
+                    groups.get(key)!.push(claim);
+                  }
+                  const sortedKeys     = [...groups.keys()].sort((a, b) => b.localeCompare(a));
+                  const curMonthClaims = groups.get(curKey) ?? [];
+                  const pastKeys       = sortedKeys.filter((k) => k !== curKey);
+
+                  return (
+                    <>
+                      {curMonthClaims.length > 0 && (
+                        <div>
+                          <div className="px-6 py-2.5 border-b flex items-center justify-between" style={{ backgroundColor: "#EEF1F8" }}>
+                            <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#2C3E7C" }}>
+                              {monthLabel(curKey)} · Current
+                            </span>
+                            <span className="text-sm font-semibold" style={{ color: "#2C3E7C" }}>
+                              {formatCurrency(curMonthClaims.reduce((s: number, c: any) => s + c.claimedAmount, 0))} claimed
+                            </span>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full">
+                              <thead>
+                                <tr className="border-b border-gray-100 bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
+                                  <th className="px-5 py-3">Employee</th>
+                                  <th className="px-5 py-3">Claim #</th>
+                                  <th className="px-5 py-3">Type</th>
+                                  <th className="px-5 py-3">Title</th>
+                                  <th className="px-5 py-3">Amount</th>
+                                  <th className="px-5 py-3">Status</th>
+                                  <th className="px-5 py-3">Date</th>
+                                  <th className="px-5 py-3"></th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-50">
+                                {curMonthClaims.map((claim: any) => (
+                                  <tr key={claim.id} onMouseEnter={() => prefetchClaim(claim.id)} className="hover:bg-gray-50">
+                                    <td className="px-5 py-3 text-sm font-medium text-gray-800">{claim.employee?.firstName} {claim.employee?.lastName}</td>
+                                    <td className="px-5 py-3 text-xs font-mono text-gray-400">{claim.claimNumber}</td>
+                                    <td className="px-5 py-3 text-xs text-gray-500">{claim.claimType}</td>
+                                    <td className="px-5 py-3 text-sm text-gray-800 max-w-xs truncate">{claim.title}</td>
+                                    <td className="px-5 py-3 text-sm font-semibold">{formatCurrency(claim.claimedAmount)}</td>
+                                    <td className="px-5 py-3"><Badge status={claim.status} /></td>
+                                    <td className="px-5 py-3 text-xs text-gray-400">{formatDate(claim.createdAt)}</td>
+                                    <td className="px-5 py-3">
+                                      <button onClick={() => openClaim(claim.id)} className="text-xs font-medium hover:underline" style={{ color: "#2C3E7C" }}>View</button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {pastKeys.map((key) => (
+                        <MonthGroup
+                          key={key}
+                          monthKey={key}
+                          claims={groups.get(key)!}
+                          onOpen={openClaim}
+                          prefetch={prefetchClaim}
+                          showEmployee
+                        />
+                      ))}
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Modals */}
       {showNewClaim && (
@@ -1045,6 +1525,13 @@ export default function ClaimsPage() {
           claimId={selectedClaimId}
           isAdmin={isAdmin}
           onClose={() => setSelectedClaimId(null)}
+        />
+      )}
+
+      {reviewClaimId && (
+        <ClaimApprovalModal
+          claimId={reviewClaimId}
+          onClose={() => setReviewClaimId(null)}
         />
       )}
     </div>

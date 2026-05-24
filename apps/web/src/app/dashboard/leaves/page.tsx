@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuthStore } from "@/store/auth";
-import { CalendarDays, Plus, Paperclip, XCircle, ChevronRight, ChevronDown, Clock, AlertTriangle, X, FileText, CheckCircle2, Users } from "lucide-react";
+import { CalendarDays, Plus, Paperclip, XCircle, ChevronRight, ChevronDown, Clock, AlertTriangle, X, FileText, CheckCircle2, Users, Trash2, Heart, Calendar } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -113,6 +113,629 @@ function workingDaysBetween(from: Date, to: Date) {
     cur.setDate(cur.getDate() + 1);
   }
   return count;
+}
+
+// ── Holiday Calendar Modal ────────────────────────────────────────────────────
+
+interface HolidayEntry {
+  id: string;
+  name: string;
+  fromDate: string;
+  toDate: string;
+  year: number;
+  numberOfDays: number;
+  description?: string | null;
+}
+
+function HolidayCalendarModal({ onClose }: { onClose: () => void }) {
+  const { user } = useAuthStore();
+  const queryClient = useQueryClient();
+  const isAdmin = user?.role === "SUPER_ADMIN" || user?.role === "HR_ADMIN";
+  const currentYear = new Date().getFullYear();
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addForm, setAddForm] = useState({ name: "", fromDate: "", toDate: "" });
+
+  const { data: holidays = [], isLoading } = useQuery<HolidayEntry[]>({
+    queryKey: ["holidays", selectedYear],
+    queryFn: () => api.get(`/api/v1/holidays?year=${selectedYear}`).then((r) => r.data.data),
+  });
+
+  const createMut = useMutation({
+    mutationFn: (body: object) => api.post("/api/v1/holidays", body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["holidays", selectedYear] });
+      setShowAddForm(false);
+      setAddForm({ name: "", fromDate: "", toDate: "" });
+      toast.success("Holiday added");
+    },
+    onError: () => toast.error("Failed to add holiday"),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => api.delete(`/api/v1/holidays/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["holidays", selectedYear] });
+      toast.success("Holiday deleted");
+    },
+    onError: () => toast.error("Failed to delete holiday"),
+  });
+
+  function handleAdd() {
+    if (!addForm.name.trim() || !addForm.fromDate || !addForm.toDate) {
+      toast.error("Please fill all fields");
+      return;
+    }
+    createMut.mutate({
+      name: addForm.name,
+      fromDate: new Date(addForm.fromDate).toISOString(),
+      toDate: new Date(addForm.toDate).toISOString(),
+    });
+  }
+
+  const years = [currentYear - 1, currentYear, currentYear + 1];
+  const totalDays = holidays.reduce((s, h) => s + h.numberOfDays, 0);
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">Holiday Calendar</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              {isAdmin ? "Manage official holidays for the year." : "View official holidays for the year."}
+            </p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+            <X size={20} className="text-gray-500" />
+          </button>
+        </div>
+
+        {/* Year selector + admin actions */}
+        <div className="p-6 border-b border-gray-200 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex gap-2">
+              {years.map((yr) => (
+                <button
+                  key={yr}
+                  onClick={() => setSelectedYear(yr)}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    selectedYear === yr ? "text-white" : "text-gray-700 bg-gray-100 hover:bg-gray-200"
+                  }`}
+                  style={selectedYear === yr ? { backgroundColor: "#2C3E7C" } : {}}
+                >
+                  {yr}
+                </button>
+              ))}
+            </div>
+            {isAdmin && (
+              <button
+                onClick={() => setShowAddForm(!showAddForm)}
+                className="px-4 py-2 rounded-md text-sm font-medium text-white flex items-center gap-2"
+                style={{ backgroundColor: "#2C3E7C" }}
+              >
+                <Plus size={18} />
+                Add Holiday
+              </button>
+            )}
+          </div>
+
+          {showAddForm && (
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
+              <h4 className="text-sm font-semibold text-gray-900">New Holiday</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <input
+                  placeholder="Holiday name"
+                  value={addForm.name}
+                  onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
+                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 bg-white"
+                />
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">From Date</label>
+                  <input
+                    type="date"
+                    value={addForm.fromDate}
+                    onChange={(e) => setAddForm({ ...addForm, fromDate: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">To Date</label>
+                  <input
+                    type="date"
+                    value={addForm.toDate}
+                    min={addForm.fromDate}
+                    onChange={(e) => setAddForm({ ...addForm, toDate: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 bg-white"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleAdd}
+                  disabled={createMut.isPending}
+                  className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50"
+                  style={{ backgroundColor: "#2C3E7C" }}
+                >
+                  {createMut.isPending ? "Adding…" : "Add Holiday"}
+                </button>
+                <button
+                  onClick={() => setShowAddForm(false)}
+                  className="px-4 py-2 border border-gray-200 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Holiday list */}
+        <div className="p-6">
+          <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+            <div className="px-6 py-4" style={{ backgroundColor: "#2C3E7C" }}>
+              <h3 className="text-base font-semibold text-white text-center uppercase tracking-wide">
+                Employees' Holiday List — {selectedYear}
+              </h3>
+            </div>
+
+            {isLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <div className="animate-spin h-6 w-6 border-2 border-blue-500 border-t-transparent rounded-full" />
+              </div>
+            ) : holidays.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Holiday</th>
+                      <th className="px-6 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider border-l border-gray-200">From</th>
+                      <th className="px-6 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider border-l border-gray-200">To</th>
+                      <th className="px-6 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider border-l border-gray-200">Days</th>
+                      {isAdmin && (
+                        <th className="px-6 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider border-l border-gray-200">Actions</th>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {holidays.map((h) => (
+                      <tr key={h.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 text-sm font-medium text-gray-900">{h.name}</td>
+                        <td className="px-6 py-4 border-l border-gray-200 text-sm text-gray-700 text-center">
+                          {new Date(h.fromDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                          <span className="text-gray-400 ml-1.5">
+                            {new Date(h.fromDate).toLocaleDateString("en-IN", { weekday: "short" })}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 border-l border-gray-200 text-sm text-gray-700 text-center">
+                          {new Date(h.toDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                          <span className="text-gray-400 ml-1.5">
+                            {new Date(h.toDate).toLocaleDateString("en-IN", { weekday: "short" })}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 border-l border-gray-200 text-sm text-gray-900 text-center font-medium">
+                          {h.numberOfDays}
+                        </td>
+                        {isAdmin && (
+                          <td className="px-6 py-4 border-l border-gray-200 text-center">
+                            <button
+                              onClick={() => deleteMut.mutate(h.id)}
+                              disabled={deleteMut.isPending}
+                              className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-red-600 disabled:opacity-50"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="p-12 text-center">
+                <CalendarDays className="mx-auto text-gray-300 mb-4" size={48} />
+                <p className="text-base font-medium text-gray-900 mb-1">No holidays for {selectedYear}</p>
+                {isAdmin && <p className="text-sm text-gray-500">Use "Add Holiday" to declare the first one.</p>}
+              </div>
+            )}
+          </div>
+
+          {holidays.length > 0 && (
+            <div className="mt-4 flex items-center justify-between px-1">
+              <p className="text-sm text-gray-600">Total Holidays: <span className="font-semibold text-gray-900">{holidays.length}</span></p>
+              <p className="text-sm text-gray-600">Total Days: <span className="font-semibold text-gray-900">{totalDays}</span></p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end p-6 border-t border-gray-200 bg-gray-50">
+          <button onClick={onClose} className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 bg-white">
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Apply Leave Modal ─────────────────────────────────────────────────────────
+
+function ApplyLeaveModal({ balances, onClose }: { balances: LeaveBalance[]; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <h2 className="text-xl font-semibold text-gray-900">Apply for Leave</h2>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+            <X size={20} className="text-gray-500" />
+          </button>
+        </div>
+        <div className="p-6">
+          <ApplyForm balances={balances} onSuccess={onClose} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Review Leave Modal ────────────────────────────────────────────────────────
+
+function ReviewLeaveModal({
+  leave,
+  onClose,
+  onDecide,
+  isPending: decisionPending,
+}: {
+  leave: PendingLeave;
+  onClose: () => void;
+  onDecide: (id: string, action: "APPROVED" | "REJECTED", lopDays?: number, note?: string) => void;
+  isPending: boolean;
+}) {
+  const [decision, setDecision] = useState<"approve" | "reject" | null>(null);
+  const [comments, setComments] = useState("");
+  const [lopEnabled, setLopEnabled] = useState(false);
+  const [lopDays, setLopDays] = useState(leave.totalDays);
+
+  function handleSubmit() {
+    if (!decision) return;
+    if (!comments.trim()) { toast.error("Manager notes are required"); return; }
+    if (decision === "approve") {
+      onDecide(leave.id, "APPROVED", lopEnabled ? lopDays : 0, comments);
+    } else {
+      onDecide(leave.id, "REJECTED", 0, comments);
+    }
+    onClose();
+  }
+
+  const initials = `${leave.employee.firstName[0]}${leave.employee.lastName[0]}`;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <h2 className="text-xl font-semibold text-gray-900">Review Leave Request</h2>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+            <X size={20} className="text-gray-500" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {/* Employee */}
+          <div className="bg-gray-50 rounded-lg p-4 flex items-center gap-3">
+            <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold shrink-0"
+              style={{ backgroundColor: "#2C3E7C" }}>
+              {initials}
+            </div>
+            <div>
+              <p className="font-semibold text-gray-900">{leave.employee.firstName} {leave.employee.lastName}</p>
+              <p className="text-sm text-gray-500">{leave.employee.department.name}</p>
+            </div>
+          </div>
+
+          {/* Leave details grid */}
+          <div className="grid grid-cols-2 gap-4">
+            {[
+              { label: "Leave Type", value: LEAVE_LABEL[leave.leaveType] ?? leave.leaveType },
+              { label: "Duration", value: `${leave.totalDays} ${leave.totalDays === 1 ? "day" : "days"}` },
+              { label: "From Date", value: fmtShort(leave.fromDate) },
+              { label: "To Date", value: fmtShort(leave.toDate) },
+            ].map(({ label, value }) => (
+              <div key={label} className="bg-white border border-gray-200 rounded-lg p-4">
+                <p className="text-xs text-gray-500 mb-1">{label}</p>
+                <p className="text-sm font-medium text-gray-900">{value}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Reason */}
+          <div>
+            <p className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+              <FileText size={15} /> Reason
+            </p>
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+              <p className="text-sm text-gray-700">{leave.reason}</p>
+            </div>
+          </div>
+
+          {leave.documentUrl && (
+            <a href={`${API_BASE}${leave.documentUrl}`} target="_blank" rel="noopener noreferrer"
+              className="flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700 hover:bg-blue-100 transition-colors">
+              <FileText size={16} /> View attached document
+            </a>
+          )}
+
+          {/* Decision buttons */}
+          <div>
+            <p className="text-sm font-medium text-gray-700 mb-3">Your Decision</p>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => setDecision("approve")}
+                className={`p-4 rounded-lg border-2 transition-all flex items-center gap-3 ${
+                  decision === "approve" ? "border-green-500 bg-green-50" : "border-gray-200 hover:border-green-300"
+                }`}
+              >
+                <CheckCircle2 size={24} className={decision === "approve" ? "text-green-600" : "text-gray-400"} />
+                <div className="text-left">
+                  <p className={`text-sm font-medium ${decision === "approve" ? "text-green-900" : "text-gray-700"}`}>Approve</p>
+                  <p className="text-xs text-gray-500">Grant leave request</p>
+                </div>
+              </button>
+              <button
+                onClick={() => setDecision("reject")}
+                className={`p-4 rounded-lg border-2 transition-all flex items-center gap-3 ${
+                  decision === "reject" ? "border-red-500 bg-red-50" : "border-gray-200 hover:border-red-300"
+                }`}
+              >
+                <XCircle size={24} className={decision === "reject" ? "text-red-600" : "text-gray-400"} />
+                <div className="text-left">
+                  <p className={`text-sm font-medium ${decision === "reject" ? "text-red-900" : "text-gray-700"}`}>Reject</p>
+                  <p className="text-xs text-gray-500">Decline request</p>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* LOP toggle when approving */}
+          {decision === "approve" && (
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 space-y-3">
+              <label className="flex items-center gap-3 cursor-pointer select-none">
+                <div
+                  onClick={() => setLopEnabled((e) => !e)}
+                  className={`w-9 h-5 rounded-full relative transition-colors ${lopEnabled ? "bg-rose-500" : "bg-gray-300"}`}
+                >
+                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${lopEnabled ? "translate-x-4" : "translate-x-0.5"}`} />
+                </div>
+                <span className="text-sm text-gray-700">Approve with <span className="font-semibold text-rose-600">Loss of Pay</span></span>
+              </label>
+              {lopEnabled && (
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-gray-600">LoP days:</span>
+                  <input
+                    type="number" min={0.5} max={leave.totalDays} step={0.5}
+                    value={lopDays}
+                    onChange={(e) => setLopDays(Math.min(leave.totalDays, Math.max(0, parseFloat(e.target.value) || 0)))}
+                    className="w-20 border border-rose-200 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-rose-400 bg-white"
+                  />
+                  <span className="text-xs text-gray-400">of {leave.totalDays} total days</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Manager notes */}
+          <div>
+            <p className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+              <FileText size={15} /> Manager Notes <span className="text-red-600">*</span>
+              <span className="text-xs text-gray-500 font-normal">(Required for record purposes)</span>
+            </p>
+            <textarea
+              placeholder={
+                decision === "approve" ? "Add notes for approval record…" :
+                decision === "reject" ? "Please provide a clear reason for rejection…" :
+                "Make a decision above to add notes"
+              }
+              value={comments}
+              onChange={(e) => setComments(e.target.value)}
+              rows={3}
+              disabled={!decision}
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 resize-none disabled:bg-gray-50 disabled:text-gray-400"
+            />
+          </div>
+
+          {decision === "reject" && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-2">
+              <AlertTriangle size={18} className="text-red-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-red-900">This action will notify the employee</p>
+                <p className="text-xs text-red-700 mt-1">Please provide a clear reason so the employee understands your decision.</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200">
+          <button onClick={onClose} className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={!decision || !comments.trim() || decisionPending}
+            className={`px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 transition-colors ${
+              decision === "approve" ? "bg-green-600 hover:bg-green-700" :
+              decision === "reject" ? "bg-red-600 hover:bg-red-700" :
+              "bg-gray-300 cursor-not-allowed"
+            }`}
+          >
+            {decisionPending ? "Saving…" :
+              decision === "approve" ? "Approve Leave" :
+              decision === "reject" ? "Reject Leave" :
+              "Submit Decision"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── LOP Approval Modal ────────────────────────────────────────────────────────
+
+function LOPApprovalModal({
+  leave,
+  onClose,
+  onDecide,
+  isPending: decisionPending,
+}: {
+  leave: PendingLeave;
+  onClose: () => void;
+  onDecide: (id: string, action: "APPROVED" | "REJECTED", lopDays?: number, note?: string) => void;
+  isPending: boolean;
+}) {
+  const [decision, setDecision] = useState<"approve" | "waive" | null>(null);
+  const [notes, setNotes] = useState("");
+
+  function handleSubmit() {
+    if (!decision || !notes.trim()) { toast.error("Notes are required"); return; }
+    onDecide(leave.id, "APPROVED", decision === "approve" ? leave.totalDays : 0, notes);
+    onClose();
+  }
+
+  const initials = `${leave.employee.firstName[0]}${leave.employee.lastName[0]}`;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-red-50">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">Loss of Pay Review</h2>
+            <p className="text-sm text-gray-600 mt-1">Handle with care — this impacts employee compensation</p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-red-100 rounded-lg transition-colors">
+            <X size={20} className="text-gray-500" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {/* Employee */}
+          <div className="bg-gray-50 rounded-lg p-4 flex items-center gap-3">
+            <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold shrink-0"
+              style={{ backgroundColor: "#2C3E7C" }}>
+              {initials}
+            </div>
+            <div>
+              <p className="font-semibold text-gray-900">{leave.employee.firstName} {leave.employee.lastName}</p>
+              <p className="text-sm text-gray-500">{leave.employee.department.name}</p>
+            </div>
+          </div>
+
+          {/* LOP details */}
+          <div className="bg-red-50 border-2 border-red-200 rounded-lg p-5">
+            <div className="flex items-start gap-3 mb-4">
+              <AlertTriangle className="text-red-600 shrink-0" size={24} />
+              <div>
+                <h3 className="text-base font-semibold text-red-900 mb-1">Loss of Pay Triggered</h3>
+                <p className="text-sm text-red-700">{leave.reason}</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-white rounded-lg p-3">
+                <p className="text-xs text-gray-500 mb-1">LOP Days</p>
+                <p className="text-2xl font-bold text-red-600">{leave.totalDays} {leave.totalDays === 1 ? "day" : "days"}</p>
+              </div>
+              <div className="bg-white rounded-lg p-3">
+                <p className="text-xs text-gray-500 mb-1">Period</p>
+                <p className="text-sm font-semibold text-gray-900">
+                  {fmtShort(leave.fromDate)}{leave.fromDate !== leave.toDate ? ` – ${fmtShort(leave.toDate)}` : ""}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Decision */}
+          <div>
+            <p className="text-sm font-medium text-gray-700 mb-3">Your Decision</p>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => setDecision("approve")}
+                className={`p-4 rounded-lg border-2 transition-all ${decision === "approve" ? "border-red-500 bg-red-50" : "border-gray-200 hover:border-red-300"}`}
+              >
+                <div className="flex items-start gap-3">
+                  <AlertTriangle size={24} className={decision === "approve" ? "text-red-600" : "text-gray-400"} />
+                  <div className="text-left">
+                    <p className={`text-sm font-medium ${decision === "approve" ? "text-red-900" : "text-gray-700"}`}>Approve LOP</p>
+                    <p className="text-xs text-gray-500 mt-1">Deduct from salary</p>
+                  </div>
+                </div>
+              </button>
+              <button
+                onClick={() => setDecision("waive")}
+                className={`p-4 rounded-lg border-2 transition-all ${decision === "waive" ? "border-green-500 bg-green-50" : "border-gray-200 hover:border-green-300"}`}
+              >
+                <div className="flex items-start gap-3">
+                  <Heart size={24} className={decision === "waive" ? "text-green-600" : "text-gray-400"} />
+                  <div className="text-left">
+                    <p className={`text-sm font-medium ${decision === "waive" ? "text-green-900" : "text-gray-700"}`}>Waive LOP</p>
+                    <p className="text-xs text-gray-500 mt-1">Excuse absence, no deduction</p>
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <p className="text-sm font-medium text-gray-700 mb-2">Manager Notes <span className="text-red-600">*</span></p>
+            <textarea
+              placeholder={
+                decision === "waive"
+                  ? "Justification for waiving LOP (e.g., exceptional circumstances, medical emergency)…"
+                  : "Add notes for record keeping…"
+              }
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={4}
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 resize-none"
+            />
+          </div>
+
+          {decision === "approve" && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-2">
+              <AlertTriangle size={18} className="text-red-600 shrink-0 mt-0.5" />
+              <p className="text-sm text-red-700">This will impact the employee's next salary. The deduction will be processed in the upcoming payroll cycle.</p>
+            </div>
+          )}
+          {decision === "waive" && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-2">
+              <Heart size={18} className="text-green-600 shrink-0 mt-0.5" />
+              <p className="text-sm text-green-700">Waiving LOP shows understanding and support during difficult times. The employee will be notified.</p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between p-6 border-t border-gray-200 bg-gray-50">
+          <p className="text-xs text-gray-500 max-w-xs">This decision will be recorded in the employee's file and reviewed during performance evaluations.</p>
+          <div className="flex gap-3">
+            <button onClick={onClose} className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
+            <button
+              onClick={handleSubmit}
+              disabled={!decision || !notes.trim() || decisionPending}
+              className={`px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 transition-colors ${
+                decision === "approve" ? "bg-red-600 hover:bg-red-700" :
+                decision === "waive" ? "bg-green-600 hover:bg-green-700" :
+                "bg-gray-300 cursor-not-allowed"
+              }`}
+            >
+              {decisionPending ? "Saving…" :
+                decision === "approve" ? "Confirm LOP" :
+                decision === "waive" ? "Waive LOP" :
+                "Submit Decision"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Leave Balance Cards ────────────────────────────────────────────────────────
@@ -841,6 +1464,163 @@ function PolicySnapshot({ balances }: { balances: LeaveBalance[] }) {
   );
 }
 
+// ── Pending Approvals (Team Leaves tab) ──────────────────────────────────────
+
+function PendingApprovalsPanel() {
+  const { user } = useAuthStore();
+  const queryClient = useQueryClient();
+  const isApprover = user?.role !== "EMPLOYEE";
+  const [reviewLeave, setReviewLeave] = useState<PendingLeave | null>(null);
+  const [lopLeave, setLopLeave] = useState<PendingLeave | null>(null);
+
+  const { data: pending = [], isLoading } = useQuery<PendingLeave[]>({
+    queryKey: ["pending-leaves"],
+    queryFn: () => api.get("/api/v1/leaves/pending").then((r) => r.data.data),
+    enabled: isApprover,
+  });
+
+  const decisionMut = useMutation({
+    mutationFn: ({ id, action, lopDays, note }: { id: string; action: string; lopDays?: number; note?: string }) =>
+      api.patch(`/api/v1/leaves/${id}/decision`, { action, lopDays, note }),
+    onSuccess: (_data, variables) => {
+      const isLop = (variables.lopDays ?? 0) > 0;
+      toast.success(isLop ? `Approved with ${variables.lopDays} LoP day${variables.lopDays !== 1 ? "s" : ""}` : "Decision recorded");
+      queryClient.invalidateQueries({ queryKey: ["pending-leaves"] });
+      queryClient.invalidateQueries({ queryKey: ["decided-leaves"] });
+      queryClient.invalidateQueries({ queryKey: ["my-leaves"] });
+      queryClient.invalidateQueries({ queryKey: ["my-leave-balances"] });
+    },
+    onError: () => toast.error("Failed to record decision"),
+  });
+
+  if (!isApprover) return null;
+
+  function handleDecide(id: string, action: "APPROVED" | "REJECTED", lopDays?: number, note?: string) {
+    decisionMut.mutate({ id, action, lopDays, note });
+  }
+
+  // Separate unpaid/overdrawn leaves for LOP section
+  const regularLeaves = pending.filter((l) => l.leaveType !== "UNPAID");
+  const lopLeaves = pending.filter((l) => l.leaveType === "UNPAID");
+
+  return (
+    <>
+      {/* Pending Approvals */}
+      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+        <div className="flex items-center justify-between p-5 border-b border-gray-200">
+          <div className="flex items-center gap-2">
+            <Clock className="text-orange-500" size={20} />
+            <h3 className="text-base font-semibold text-gray-900">Pending Approvals</h3>
+            {pending.length > 0 && (
+              <span className="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full font-medium">{pending.length}</span>
+            )}
+          </div>
+        </div>
+
+        {isLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin h-5 w-5 border-2 border-orange-400 border-t-transparent rounded-full" />
+          </div>
+        ) : regularLeaves.length === 0 ? (
+          <div className="p-12 text-center">
+            <Clock className="mx-auto text-gray-300 mb-4" size={48} />
+            <p className="text-sm text-gray-500">No pending approvals at this time.</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {regularLeaves.map((leave) => (
+              <div key={leave.id} className="p-5 hover:bg-gray-50 transition-colors">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="font-medium text-gray-900">{leave.employee.firstName} {leave.employee.lastName}</p>
+                      <span className="text-xs text-gray-400">{leave.employee.department.name}</span>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-1">
+                      <span className="font-medium">{LEAVE_LABEL[leave.leaveType] ?? leave.leaveType}</span>
+                      {" · "}{leave.totalDays} {leave.totalDays === 1 ? "day" : "days"}
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      {fmtShort(leave.fromDate)}{leave.fromDate !== leave.toDate ? ` – ${fmtShort(leave.toDate)}` : ""}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1 truncate">{leave.reason}</p>
+                  </div>
+                  <button
+                    onClick={() => setReviewLeave(leave)}
+                    className="px-4 py-2 rounded-md text-sm font-medium text-white whitespace-nowrap shrink-0"
+                    style={{ backgroundColor: "#2C3E7C" }}
+                  >
+                    Review
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* LOP Approvals — only shown when UNPAID type leaves exist */}
+      {lopLeaves.length > 0 && (
+        <div className="bg-white rounded-lg border border-red-200 overflow-hidden">
+          <div className="p-5 bg-red-50 border-b border-red-200">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="text-red-600" size={20} />
+              <h3 className="text-base font-semibold text-gray-900">Loss of Pay Approvals</h3>
+            </div>
+            <p className="text-sm text-gray-600 mt-1">Review and approve or waive LOP for your team members</p>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {lopLeaves.map((leave) => (
+              <div key={leave.id} className="p-5 hover:bg-gray-50 transition-colors">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="font-medium text-gray-900">{leave.employee.firstName} {leave.employee.lastName}</p>
+                      <span className="text-xs text-gray-400">{leave.employee.department.name}</span>
+                    </div>
+                    <p className="text-sm font-medium text-red-600 mb-1">
+                      {leave.totalDays} {leave.totalDays === 1 ? "day" : "days"} Unpaid Leave
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      {fmtShort(leave.fromDate)}{leave.fromDate !== leave.toDate ? ` – ${fmtShort(leave.toDate)}` : ""}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1 truncate">{leave.reason}</p>
+                  </div>
+                  <button
+                    onClick={() => setLopLeave(leave)}
+                    className="px-4 py-2 rounded-md text-sm font-medium text-white whitespace-nowrap shrink-0"
+                    style={{ backgroundColor: "#2C3E7C" }}
+                  >
+                    Take Action
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Modals */}
+      {reviewLeave && (
+        <ReviewLeaveModal
+          leave={reviewLeave}
+          onClose={() => setReviewLeave(null)}
+          onDecide={handleDecide}
+          isPending={decisionMut.isPending}
+        />
+      )}
+      {lopLeave && (
+        <LOPApprovalModal
+          leave={lopLeave}
+          onClose={() => setLopLeave(null)}
+          onDecide={handleDecide}
+          isPending={decisionMut.isPending}
+        />
+      )}
+    </>
+  );
+}
+
 // ── Decision History (for managers/HR) ───────────────────────────────────────
 
 interface DecidedLeave {
@@ -941,26 +1721,6 @@ function DecisionHistory() {
   );
 }
 
-// ── Manager Section Divider ───────────────────────────────────────────────────
-
-function ManagerSectionDivider() {
-  const { user } = useAuthStore();
-  if (user?.role === "EMPLOYEE") return null;
-
-  return (
-    <div className="relative flex items-center gap-4 py-2">
-      <div className="flex-1 h-px bg-gradient-to-r from-transparent via-purple-200 to-transparent" />
-      <div className="flex items-center gap-2 px-4 py-1.5 bg-purple-50 border border-purple-100 rounded-full shrink-0">
-        <Users className="h-3.5 w-3.5 text-purple-500" />
-        <span className="text-xs font-semibold text-purple-600 uppercase tracking-wider">Leave Management</span>
-      </div>
-      <div className="flex-1 h-px bg-gradient-to-r from-transparent via-purple-200 to-transparent" />
-    </div>
-  );
-}
-
-// ── Pending Approvals (for managers/HR) ───────────────────────────────────────
-
 type PendingLeave = {
   id: string;
   leaveType: string;
@@ -972,250 +1732,16 @@ type PendingLeave = {
   employee: { id: string; firstName: string; lastName: string; department: { name: string } };
 };
 
-function LeaveDecisionRow({
-  leave,
-  onDecide,
-  isPending,
-}: {
-  leave: PendingLeave;
-  onDecide: (id: string, action: "APPROVED" | "REJECTED", lopDays?: number, note?: string) => void;
-  isPending: boolean;
-}) {
-  const [mode, setMode] = useState<"idle" | "approve" | "reject">("idle");
-  const [lopEnabled, setLopEnabled] = useState(false);
-  const [lopDays, setLopDays] = useState<number>(leave.totalDays);
-  const [rejectNote, setRejectNote] = useState("");
-
-  function confirmApprove() {
-    onDecide(leave.id, "APPROVED", lopEnabled ? lopDays : 0);
-    setMode("idle");
-  }
-
-  function confirmReject() {
-    if (!rejectNote.trim()) { toast.error("Please enter a rejection reason"); return; }
-    onDecide(leave.id, "REJECTED", 0, rejectNote);
-    setMode("idle");
-  }
-
-  return (
-    <div className="px-6 py-4">
-      {/* Leave summary row */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-gray-800">
-            {leave.employee.firstName} {leave.employee.lastName}
-            <span className="ml-2 text-xs font-normal text-gray-400">{leave.employee.department.name}</span>
-          </p>
-          <p className="text-xs text-gray-500 mt-0.5">
-            {LEAVE_LABEL[leave.leaveType] ?? leave.leaveType} · {fmtShort(leave.fromDate)}
-            {leave.fromDate !== leave.toDate ? ` – ${fmtShort(leave.toDate)}` : ""}
-            {" "}({leave.totalDays} {leave.totalDays === 1 ? "day" : "days"})
-          </p>
-          <p className="text-xs text-gray-400 mt-0.5 truncate">{leave.reason}</p>
-          {leave.documentUrl && (
-            <a href={`${API_BASE}${leave.documentUrl}`} target="_blank" rel="noopener noreferrer"
-              className="text-xs text-blue-500 hover:underline">View document</a>
-          )}
-        </div>
-        {mode === "idle" && (
-          <div className="flex gap-2 shrink-0">
-            <button
-              onClick={() => setMode("approve")}
-              disabled={isPending}
-              className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-            >Approve</button>
-            <button
-              onClick={() => setMode("reject")}
-              disabled={isPending}
-              className="px-3 py-1.5 text-xs bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50"
-            >Reject</button>
-          </div>
-        )}
-      </div>
-
-      {/* Approve panel */}
-      {mode === "approve" && (
-        <div className="mt-3 rounded-xl border border-green-100 bg-green-50 p-4 space-y-3">
-          <p className="text-xs font-semibold text-green-800">Approve leave for {leave.employee.firstName}?</p>
-
-          {/* LoP toggle */}
-          <label className="flex items-center gap-3 cursor-pointer select-none">
-            <div
-              onClick={() => setLopEnabled((e) => !e)}
-              className={`w-9 h-5 rounded-full relative transition-colors ${lopEnabled ? "bg-rose-500" : "bg-gray-300"}`}
-            >
-              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${lopEnabled ? "translate-x-4" : "translate-x-0.5"}`} />
-            </div>
-            <span className="text-sm text-gray-700">Approve with <span className="font-semibold text-rose-600">Loss of Pay</span></span>
-          </label>
-
-          {/* LoP days input */}
-          {lopEnabled && (
-            <div className="flex items-center gap-3 pl-1">
-              <label className="text-xs text-gray-600 shrink-0">LoP days:</label>
-              <input
-                type="number"
-                min={0.5}
-                max={leave.totalDays}
-                step={0.5}
-                value={lopDays}
-                onChange={(e) => setLopDays(Math.min(leave.totalDays, Math.max(0, parseFloat(e.target.value) || 0)))}
-                className="w-20 border border-rose-200 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-rose-400 bg-white"
-              />
-              <span className="text-xs text-gray-400">of {leave.totalDays} total days</span>
-              {lopDays > 0 && (
-                <span className="text-xs font-medium text-rose-600 bg-rose-50 border border-rose-100 rounded-lg px-2 py-0.5">
-                  {lopDays} day{lopDays !== 1 ? "s" : ""} salary deducted
-                </span>
-              )}
-            </div>
-          )}
-
-          <div className="flex gap-2 pt-1">
-            <button
-              onClick={confirmApprove}
-              disabled={isPending}
-              className={`px-4 py-1.5 text-xs font-semibold rounded-lg text-white disabled:opacity-50 ${lopEnabled ? "bg-rose-600 hover:bg-rose-700" : "bg-green-600 hover:bg-green-700"}`}
-            >
-              {lopEnabled ? `Approve with ${lopDays} LoP day${lopDays !== 1 ? "s" : ""}` : "Approve"}
-            </button>
-            <button onClick={() => setMode("idle")} className="px-4 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50">
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Reject panel */}
-      {mode === "reject" && (
-        <div className="mt-3 rounded-xl border border-red-100 bg-red-50 p-4 space-y-3">
-          <p className="text-xs font-semibold text-red-800">Reason for rejection:</p>
-          <textarea
-            rows={2}
-            value={rejectNote}
-            onChange={(e) => setRejectNote(e.target.value)}
-            placeholder="Enter reason…"
-            className="w-full border border-red-200 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-red-400 bg-white"
-          />
-          <div className="flex gap-2">
-            <button
-              onClick={confirmReject}
-              disabled={isPending}
-              className="px-4 py-1.5 text-xs font-semibold bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
-            >
-              Confirm Reject
-            </button>
-            <button onClick={() => setMode("idle")} className="px-4 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50">
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PendingApprovals() {
-  const { user } = useAuthStore();
-  const queryClient = useQueryClient();
-  const [open, setOpen] = useState(true);
-  const isApprover = user?.role !== "EMPLOYEE";
-
-  const { data: pending = [] } = useQuery<PendingLeave[]>({
-    queryKey: ["pending-leaves"],
-    queryFn: () => api.get("/api/v1/leaves/pending").then((r) => r.data.data),
-    enabled: isApprover,
-  });
-
-  const decisionMut = useMutation({
-    mutationFn: ({ id, action, lopDays, note }: { id: string; action: string; lopDays?: number; note?: string }) =>
-      api.patch(`/api/v1/leaves/${id}/decision`, { action, lopDays, note }),
-    onSuccess: (_data, variables) => {
-      const isLop = (variables.lopDays ?? 0) > 0;
-      toast.success(isLop ? `Approved with ${variables.lopDays} LoP day${variables.lopDays !== 1 ? "s" : ""}` : "Decision recorded");
-      queryClient.invalidateQueries({ queryKey: ["pending-leaves"] });
-      queryClient.invalidateQueries({ queryKey: ["decided-leaves"] });
-      queryClient.invalidateQueries({ queryKey: ["my-leaves"] });
-      queryClient.invalidateQueries({ queryKey: ["my-leave-balances"] });
-    },
-    onError: () => toast.error("Failed to record decision"),
-  });
-
-  if (!isApprover) return null;
-
-  return (
-    <div className="bg-white rounded-2xl border border-orange-100 shadow-sm overflow-hidden">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between px-6 py-4 hover:bg-orange-50/30 transition-colors"
-      >
-        <div className="flex items-center gap-2">
-          <Clock className="h-4 w-4 text-orange-500" />
-          <h2 className="font-semibold text-gray-900">Pending Approvals</h2>
-          {pending.length > 0 && (
-            <span className="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full font-medium">{pending.length}</span>
-          )}
-        </div>
-        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
-      </button>
-
-      {open && (
-        pending.length === 0 ? (
-          <div className="px-6 py-8 text-center text-sm text-gray-400 border-t border-orange-50">
-            No pending approvals at this time.
-          </div>
-        ) : (
-          <div className="border-t border-orange-50 divide-y divide-gray-50">
-            {pending.map((leave) => (
-              <LeaveDecisionRow
-                key={leave.id}
-                leave={leave}
-                onDecide={(id, action, lopDays, note) => decisionMut.mutate({ id, action, lopDays, note })}
-                isPending={decisionMut.isPending}
-              />
-            ))}
-          </div>
-        )
-      )}
-    </div>
-  );
-}
-
-// ── Collapsible Apply wrapper ─────────────────────────────────────────────────
-
-function CollapsibleApplyForm({ balances, onSuccess }: { balances: LeaveBalance[]; onSuccess: () => void }) {
-  const [open, setOpen] = useState(false);
-
-  function handleSuccess() {
-    onSuccess();
-    setOpen(false);
-  }
-
-  return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors"
-      >
-        <div className="flex items-center gap-2">
-          <Plus className="h-4 w-4 text-blue-500" />
-          <h2 className="font-semibold text-gray-900">Apply for Leave</h2>
-        </div>
-        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && (
-        <div className="border-t border-gray-50 p-6">
-          <ApplyForm balances={balances} onSuccess={handleSuccess} />
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function LeavesPage() {
+  const { user } = useAuthStore();
   const queryClient = useQueryClient();
+  const isApprover = user?.role !== "EMPLOYEE";
+
+  const [activeTab, setActiveTab] = useState<"my-leaves" | "team-leaves">("my-leaves");
+  const [showApplyLeave, setShowApplyLeave] = useState(false);
+  const [showHolidayCalendar, setShowHolidayCalendar] = useState(false);
 
   const { data: balancesResp } = useQuery<LeaveBalancesResponse>({
     queryKey: ["my-leave-balances"],
@@ -1244,62 +1770,128 @@ export default function LeavesPage() {
     queryClient.invalidateQueries({ queryKey: ["my-leave-balances"] });
   }
 
+  const tabs = [
+    { id: "my-leaves" as const,   label: "My Leaves",   Icon: CalendarDays },
+    ...(isApprover ? [{ id: "team-leaves" as const, label: "Team Leaves", Icon: Users }] : []),
+  ];
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-6 py-8">
-
-        {/* Header */}
-        <div className="flex items-start justify-between mb-6">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-blue-600 mb-1">Time Away</p>
-            <h1 className="text-3xl font-bold text-gray-900">Leaves</h1>
-            <p className="text-sm text-gray-400 mt-1.5 max-w-md leading-relaxed">
-              Check available leave, submit a request, and track approvals in one place.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 mt-1">
-            <a
-              href="/dashboard/holidays"
-              className="flex items-center gap-1.5 px-4 py-2 text-sm border border-gray-200 rounded-xl bg-white hover:bg-gray-50 text-gray-700 transition-colors shadow-sm"
-            >
-              <CalendarDays className="h-4 w-4" /> View Holiday Calendar
-            </a>
-            <a
-              href="#apply"
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors shadow-sm"
-            >
-              <Plus className="h-4 w-4" /> Apply for Leave
-            </a>
-          </div>
-        </div>
-
-        {/* Two-column layout */}
-        <div className="flex gap-6 items-start">
-
-          {/* Left — main content */}
-          <div className="flex-1 min-w-0 space-y-5">
-
-            {/* ── My Leave section ── */}
-            <BalanceSection balances={balances} lopDays={lopDays} />
-            <div id="apply">
-              <CollapsibleApplyForm balances={balances} onSuccess={invalidateLeaves} />
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 rounded-md flex items-center justify-center" style={{ backgroundColor: "#2C3E7C" }}>
+              <CalendarDays className="text-white" size={18} />
             </div>
+            <div>
+              <p className="text-sm text-gray-500 uppercase tracking-wide">Time Away</p>
+              <h1 className="text-2xl font-semibold text-gray-900">Leaves</h1>
+            </div>
+          </div>
+          <p className="text-sm text-gray-600 mt-1">
+            Check available leaves, submit a request, and track approvals in one place.
+          </p>
+        </div>
+        <div className="flex gap-2 flex-wrap md:flex-nowrap w-full md:w-auto">
+          <button
+            onClick={() => setShowHolidayCalendar(true)}
+            className="flex-1 md:flex-initial px-4 py-2 border border-gray-200 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center justify-center gap-2"
+          >
+            <Calendar size={18} />
+            <span className="hidden sm:inline">View Holiday Calendar</span>
+            <span className="sm:hidden">Holidays</span>
+          </button>
+          <button
+            onClick={() => setShowApplyLeave(true)}
+            className="flex-1 md:flex-initial px-4 py-2 rounded-md text-sm font-medium text-white flex items-center justify-center gap-2"
+            style={{ backgroundColor: "#2C3E7C" }}
+          >
+            <Plus size={18} />
+            <span className="hidden sm:inline">Apply for Leave</span>
+            <span className="sm:hidden">Apply</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="border-b border-gray-200">
+        <div className="flex">
+          {tabs.map(({ id, label, Icon }) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              className={`px-4 py-2.5 text-sm font-medium flex items-center gap-2 transition-colors border-b-2 -mb-px ${
+                activeTab === id ? "text-gray-900" : "border-transparent text-gray-600 hover:text-gray-900"
+              }`}
+              style={activeTab === id ? { borderBottomColor: "#2C3E7C" } : {}}
+            >
+              <Icon size={16} />
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── My Leaves Tab ── */}
+      {activeTab === "my-leaves" && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Main content */}
+          <div className="lg:col-span-2 space-y-5">
+            <BalanceSection balances={balances} lopDays={lopDays} />
+
+            {/* Apply for Leave — opens modal */}
+            <div className="bg-white rounded-lg border border-gray-200">
+              <button
+                onClick={() => setShowApplyLeave(true)}
+                className="w-full flex items-center justify-between p-5 hover:bg-gray-50 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <Plus size={20} style={{ color: "#2C3E7C" }} />
+                  <h3 className="text-base font-semibold text-gray-900">Apply for Leave</h3>
+                </div>
+                <ChevronRight size={20} className="text-gray-400" />
+              </button>
+            </div>
+
             <LeaveHistory leaves={leaves} onCancel={(id) => cancelMut.mutate(id)} />
-
-            {/* ── Manager section divider (only for approvers) ── */}
-            <ManagerSectionDivider />
-
-            <PendingApprovals />
-            <DecisionHistory />
           </div>
 
-          {/* Right — sidebar */}
-          <div className="w-72 shrink-0 space-y-4">
+          {/* Sidebar */}
+          <div className="space-y-4">
             <CurrentRequest leaves={leaves} />
             <PolicySnapshot balances={balances} />
           </div>
         </div>
-      </div>
+      )}
+
+      {/* ── Team Leaves Tab ── */}
+      {activeTab === "team-leaves" && isApprover && (
+        <div className="space-y-6">
+          {/* Banner */}
+          <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-lg p-4 flex items-start gap-3">
+            <Users className="text-purple-600 shrink-0 mt-0.5" size={20} />
+            <div>
+              <p className="text-sm font-medium text-gray-900 uppercase tracking-wide">Leave Management</p>
+              <p className="text-xs text-gray-600 mt-1">Review and approve leave requests from your team members</p>
+            </div>
+          </div>
+
+          <PendingApprovalsPanel />
+          <DecisionHistory />
+        </div>
+      )}
+
+      {/* Modals */}
+      {showApplyLeave && (
+        <ApplyLeaveModal
+          balances={balances}
+          onClose={() => { setShowApplyLeave(false); invalidateLeaves(); }}
+        />
+      )}
+      {showHolidayCalendar && (
+        <HolidayCalendarModal onClose={() => setShowHolidayCalendar(false)} />
+      )}
     </div>
   );
 }

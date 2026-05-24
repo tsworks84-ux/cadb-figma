@@ -24,7 +24,7 @@ const announcementSchema = z.object({
   title: z.string().min(1).max(200),
   body: z.string().min(1).max(5000),
   type: z.enum(["GENERAL", "IMPORTANT", "URGENT"]).optional(),
-  audience: z.enum(["ALL_EMPLOYEES", "MANAGERS", "HR_ONLY"]).optional(),
+  audience: z.enum(["ALL_EMPLOYEES", "MANAGERS", "HR_ONLY", "STUDENTS"]).optional(),
   pinned: z.boolean().optional(),
   attachments: z.array(attachmentSchema).optional(),
 });
@@ -76,11 +76,11 @@ export async function announcementRoutes(fastify: FastifyInstance) {
     }
   );
 
-  // ── Published feed (all employees) ──────────────────────────────────────
+  // ── Published feed (employees only — excludes STUDENTS audience) ─────────
   fastify.get("/", async (request, reply) => {
     const user = request.user as JwtPayload;
     const announcements = await prisma.announcement.findMany({
-      where: { status: "PUBLISHED" },
+      where: { status: "PUBLISHED", audience: { not: "STUDENTS" } },
       orderBy: [{ publishedAt: "desc" }],
       include: {
         postedBy: { select: AUTHOR_SELECT },

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "@cadb/db";
 import { authenticate } from "../../middleware/authenticate.js";
+import { maybeAutoConcludes } from "./scheduleHelpers.js";
 
 const scheduleSchema = z.object({
   academicYear: z.string().min(1),
@@ -25,6 +26,15 @@ const scheduleInclude = {
       batch: { select: { id: true, name: true, academicYear: true, gradeId: true, grade: { select: { id: true, name: true } } } },
     },
   },
+  attendances: { select: { isPresent: true } },
+  assignments: {
+    select: {
+      id:          true,
+      name:        true,
+      submissions: { select: { status: true } },
+    },
+    take: 1,
+  },
 } as const;
 
 function requireAdmin(request: any, reply: any) {
@@ -33,6 +43,7 @@ function requireAdmin(request: any, reply: any) {
     return reply.status(403).send({ success: false, error: "Insufficient permissions" });
   }
 }
+
 
 export async function scheduleRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", authenticate);
@@ -96,6 +107,100 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true, data: schedule });
   });
 
+  // ── ATTENDANCE DETAIL ──────────────────────────────────────────────────────
+  // Returns batch students + existing attendance records + linked assignment
+
+  fastify.get("/:id/attendance-detail", async (request, reply) => {
+    const { id } = request.params as any;
+
+    const schedule = await prisma.schedule.findUnique({
+      where: { id },
+      include: {
+        batches: {
+          include: {
+            batch: {
+              include: {
+                students: {
+                  where: { isArchived: false, status: "ACTIVE" },
+                  select: {
+                    id: true, firstName: true, lastName: true,
+                    studentCode: true, rollNumber: true, photoUrl: true,
+                  },
+                  orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+                },
+              },
+            },
+          },
+        },
+        attendances: {
+          include: {
+            student: { select: { id: true, firstName: true, lastName: true, studentCode: true } },
+          },
+        },
+        assignments: {
+          include: {
+            subject:  { select: { id: true, name: true } },
+            employee: { select: { id: true, firstName: true, lastName: true } },
+            batches:  { include: { batch: { select: { id: true, name: true } } } },
+            submissions: { select: { id: true, status: true, studentId: true } },
+          },
+          orderBy: { createdAt: "desc" },
+        },
+      },
+    });
+
+    if (!schedule) return reply.status(404).send({ success: false, error: "Schedule not found" });
+
+    // Deduplicate students across batches
+    const studentMap = new Map<string, any>();
+    for (const sb of schedule.batches) {
+      for (const student of (sb.batch as any).students ?? []) {
+        studentMap.set(student.id, student);
+      }
+    }
+    const batchStudents = [...studentMap.values()];
+
+    return reply.send({ success: true, data: { ...schedule, batchStudents } });
+  });
+
+  // ── SAVE ATTENDANCE ────────────────────────────────────────────────────────
+
+  fastify.post("/:id/attendance", async (request, reply) => {
+    requireAdmin(request, reply);
+    const { id } = request.params as any;
+    const { records } = request.body as {
+      records: { studentId: string; isPresent: boolean; note?: string }[];
+    };
+
+    if (!Array.isArray(records) || records.length === 0) {
+      return reply.status(400).send({ success: false, error: "records array required" });
+    }
+
+    await prisma.$transaction(
+      records.map((r) =>
+        prisma.scheduleAttendance.upsert({
+          where: { scheduleId_studentId: { scheduleId: id, studentId: r.studentId } },
+          create: { scheduleId: id, studentId: r.studentId, isPresent: r.isPresent, note: r.note ?? null },
+          update: { isPresent: r.isPresent, note: r.note ?? null },
+        })
+      )
+    );
+
+    await maybeAutoConcludes(id);
+    return reply.send({ success: true });
+  });
+
+  // ── DELETE ATTENDANCE RECORD ───────────────────────────────────────────────
+
+  fastify.delete("/:id/attendance/:studentId", async (request, reply) => {
+    requireAdmin(request, reply);
+    const { id, studentId } = request.params as any;
+    await prisma.scheduleAttendance.deleteMany({
+      where: { scheduleId: id, studentId },
+    });
+    return reply.send({ success: true });
+  });
+
   // ── CREATE ─────────────────────────────────────────────────────────────────
 
   fastify.post("/", async (request, reply) => {
@@ -155,7 +260,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
     const { id } = request.params as any;
     const { status } = request.body as any;
 
-    const valid = ["UPCOMING", "COMPLETED", "CANCELLED"];
+    const valid = ["UPCOMING", "COMPLETED", "CONCLUDED", "CANCELLED"];
     if (!valid.includes(status)) return reply.status(400).send({ success: false, error: "Invalid status" });
 
     const schedule = await prisma.schedule.update({ where: { id }, data: { status } });

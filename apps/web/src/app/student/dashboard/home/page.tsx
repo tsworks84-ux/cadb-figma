@@ -1,13 +1,39 @@
 "use client";
 
 import { useStudentAuthStore } from "@/store/studentAuth";
-import { CalendarDays, ClipboardList, BookOpen, Bell, Clock, TrendingUp, GraduationCap, ChevronRight } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { CalendarDays, ClipboardList, BookOpen, Bell, Clock, TrendingUp, GraduationCap, ChevronRight, Info, AlertTriangle, AlertCircle, Pin } from "lucide-react";
+import { formatDate } from "@/lib/utils";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+
+type AnnType = "GENERAL" | "IMPORTANT" | "URGENT";
+const ANN_META: Record<AnnType, { border: string; bg: string; icon: React.ElementType; iconColor: string; badge: string }> = {
+  GENERAL:   { border: "border-l-blue-400",   bg: "bg-blue-50",   icon: Info,          iconColor: "text-blue-500",   badge: "bg-blue-100 text-blue-700" },
+  IMPORTANT: { border: "border-l-orange-400", bg: "bg-orange-50", icon: AlertTriangle,  iconColor: "text-orange-500", badge: "bg-orange-100 text-orange-700" },
+  URGENT:    { border: "border-l-red-500",    bg: "bg-red-50",    icon: AlertCircle,   iconColor: "text-red-500",    badge: "bg-red-100 text-red-700" },
+};
 
 export default function StudentHomePage() {
-  const { student } = useStudentAuthStore();
+  const { student, accessToken } = useStudentAuthStore();
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+
+  const { data: announcements = [] } = useQuery({
+    queryKey: ["student-announcements"],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/api/v1/student/announcements`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!res.ok) return [];
+      const json = await res.json();
+      return json.data ?? [];
+    },
+    enabled: !!accessToken,
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: true,
+  });
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
@@ -66,13 +92,40 @@ export default function StudentHomePage() {
             <div className="flex items-center gap-2">
               <Bell className="h-4 w-4 text-amber-500" />
               <h2 className="font-semibold text-gray-900 text-sm">Notice Board</h2>
+              {announcements.length > 0 && (
+                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700 text-xs font-bold">
+                  {announcements.length}
+                </span>
+              )}
             </div>
           </div>
-          <div className="px-5 py-8 text-center">
-            <Bell className="h-8 w-8 text-gray-200 mx-auto mb-2" />
-            <p className="text-sm text-gray-400">No announcements yet.</p>
-            <p className="text-xs text-gray-300 mt-1">Notices from your institution will appear here.</p>
-          </div>
+          {announcements.length === 0 ? (
+            <div className="px-5 py-8 text-center">
+              <Bell className="h-8 w-8 text-gray-200 mx-auto mb-2" />
+              <p className="text-sm text-gray-400">No announcements yet.</p>
+              <p className="text-xs text-gray-300 mt-1">Notices from your institution will appear here.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-50">
+              {announcements.slice(0, 4).map((a: any) => {
+                const meta = ANN_META[a.type as AnnType] ?? ANN_META.GENERAL;
+                const Icon = meta.icon;
+                return (
+                  <div key={a.id} className={`flex items-start gap-3 px-4 py-3 border-l-4 ${meta.border} ${meta.bg}`}>
+                    {a.pinned && <Pin className="h-3 w-3 text-amber-400 shrink-0 mt-1" />}
+                    <Icon className={`h-4 w-4 shrink-0 mt-0.5 ${meta.iconColor}`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{a.title}</p>
+                      <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{a.body}</p>
+                      <p className="text-[11px] text-gray-400 mt-1">
+                        {a.postedBy.firstName} {a.postedBy.lastName} · {a.publishedAt ? formatDate(a.publishedAt) : ""}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Upcoming assessments */}
