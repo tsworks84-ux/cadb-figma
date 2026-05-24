@@ -7,6 +7,16 @@ import { sendCredentialsMail } from "../../utils/mailer.js";
 import type { JwtPayload } from "@cadb/types";
 import { randomUUID } from "crypto";
 import { uploadFile } from "../../utils/s3.js";
+import { createWriteStream, mkdirSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+import { pipeline } from "stream/promises";
+
+const __dirname_emp = dirname(fileURLToPath(import.meta.url));
+const UPLOADS_DIR_EMP = join(__dirname_emp, "../../../uploads");
+mkdirSync(UPLOADS_DIR_EMP, { recursive: true });
+const ALLOWED_QUAL_MIME = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
+const MAX_QUAL_SIZE = 5 * 1024 * 1024;
 
 const addressSchema = z.object({
   line1: z.string().min(1),
@@ -356,8 +366,12 @@ export async function employeeRoutes(fastify: FastifyInstance) {
     const maskedPan = panEncrypted
       ? panEncrypted.slice(0, 2) + "XXXXXXX" + panEncrypted.slice(-1)
       : null;
+    // Return masked Aadhaar showing only last 4 digits
+    const maskedAadhaar = aadhaarEncrypted
+      ? "XXXX XXXX " + aadhaarEncrypted.slice(-4)
+      : null;
     const completeness = profileCompleteness(safe as any);
-    return reply.send({ success: true, data: { ...safe, pan: maskedPan, ...completeness } });
+    return reply.send({ success: true, data: { ...safe, pan: maskedPan, aadhaar: maskedAadhaar, ...completeness } });
   });
 
   // Create employee (HR_ADMIN / SUPER_ADMIN only)
@@ -429,6 +443,14 @@ export async function employeeRoutes(fastify: FastifyInstance) {
             },
           });
 
+          if (d.reportingToId) {
+            await tx.teamMembership.upsert({
+              where: { teamOwnerId_memberId: { teamOwnerId: d.reportingToId, memberId: emp.id } },
+              create: { teamOwnerId: d.reportingToId, memberId: emp.id },
+              update: {},
+            });
+          }
+
           return emp;
         });
         break; // success — exit retry loop
@@ -486,7 +508,7 @@ export async function employeeRoutes(fastify: FastifyInstance) {
       "dateOfBirth", "gender", "maritalStatus", "bloodGroup", "religion", "nationality",
       "currentAddress", "permanentAddress",
       "emergencyContactName", "emergencyContactPhone", "emergencyRelation",
-      "panEncrypted",
+      "panEncrypted", "aadhaarEncrypted", "uanNumber",
     ];
     const updateData: Record<string, unknown> = {};
 
@@ -511,11 +533,48 @@ export async function employeeRoutes(fastify: FastifyInstance) {
       updateData.panEncrypted = pan;
     }
 
+    if (updateData.aadhaarEncrypted !== undefined) {
+      const aadhaar = String(updateData.aadhaarEncrypted).replace(/\s/g, "");
+      if (!/^\d{12}$/.test(aadhaar)) {
+        return reply.status(400).send({ success: false, error: "Invalid Aadhaar format. Must be 12 digits", statusCode: 400 });
+      }
+      updateData.aadhaarEncrypted = aadhaar;
+    }
+
+    if (updateData.uanNumber !== undefined) {
+      const uan = String(updateData.uanNumber).replace(/\s/g, "");
+      if (uan && !/^\d{12}$/.test(uan)) {
+        return reply.status(400).send({ success: false, error: "Invalid UAN format. Must be 12 digits", statusCode: 400 });
+      }
+      updateData.uanNumber = uan || null;
+    }
+
     const updated = await prisma.employee.update({
       where: { id },
       data: updateData as any,
       select: { id: true, employeeCode: true, firstName: true, lastName: true, updatedAt: true },
     });
+
+    // Sync team membership when reporting manager changes
+    if (updateData.reportingToId !== undefined) {
+      const oldManagerId = (existing as any).reportingToId as string | null;
+      const newManagerId = (updateData.reportingToId as string | null) ?? null;
+
+      if (oldManagerId !== newManagerId) {
+        if (oldManagerId) {
+          await prisma.teamMembership.deleteMany({
+            where: { teamOwnerId: oldManagerId, memberId: id },
+          });
+        }
+        if (newManagerId) {
+          await prisma.teamMembership.upsert({
+            where: { teamOwnerId_memberId: { teamOwnerId: newManagerId, memberId: id } },
+            create: { teamOwnerId: newManagerId, memberId: id },
+            update: {},
+          });
+        }
+      }
+    }
 
     await prisma.auditLog.create({
       data: {
@@ -611,11 +670,55 @@ export async function employeeRoutes(fastify: FastifyInstance) {
 
   fastify.post("/:id/qualifications", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const parsed = qualificationSchema.safeParse(request.body);
+
+    let bodyData: Record<string, any> = {};
+    let documentUrl: string | undefined;
+
+    if (request.isMultipart()) {
+      const data = await request.file();
+      if (!data) return reply.status(400).send({ success: false, error: "No file in multipart", statusCode: 400 });
+
+      // Parse text fields
+      for (const [key, field] of Object.entries(data.fields)) {
+        bodyData[key] = (field as any).value;
+      }
+      // Coerce numeric fields
+      if (bodyData.yearOfPassing) bodyData.yearOfPassing = Number(bodyData.yearOfPassing);
+      if (bodyData.percentage) bodyData.percentage = bodyData.percentage === "" ? undefined : Number(bodyData.percentage);
+      if (bodyData.cgpa) bodyData.cgpa = bodyData.cgpa === "" ? undefined : Number(bodyData.cgpa);
+
+      // Handle file
+      if (!ALLOWED_QUAL_MIME.has(data.mimetype)) {
+        return reply.status(400).send({ success: false, error: "Only PDF, JPG, PNG allowed", statusCode: 400 });
+      }
+      const ext = data.filename.split(".").pop() ?? "bin";
+      const fileName = `qual_${id}_${randomUUID()}.${ext}`;
+      const filePath = join(UPLOADS_DIR_EMP, fileName);
+      let fileSize = 0;
+      const chunks: Buffer[] = [];
+      for await (const chunk of data.file) {
+        fileSize += chunk.length;
+        if (fileSize > MAX_QUAL_SIZE) {
+          return reply.status(413).send({ success: false, error: "File too large (max 5 MB)", statusCode: 413 });
+        }
+        chunks.push(chunk);
+      }
+      await pipeline(
+        (async function* () { for (const c of chunks) yield c; })(),
+        createWriteStream(filePath)
+      );
+      documentUrl = `/uploads/${fileName}`;
+    } else {
+      bodyData = request.body as Record<string, any>;
+    }
+
+    const parsed = qualificationSchema.safeParse(bodyData);
     if (!parsed.success) {
       return reply.status(400).send({ success: false, error: "Validation failed", statusCode: 400 });
     }
-    const data = await prisma.qualification.create({ data: { employeeId: id, ...parsed.data } });
+    const data = await prisma.qualification.create({
+      data: { employeeId: id, ...parsed.data, ...(documentUrl ? { documentUrl } : {}) },
+    });
     return reply.status(201).send({ success: true, data });
   });
 
