@@ -190,6 +190,11 @@ enum ScheduleStatus {
   CANCELLED
 }
 
+enum ClassMode {
+  ONLINE
+  OFFLINE
+}
+
 enum AssignmentStatus {
   DUE
   COMPLETED
@@ -1504,6 +1509,7 @@ model Schedule {
   subjectId    String?
   employeeId   String?
   locationId   String?
+  mode         ClassMode      @default(OFFLINE)
   date         DateTime       @db.Date
   startTime    DateTime
   endTime      DateTime

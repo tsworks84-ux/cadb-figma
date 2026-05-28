@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { studentApi } from "@/lib/studentApi";
 import { useStudentAuthStore } from "@/store/studentAuth";
-import { GraduationCap, ChevronLeft, ChevronRight, MapPin } from "lucide-react";
+import { GraduationCap, ChevronLeft, ChevronRight } from "lucide-react";
 
 function statusLabel(s: string | null | undefined) {
   if (!s) return null;
@@ -150,11 +150,10 @@ export default function StudentSchedulePage() {
                               {c.faculty && (
                                 <span className="text-xs text-gray-400">{c.faculty.firstName} {c.faculty.lastName}</span>
                               )}
-                              {c.location && (
-                                <span className="text-xs text-gray-400 flex items-center gap-1">
-                                  <MapPin className="h-2.5 w-2.5" />{c.location.name}
-                                </span>
-                              )}
+                              {c.mode === "ONLINE"
+                                ? <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-100">🌐 Online</span>
+                                : <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 bg-slate-50 text-slate-500 border border-slate-200">🏫 Offline</span>
+                              }
                             </div>
                             {c.topics && <p className="text-xs text-gray-400 truncate mt-0.5">{c.topics}</p>}
                           </div>

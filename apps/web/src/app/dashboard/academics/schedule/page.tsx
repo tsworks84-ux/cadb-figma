@@ -600,7 +600,7 @@ function StatsPanel({ schedules, subjects }: { schedules: any[]; subjects: any[]
 
 type ScheduleForm = {
   academicYear: string; batchIds: string[]; subjectId: string; employeeId: string;
-  locationId: string; date: string; startTime: string; endTime: string; topics: string; notes: string;
+  locationId: string; mode: "ONLINE" | "OFFLINE"; date: string; startTime: string; endTime: string; topics: string; notes: string;
 };
 
 function ScheduleModal({
@@ -613,7 +613,7 @@ function ScheduleModal({
   const qc = useQueryClient();
   const emptyForm = (): ScheduleForm => ({
     academicYear: defaultYear, batchIds: [], subjectId: "", employeeId: "",
-    locationId: "", date: "", startTime: "", endTime: "", topics: "", notes: "",
+    locationId: "", mode: "OFFLINE", date: "", startTime: "", endTime: "", topics: "", notes: "",
   });
   const [form, setForm] = useState<ScheduleForm>(initial ?? emptyForm());
 
@@ -688,6 +688,7 @@ function ScheduleModal({
     return {
       academicYear: form.academicYear, batchIds: form.batchIds,
       subjectId: form.subjectId || null, employeeId: form.employeeId || null, locationId: form.locationId || null,
+      mode: form.mode,
       date: new Date(form.date).toISOString(), startTime: startDT.toISOString(), endTime: endDT.toISOString(),
       topics: form.topics || undefined, notes: form.notes || undefined,
     };
@@ -813,11 +814,24 @@ function ScheduleModal({
                 </p>
               )}
               <div style={{ marginTop: 14 }}>
-                <DField label="Location">
-                  <DSelect value={form.locationId} onChange={(e) => setForm({ ...form, locationId: e.target.value })}>
-                    <option value="">Select location</option>
-                    {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-                  </DSelect>
+                <DField label="Mode">
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {(["OFFLINE", "ONLINE"] as const).map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setForm({ ...form, mode: m })}
+                        style={{
+                          flex: 1, minHeight: 42, border: `1.5px solid ${form.mode === m ? (m === "ONLINE" ? "#10b981" : "#4f46e5") : "#e6e8ef"}`,
+                          borderRadius: 12, background: form.mode === m ? (m === "ONLINE" ? "#ecfdf5" : "#ede9fe") : "white",
+                          color: form.mode === m ? (m === "ONLINE" ? "#065f46" : "#3730a3") : "#7c8598",
+                          fontWeight: form.mode === m ? 700 : 500, fontSize: 14, cursor: "pointer", transition: "all .15s",
+                        }}
+                      >
+                        {m === "ONLINE" ? "🌐 Online" : "🏫 Offline"}
+                      </button>
+                    ))}
+                  </div>
                 </DField>
               </div>
             </section>
@@ -1467,7 +1481,15 @@ function ScheduleRow({ s, canEdit, onEdit, onDelete, onStatus, onClick }: {
           {s.topics || <span className="text-gray-300">—</span>}
         </p>
       </td>
-      <td className="px-3 py-2.5 whitespace-nowrap"><StatusBadge status={s.status} /></td>
+      <td className="px-3 py-2.5 whitespace-nowrap">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <StatusBadge status={s.status} />
+          {s.mode === "ONLINE"
+            ? <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-100">🌐 Online</span>
+            : <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 bg-slate-50 text-slate-500 border border-slate-200">🏫 Offline</span>
+          }
+        </div>
+      </td>
       {canEdit && (
         <td className="px-3 py-2.5 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1641,6 +1663,7 @@ export default function SchedulePage() {
         academicYear: s.academicYear,
         batchIds:  s.batches?.map((sb: any) => sb.batchId) ?? [],
         subjectId: s.subjectId ?? "", employeeId: s.employeeId ?? "", locationId: s.locationId ?? "",
+        mode: (s.mode ?? "OFFLINE") as "ONLINE" | "OFFLINE",
         date:      d.toISOString().split("T")[0],
         startTime: `${String(st.getHours()).padStart(2, "0")}:${String(st.getMinutes()).padStart(2, "0")}`,
         endTime:   `${String(et.getHours()).padStart(2, "0")}:${String(et.getMinutes()).padStart(2, "0")}`,

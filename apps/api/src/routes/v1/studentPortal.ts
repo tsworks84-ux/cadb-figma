@@ -268,7 +268,7 @@ export async function studentPortalRoutes(fastify: FastifyInstance) {
       orderBy: [{ date: "asc" }, { startTime: "asc" }],
       select: {
         id: true, date: true, startTime: true, endTime: true,
-        topics: true, notes: true, status: true, academicYear: true,
+        topics: true, notes: true, status: true, mode: true, academicYear: true,
         subject:  { select: { id: true, code: true, name: true } },
         employee: { select: { id: true, firstName: true, lastName: true } },
         location: { select: { id: true, name: true } },
@@ -282,7 +282,7 @@ export async function studentPortalRoutes(fastify: FastifyInstance) {
       const attendanceStatus = s.status !== "CONCLUDED" ? null : (att == null ? "UNRECORDED" : att.isPresent ? "PRESENT" : "ABSENT");
       return {
         id: s.id, date: s.date, startTime: s.startTime, endTime: s.endTime,
-        topics: s.topics, notes: s.notes, status: s.status, academicYear: s.academicYear,
+        topics: s.topics, notes: s.notes, status: s.status, mode: s.mode, academicYear: s.academicYear,
         subject: s.subject, faculty: s.employee, location: s.location,
         batches: s.batches.map((b) => b.batch),
         attendanceStatus,

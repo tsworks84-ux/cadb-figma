@@ -10,6 +10,7 @@ const scheduleSchema = z.object({
   subjectId:    z.string().optional().nullable(),
   employeeId:   z.string().optional().nullable(),
   locationId:   z.string().optional().nullable(),
+  mode:         z.enum(["ONLINE", "OFFLINE"]).optional().default("OFFLINE"),
   date:         z.string().min(1),
   startTime:    z.string().min(1),
   endTime:      z.string().min(1),
