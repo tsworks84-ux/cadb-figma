@@ -3,9 +3,12 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { Home, User, FileText, CalendarDays, ClipboardList, BookOpen, Settings, LogOut, GraduationCap } from "lucide-react";
+import { Home, User, FileText, CalendarDays, ClipboardList, BookOpen, GraduationCap, Settings, LogOut, Bell } from "lucide-react";
 import { useStudentAuthStore } from "@/store/studentAuth";
+import { studentApi } from "@/lib/studentApi";
 import Image from "next/image";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 const nav = [
   { name: "Home",        href: "/student/dashboard/home",        icon: Home },
@@ -15,6 +18,7 @@ const nav = [
   { name: "Assignments", href: "/student/dashboard/assignments", icon: ClipboardList },
   { name: "Assessments", href: "/student/dashboard/assessments", icon: BookOpen },
   { name: "Schedule",    href: "/student/dashboard/schedule",    icon: GraduationCap },
+  { name: "Notices",     href: "/student/dashboard/notices",     icon: Bell },
   { name: "Settings",    href: "/student/dashboard/settings",    icon: Settings },
 ];
 
@@ -26,11 +30,7 @@ export function StudentSidebar() {
   async function handleLogout() {
     const refreshToken = localStorage.getItem("cadb_student_refresh_token");
     try {
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/v1/student/auth/logout`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken }),
-      });
+      await studentApi.post("/api/v1/student/auth/logout", { refreshToken });
     } catch {}
     clearAuth();
     router.push("/student/login");
@@ -68,19 +68,21 @@ export function StudentSidebar() {
         })}
       </nav>
 
-      {/* User */}
+      {/* User footer */}
       <div className="border-t border-slate-700 px-4 py-3">
         <div className="flex items-center gap-3">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold overflow-hidden">
-            {student
-              ? `${student.firstName[0]}${student.lastName[0]}`
-              : "?"}
+            {student?.photoUrl
+              ? <Image src={`${API_BASE}${student.photoUrl}`} alt="photo" width={32} height={32} className="h-full w-full object-cover" />
+              : student
+                ? `${student.firstName[0]}${student.lastName[0]}`
+                : "?"}
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium truncate">{student ? `${student.firstName} ${student.lastName}` : "Loading..."}</p>
             <p className="text-xs text-slate-400 truncate">{student?.studentCode}</p>
           </div>
-          <button onClick={handleLogout} className="text-slate-400 hover:text-white transition-colors">
+          <button onClick={handleLogout} className="text-slate-400 hover:text-white transition-colors" title="Sign out">
             <LogOut className="h-4 w-4" />
           </button>
         </div>

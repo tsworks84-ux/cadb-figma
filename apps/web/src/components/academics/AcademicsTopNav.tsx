@@ -29,8 +29,10 @@ export function AcademicsTopNav() {
   const permissions = usePermissions();
   const isSuperAdmin = user?.role === "SUPER_ADMIN";
   const isHRAdmin    = user?.role === "HR_ADMIN";
+  const isEmployee   = !isSuperAdmin && !isHRAdmin && user?.role === "EMPLOYEE";
 
-  const visibleItems = NAV_ITEMS.filter(({ permKey }) => {
+  const visibleItems = NAV_ITEMS.filter(({ permKey, name }) => {
+    if (isEmployee) return name === "Batches";
     if (!permKey) return true;
     if (isSuperAdmin || isHRAdmin) return true;
     return permissions[permKey]?.canView ?? false;
@@ -140,8 +142,10 @@ export function AcademicsMobileTabStrip() {
   const permissions = usePermissions();
   const isSuperAdmin = user?.role === "SUPER_ADMIN";
   const isHRAdmin    = user?.role === "HR_ADMIN";
+  const isEmployee   = !isSuperAdmin && !isHRAdmin && user?.role === "EMPLOYEE";
 
-  const visibleItems = NAV_ITEMS.filter(({ permKey }) => {
+  const visibleItems = NAV_ITEMS.filter(({ permKey, name }) => {
+    if (isEmployee) return name === "Batches";
     if (!permKey) return true;
     if (isSuperAdmin || isHRAdmin) return true;
     return permissions[permKey]?.canView ?? false;

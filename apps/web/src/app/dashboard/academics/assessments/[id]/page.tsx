@@ -122,13 +122,17 @@ export default function ExamDetailPage() {
   const activeRows   = allRows.filter((r) => !r.result?.isExcluded);
   const excludedRows = allRows.filter((r) =>  r.result?.isExcluded);
 
-  const batchOptions = [...new Map(
-    allRows.map((r) => [r.student.batchId, r.student.batch])
-  ).entries()].map(([id, b]) => ({ id, name: b?.name ?? id }));
+  const _batchMap = new Map<string, any>();
+  for (const r of allRows) {
+    for (const sb of ((r.student.studentBatches ?? []) as any[])) {
+      if (!_batchMap.has(sb.batchId)) _batchMap.set(sb.batchId, sb.batch);
+    }
+  }
+  const batchOptions = [..._batchMap.entries()].map(([id, b]) => ({ id, name: b?.name ?? id }));
 
   const filteredRows = activeRows.filter((r) => {
     const s = r.student;
-    if (filterBatch && s.batchId !== filterBatch) return false;
+    if (filterBatch && !(s.studentBatches ?? []).some((sb: any) => sb.batchId === filterBatch)) return false;
     if (search) {
       const name = `${s.firstName} ${s.lastName}`.toLowerCase();
       const roll = (s.rollNumber ?? "").toLowerCase();
@@ -287,7 +291,7 @@ export default function ExamDetailPage() {
       .map((r) => ({
         name:  `${r.student.firstName} ${r.student.lastName}`,
         roll:  r.student.rollNumber ?? "—",
-        batch: r.student.batch?.name ?? "",
+        batch: r.student.studentBatches?.[0]?.batch?.name ?? "",
         total: (r.result?.marks ?? []).reduce((s: number, m: any) => s + (m.marks ?? 0), 0),
       }))
       .sort((a, b) => b.total - a.total)
@@ -454,7 +458,7 @@ export default function ExamDetailPage() {
         return [
           r.student.rollNumber ?? "—",
           `${r.student.firstName} ${r.student.lastName}`,
-          r.student.batch?.name ?? "—",
+          r.student.studentBatches?.[0]?.batch?.name ?? "—",
           ...slots.map((slot: any) => {
             if (isAbsent) return "A";
             const m = r.result?.marks?.find((mk: any) => mk.paperNum === slot.paperNum && mk.subjectSlot === slot.subjectSlot);

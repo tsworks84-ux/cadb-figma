@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -965,111 +965,162 @@ function AdmissionTab({ student, canEdit, onRefetch }: { student: any; canEdit: 
 
 // ── Batch Tab ─────────────────────────────────────────────────────────────────
 
+function BatchRow({ sb, student, canEdit, onRemoved }: { sb: any; student: any; canEdit: boolean; onRemoved: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+
+  const { data: batchSubjects = [], isLoading: loadingSubjects } = useQuery({
+    queryKey: ["batch-subjects", sb.batchId],
+    queryFn: () => api.get(`/api/v1/academics/batches/${sb.batchId}/subjects`).then((r) => r.data.data),
+    enabled: expanded,
+  });
+
+  const removeMut = useMutation({
+    mutationFn: () => api.delete(`/api/v1/academics/batches/${sb.batchId}/students/${student.id}`),
+    onSuccess: () => { toast.success("Removed from batch"); onRemoved(); },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
+  });
+
+  return (
+    <div className="border-b border-gray-50 last:border-0">
+      <div
+        className="flex items-start gap-3 px-5 py-4 hover:bg-gray-50/50 transition-colors cursor-pointer"
+        onClick={() => { setExpanded((v) => !v); setConfirmRemove(false); }}
+      >
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-900">
+            {sb.batch.academicYear} · {sb.batch.name}
+          </p>
+          {sb.batch.grade?.name && (
+            <p className="text-xs text-gray-400 mt-0.5">{sb.batch.grade.name}{sb.batch.location?.name ? ` · ${sb.batch.location.name}` : ""}</p>
+          )}
+          <p className="text-xs text-gray-400 mt-0.5">
+            Added {new Date(sb.joinedAt).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className={`text-xs font-medium rounded-full px-2.5 py-1 border ${sb.batch.isActive ? "bg-green-50 text-green-700 border-green-100" : "bg-gray-100 text-gray-500 border-gray-200"}`}>
+            {sb.batch.isActive ? "Active" : "Inactive"}
+          </span>
+          {canEdit && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setConfirmRemove((v) => !v); setExpanded(false); }}
+              className="text-xs text-gray-400 hover:text-red-500 transition-colors px-1.5 py-1 rounded"
+              title="Remove from batch"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Inline remove confirm */}
+      {confirmRemove && (
+        <div className="px-5 pb-4 flex items-center gap-3 bg-red-50/60 border-t border-red-100">
+          <p className="text-xs text-red-700 flex-1">Remove from <strong>{sb.batch.name}</strong>?</p>
+          <button onClick={() => setConfirmRemove(false)} className="text-xs text-gray-500 px-2 py-1 rounded border border-gray-200 bg-white hover:bg-gray-50">Cancel</button>
+          <button onClick={() => removeMut.mutate()} disabled={removeMut.isPending}
+            className="text-xs text-white px-2 py-1 rounded bg-red-500 hover:bg-red-600 disabled:opacity-50">
+            {removeMut.isPending ? "Removing…" : "Remove"}
+          </button>
+        </div>
+      )}
+
+      {/* Subjects expand */}
+      {expanded && (
+        <div className="border-t border-gray-50 bg-gray-50/40">
+          {loadingSubjects ? (
+            <p className="text-xs text-gray-400 px-8 py-3">Loading subjects…</p>
+          ) : batchSubjects.length === 0 ? (
+            <p className="text-xs text-gray-400 px-8 py-3">No subjects assigned to this batch</p>
+          ) : (
+            <div className="divide-y divide-gray-50">
+              {batchSubjects.map((bs: any) => (
+                <div key={bs.id} className="flex items-center justify-between px-8 py-2.5">
+                  <div>
+                    <p className="text-sm font-medium text-gray-700">{bs.subject.name}</p>
+                    <p className="text-xs text-gray-400 font-mono">{bs.subject.code}</p>
+                  </div>
+                  {bs.employee && (
+                    <p className="text-xs text-gray-500">{bs.employee.firstName} {bs.employee.lastName}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BatchTab({ student, canEdit, onRefetch }: { student: any; canEdit: boolean; onRefetch: () => void }) {
   const qc = useQueryClient();
   const [showPicker, setShowPicker] = useState(false);
   const [filterYear, setFilterYear] = useState("");
   const [selectedBatchId, setSelectedBatchId] = useState("");
-  const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
 
-  const needsPicker = showPicker || !student.batch;
-
-  const { data: batchSubjects = [], isLoading: loadingSubjects } = useQuery({
-    queryKey: ["batch-subjects", student.batchId],
-    queryFn: () => api.get(`/api/v1/academics/batches/${student.batchId}/subjects`).then((r) => r.data.data),
-    enabled: !!student.batchId,
-  });
+  const currentBatchIds = new Set((student.studentBatches ?? []).map((sb: any) => sb.batchId));
+  const hasBatches = (student.studentBatches ?? []).length > 0;
 
   const { data: academicYears = [] } = useQuery({
     queryKey: ["academic-years"],
     queryFn: () => api.get("/api/v1/academics/academic-years").then((r) => r.data.data),
     staleTime: 10 * 60 * 1000,
-    enabled: needsPicker,
+    enabled: showPicker,
   });
 
-  const { data: batches = [] } = useQuery({
+  const { data: allBatches = [] } = useQuery({
     queryKey: ["batches"],
     queryFn: () => api.get("/api/v1/academics/batches?archived=false").then((r) => r.data.data),
     staleTime: 5 * 60 * 1000,
-    enabled: needsPicker,
+    enabled: showPicker,
   });
 
   const activeYears = (academicYears as any[]).filter((y) => !y.isArchived);
-  const filteredBatches = filterYear
-    ? (batches as any[]).filter((b) => b.academicYear === filterYear && !b.isArchived)
-    : (batches as any[]).filter((b) => !b.isArchived);
+
+  // Exclude batches the student is already in
+  const filteredBatches = (allBatches as any[]).filter(
+    (b) => !b.isArchived && !currentBatchIds.has(b.id) && (!filterYear || b.academicYear === filterYear)
+  );
 
   useEffect(() => {
     if (activeYears.length > 0 && !filterYear) setFilterYear(activeYears[0].name);
   }, [activeYears.length]);
 
   const assignMut = useMutation({
-    mutationFn: (batchId: string) => api.patch(`/api/v1/academics/students/${student.id}`, { batchId }),
+    mutationFn: (batchId: string) => api.put(`/api/v1/academics/batches/${batchId}/students/${student.id}`, {}),
     onSuccess: () => {
-      toast.success("Batch assigned");
+      toast.success("Added to batch");
       setShowPicker(false);
       setSelectedBatchId("");
       qc.invalidateQueries({ queryKey: ["student", student.id] });
+      qc.invalidateQueries({ queryKey: ["batches"] });
       onRefetch();
     },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
   });
 
-  const history: any[] = student.batchHistory ?? [];
+  const invalidateAfterRemove = () => {
+    qc.invalidateQueries({ queryKey: ["student", student.id] });
+    qc.invalidateQueries({ queryKey: ["batches"] });
+    onRefetch();
+  };
 
-  const BatchPicker = () => (
-    <div className="border-t border-gray-100 px-5 py-4 bg-gray-50/60 space-y-4">
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-        {student.batch ? "Change Batch" : "Assign to Batch"}
-      </p>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Academic Year</label>
-          <select value={filterYear} onChange={(e) => { setFilterYear(e.target.value); setSelectedBatchId(""); }}
-            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none bg-white text-gray-700">
-            <option value="">— All years —</option>
-            {activeYears.map((y: any) => <option key={y.id} value={y.name}>{y.name}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Batch</label>
-          <select value={selectedBatchId} onChange={(e) => setSelectedBatchId(e.target.value)}
-            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none bg-white text-gray-700">
-            <option value="">— Select a batch —</option>
-            {filteredBatches.map((b: any) => (
-              <option key={b.id} value={b.id}>{b.name}{b._count?.students != null ? ` · ${b._count.students} students` : ""}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-      <div className="flex gap-2">
-        {student.batch && (
-          <button onClick={() => { setShowPicker(false); setSelectedBatchId(""); }}
-            className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-white transition-colors">
-            Cancel
-          </button>
-        )}
-        <button
-          onClick={() => { if (selectedBatchId) assignMut.mutate(selectedBatchId); }}
-          disabled={!selectedBatchId || assignMut.isPending}
-          className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-indigo-600 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-        >
-          <GraduationCap className="h-3.5 w-3.5" />
-          {assignMut.isPending ? "Assigning…" : "Confirm"}
-        </button>
-      </div>
-    </div>
-  );
+  const history: any[] = student.batchHistory ?? [];
 
   return (
     <div className="space-y-5">
-      {/* ── Active Batch ──────────────────────────────────────── */}
+      {/* ── Current Batches ──────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
           <div className="flex items-center gap-2">
             <GraduationCap className="h-4 w-4 text-gray-400" />
-            <span className="text-sm font-semibold text-gray-700">Batch</span>
+            <span className="text-sm font-semibold text-gray-700">Batches</span>
+            {hasBatches && (
+              <span className="text-xs text-gray-400 bg-gray-100 rounded-full px-2 py-0.5">{(student.studentBatches ?? []).length}</span>
+            )}
           </div>
           {canEdit && (
             <button
@@ -1077,62 +1128,60 @@ function BatchTab({ student, canEdit, onRefetch }: { student: any; canEdit: bool
               className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 active:bg-indigo-700 transition-colors"
             >
               <Plus className="h-3.5 w-3.5" />
-              {student.batch ? "Change Batch" : "Add to Batch"}
+              Add to Batch
             </button>
           )}
         </div>
 
         {/* Batch picker */}
-        {needsPicker && <BatchPicker />}
-
-        {/* Active batch row */}
-        {student.batch ? (
-          <>
-            <div className="px-5 py-2 border-b border-gray-50">
-              <span className="text-xs font-semibold text-green-600 uppercase tracking-wide">Active</span>
-            </div>
-            <div
-              className="flex items-start gap-3 px-5 py-4 hover:bg-gray-50/50 transition-colors cursor-pointer"
-              onClick={() => setExpandedHistory(expandedHistory === "active" ? null : "active")}
-            >
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-gray-900">
-                  {student.batch.academicYear} {student.batch.name}
-                </p>
-                {batchSubjects.length > 0 && (
-                  <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
-                    <BookOpen className="h-3 w-3 shrink-0" />
-                    {loadingSubjects ? "Loading…" : batchSubjects.map((bs: any) => bs.subject.name).join(", ")}
-                  </p>
-                )}
-                {student.batchAssignedAt && (
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    added on {new Date(student.batchAssignedAt).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}
-                  </p>
-                )}
+        {showPicker && (
+          <div className="border-b border-gray-100 px-5 py-4 bg-gray-50/60 space-y-4">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Add to Batch</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Academic Year</label>
+                <select value={filterYear} onChange={(e) => { setFilterYear(e.target.value); setSelectedBatchId(""); }}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none bg-white text-gray-700">
+                  <option value="">— All years —</option>
+                  {activeYears.map((y: any) => <option key={y.id} value={y.name}>{y.name}</option>)}
+                </select>
               </div>
-              <span className={`shrink-0 text-xs font-medium rounded-full px-2.5 py-1 border ${student.batch.isActive ? "bg-green-50 text-green-700 border-green-100" : "bg-gray-100 text-gray-500 border-gray-200"}`}>
-                {student.batch.isActive ? "Active" : "Inactive"}
-              </span>
-            </div>
-
-            {/* Subjects expand */}
-            {expandedHistory === "active" && batchSubjects.length > 0 && (
-              <div className="border-t border-gray-50 divide-y divide-gray-50 bg-gray-50/40">
-                {batchSubjects.map((bs: any) => (
-                  <div key={bs.id} className="flex items-center justify-between px-8 py-2.5">
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">{bs.subject.name}</p>
-                      <p className="text-xs text-gray-400 font-mono">{bs.subject.code}</p>
-                    </div>
-                    {bs.employee && (
-                      <p className="text-xs text-gray-500">{bs.employee.firstName} {bs.employee.lastName}</p>
-                    )}
-                  </div>
-                ))}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Batch</label>
+                <select value={selectedBatchId} onChange={(e) => setSelectedBatchId(e.target.value)}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none bg-white text-gray-700">
+                  <option value="">— Select a batch —</option>
+                  {filteredBatches.length === 0 && <option disabled>All batches already assigned</option>}
+                  {filteredBatches.map((b: any) => (
+                    <option key={b.id} value={b.id}>{b.name}{b._count?.studentBatches != null ? ` · ${b._count.studentBatches} students` : ""}</option>
+                  ))}
+                </select>
               </div>
-            )}
-          </>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => { setShowPicker(false); setSelectedBatchId(""); }}
+                className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-white transition-colors">
+                Cancel
+              </button>
+              <button
+                onClick={() => { if (selectedBatchId) assignMut.mutate(selectedBatchId); }}
+                disabled={!selectedBatchId || assignMut.isPending}
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-indigo-600 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+              >
+                <GraduationCap className="h-3.5 w-3.5" />
+                {assignMut.isPending ? "Adding…" : "Add"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Batch list */}
+        {hasBatches ? (
+          <div className="divide-y divide-gray-50">
+            {(student.studentBatches ?? []).map((sb: any) => (
+              <BatchRow key={sb.id} sb={sb} student={student} canEdit={canEdit} onRemoved={invalidateAfterRemove} />
+            ))}
+          </div>
         ) : !showPicker ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <GraduationCap className="h-10 w-10 text-gray-200 mb-2" />
@@ -1201,10 +1250,519 @@ function CredSection({ title, icon: Icon, children }: { title: string; icon: any
   );
 }
 
+// ── Assignments Tab ───────────────────────────────────────────────────────────
+
+const ASSIGN_STYLE: Record<string, { bar: string; bg: string; text: string; border: string; label: string }> = {
+  APPROVED:      { bar: "bg-green-500",  bg: "bg-green-50",  text: "text-green-700",  border: "border-green-200",  label: "Approved"     },
+  SUBMITTED:     { bar: "bg-blue-500",   bg: "bg-blue-50",   text: "text-blue-700",   border: "border-blue-200",   label: "Submitted"    },
+  IN_PROCESS:    { bar: "bg-violet-500", bg: "bg-violet-50", text: "text-violet-700", border: "border-violet-200", label: "Under Review" },
+  REJECTED:      { bar: "bg-orange-500", bg: "bg-orange-50", text: "text-orange-700", border: "border-orange-200", label: "Rejected"     },
+  NOT_SUBMITTED: { bar: "bg-amber-400",  bg: "bg-amber-50",  text: "text-amber-700",  border: "border-amber-200",  label: "Pending"      },
+  OVERDUE:       { bar: "bg-red-500",    bg: "bg-red-50",    text: "text-red-700",    border: "border-red-200",    label: "Overdue"      },
+  ARCHIVED:      { bar: "bg-gray-300",   bg: "bg-gray-50",   text: "text-gray-500",   border: "border-gray-200",   label: "Archived"     },
+};
+
+function AssignmentsTab({ student }: { student: any }) {
+  const today = new Date();
+  const defaultFrom = new Date(today.getFullYear(), today.getMonth() - 2, 1);
+  const defaultTo   = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+
+  const [dateFrom,      setDateFrom]      = useState(defaultFrom.toISOString().split("T")[0]);
+  const [dateTo,        setDateTo]        = useState(defaultTo.toISOString().split("T")[0]);
+  const [subjectFilter, setSubjectFilter] = useState("");
+  const [statusFilter,  setStatusFilter]  = useState("");
+  const [view,          setView]          = useState<"list" | "stats">("list");
+
+  const params = new URLSearchParams({ dateFrom, dateTo });
+  if (subjectFilter) params.set("subjectId", subjectFilter);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["student-assignments", student.id, dateFrom, dateTo, subjectFilter],
+    queryFn: () => api.get(`/api/v1/academics/students/${student.id}/assignments?${params}`).then((r) => r.data),
+    enabled: !!student.id,
+  });
+
+  const allItems: any[] = data?.data ?? [];
+  const stats = data?.stats ?? { total: 0, approved: 0, submitted: 0, inProcess: 0, rejected: 0, notSubmitted: 0, overdue: 0, completionRate: 0 };
+  const items = statusFilter ? allItems.filter((a) => a.displayStatus === statusFilter) : allItems;
+
+  const subjects = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const a of allItems) { if (a.subject) map.set(a.subject.id, a.subject); }
+    return Array.from(map.values());
+  }, [allItems]);
+
+  const monthlyTrend = useMemo(() => {
+    const map = new Map<string, { label: string; total: number; approved: number }>();
+    for (const a of allItems) {
+      if (a.status === "ARCHIVED") continue;
+      const d = new Date(a.submissionDate);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const label = d.toLocaleDateString("en-IN", { month: "short", year: "numeric" });
+      if (!map.has(key)) map.set(key, { label, total: 0, approved: 0 });
+      const e = map.get(key)!;
+      e.total++;
+      if (a.displayStatus === "APPROVED") e.approved++;
+    }
+    return Array.from(map.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([, v]) => ({ ...v, rate: v.total > 0 ? Math.round((v.approved / v.total) * 100) : 0 }));
+  }, [allItems]);
+
+  const subjectBreakdown = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; code: string; total: number; approved: number; overdue: number }>();
+    for (const a of allItems) {
+      if (!a.subject || a.status === "ARCHIVED") continue;
+      const key = a.subject.id;
+      if (!map.has(key)) map.set(key, { ...a.subject, total: 0, approved: 0, overdue: 0 });
+      const e = map.get(key)!;
+      e.total++;
+      if (a.displayStatus === "APPROVED") e.approved++;
+      if (a.displayStatus === "OVERDUE")  e.overdue++;
+    }
+    return Array.from(map.values()).map((s) => ({
+      ...s,
+      rate: s.total > 0 ? Math.round((s.approved / s.total) * 100) : 0,
+    }));
+  }, [allItems]);
+
+  const rateTextColor = (r: number) => r >= 75 ? "text-green-600" : r >= 50 ? "text-amber-600" : "text-red-600";
+  const rateBarColor  = (r: number) => r >= 75 ? "bg-green-500"   : r >= 50 ? "bg-amber-500"   : "bg-red-500";
+
+  const STATUS_OPTS = [
+    { value: "",              label: "All Statuses"  },
+    { value: "NOT_SUBMITTED", label: "Pending"       },
+    { value: "OVERDUE",       label: "Overdue"       },
+    { value: "SUBMITTED",     label: "Submitted"     },
+    { value: "IN_PROCESS",    label: "Under Review"  },
+    { value: "APPROVED",      label: "Approved"      },
+    { value: "REJECTED",      label: "Rejected"      },
+  ];
+
+  return (
+    <div className="space-y-4">
+      {/* Controls */}
+      <div className="bg-white rounded-xl border border-gray-100 p-4">
+        <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
+          <div className="flex rounded-lg border border-gray-200 overflow-hidden shrink-0">
+            {(["list", "stats"] as const).map((v) => (
+              <button key={v} onClick={() => setView(v)}
+                className={`px-3 py-1.5 text-xs font-semibold capitalize transition-colors ${
+                  view === v ? "bg-indigo-600 text-white" : "text-gray-500 hover:bg-gray-50"
+                }`}>
+                {v === "list" ? "Assignment List" : "Statistics"}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs text-gray-400 font-medium whitespace-nowrap">From</label>
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+                className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-indigo-400" />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs text-gray-400 font-medium whitespace-nowrap">To</label>
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+                className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-indigo-400" />
+            </div>
+          </div>
+          {subjects.length > 0 && (
+            <select value={subjectFilter} onChange={(e) => setSubjectFilter(e.target.value)}
+              className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 bg-white focus:outline-none focus:border-indigo-400">
+              <option value="">All Subjects</option>
+              {subjects.map((s: any) => (
+                <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+              ))}
+            </select>
+          )}
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+            className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 bg-white focus:outline-none focus:border-indigo-400">
+            {STATUS_OPTS.map(({ value, label }) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: "Total Assigned", value: String(stats.total),          color: "text-gray-800",  bg: "bg-white"     },
+          { label: "Approved",       value: String(stats.approved),       color: "text-green-700", bg: "bg-green-50"  },
+          { label: "Overdue",        value: String(stats.overdue),        color: "text-red-700",   bg: "bg-red-50"    },
+          { label: "Completion %",   value: `${stats.completionRate}%`,   color: rateTextColor(stats.completionRate), bg: "bg-indigo-50" },
+        ].map(({ label, value, color, bg }) => (
+          <div key={label} className={`${bg} rounded-xl border border-gray-100 px-4 py-3 text-center`}>
+            <p className={`text-2xl font-black ${color}`}>{isLoading ? "—" : value}</p>
+            <p className="text-xs text-gray-400 mt-0.5 font-medium">{label}</p>
+          </div>
+        ))}
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center h-40">
+          <div className="h-6 w-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : items.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-40 text-center">
+          <BookOpenCheck className="h-8 w-8 text-gray-200 mb-3" />
+          <p className="text-sm font-semibold text-gray-400">No assignments found</p>
+          <p className="text-xs text-gray-400 mt-1">Try adjusting the date range or filters.</p>
+        </div>
+      ) : view === "list" ? (
+        <div className="space-y-2">
+          {items.map((a: any) => {
+            const style   = ASSIGN_STYLE[a.displayStatus] ?? ASSIGN_STYLE.NOT_SUBMITTED;
+            const dueFmt  = new Date(a.submissionDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+            const asnFmt  = new Date(a.assignmentDate).toLocaleDateString("en-IN",  { day: "2-digit", month: "short" });
+            return (
+              <div key={a.id} className={`bg-white rounded-xl border ${style.border} flex overflow-hidden`}>
+                <div className={`w-1.5 shrink-0 ${style.bar}`} />
+                <div className="flex-1 px-4 py-3 flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4 min-w-0">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-800 truncate">{a.name}</p>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
+                      {a.subject && (
+                        <span className="text-xs text-indigo-600 font-medium">{a.subject.name} ({a.subject.code})</span>
+                      )}
+                      {a.faculty && (
+                        <span className="text-xs text-gray-400">{a.faculty.firstName} {a.faculty.lastName}</span>
+                      )}
+                    </div>
+                    {a.topics && <p className="text-xs text-gray-400 truncate mt-0.5">{a.topics}</p>}
+                    {a.submission?.reviewNote && (
+                      <p className="text-xs text-orange-600 mt-0.5 italic">"{a.submission.reviewNote}"</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 sm:flex-col sm:items-end shrink-0">
+                    <div className="text-right">
+                      <p className="text-xs text-gray-400">Assigned {asnFmt}</p>
+                      <p className="text-xs font-medium text-gray-600">Due {dueFmt}</p>
+                    </div>
+                    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${style.bg} ${style.text}`}>
+                      {style.label}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {/* Big completion rate card */}
+          <div className="bg-white rounded-xl border border-gray-100 p-6 flex flex-col sm:flex-row items-center gap-6">
+            <div className="text-center shrink-0">
+              <p className={`text-5xl font-black ${rateTextColor(stats.completionRate)}`}>{stats.completionRate}%</p>
+              <p className="text-xs text-gray-400 mt-1 font-medium">Completion Rate</p>
+              <p className="text-xs text-gray-300 mt-0.5">{stats.approved} of {stats.total} approved</p>
+            </div>
+            <div className="flex-1 w-full grid grid-cols-3 sm:grid-cols-6 gap-2">
+              {[
+                { label: "Pending",     value: stats.notSubmitted, color: "text-amber-700",  bg: "bg-amber-50"  },
+                { label: "Overdue",     value: stats.overdue,      color: "text-red-700",    bg: "bg-red-50"    },
+                { label: "Submitted",   value: stats.submitted,    color: "text-blue-700",   bg: "bg-blue-50"   },
+                { label: "In Review",   value: stats.inProcess,    color: "text-violet-700", bg: "bg-violet-50" },
+                { label: "Approved",    value: stats.approved,     color: "text-green-700",  bg: "bg-green-50"  },
+                { label: "Rejected",    value: stats.rejected,     color: "text-orange-700", bg: "bg-orange-50" },
+              ].map(({ label, value, color, bg }) => (
+                <div key={label} className={`${bg} rounded-lg px-3 py-2 text-center`}>
+                  <p className={`text-lg font-black ${color}`}>{value}</p>
+                  <p className="text-[10px] text-gray-400 font-medium">{label}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Monthly trend */}
+          {monthlyTrend.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+              <div className="px-5 py-4 border-b border-gray-50">
+                <p className="text-sm font-semibold text-gray-800">Monthly Completion Trend</p>
+              </div>
+              <div className="px-5 py-4 space-y-3">
+                {monthlyTrend.map((m) => (
+                  <div key={m.label} className="flex items-center gap-3">
+                    <p className="text-xs font-medium text-gray-500 w-20 shrink-0">{m.label}</p>
+                    <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
+                      <div className={`h-2 rounded-full transition-all ${rateBarColor(m.rate)}`}
+                        style={{ width: `${m.rate}%` }} />
+                    </div>
+                    <p className={`text-xs font-bold w-9 text-right shrink-0 ${rateTextColor(m.rate)}`}>{m.rate}%</p>
+                    <p className="text-xs text-gray-400 w-16 text-right shrink-0">{m.approved}/{m.total}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Subject breakdown */}
+          {subjectBreakdown.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+              <div className="px-5 py-4 border-b border-gray-50">
+                <p className="text-sm font-semibold text-gray-800">Subject-wise Breakdown</p>
+              </div>
+              <div className="divide-y divide-gray-50">
+                {subjectBreakdown.map((s) => (
+                  <div key={s.id} className="px-5 py-3 flex items-center gap-4">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-800 truncate">{s.name}</p>
+                      <p className="text-xs text-gray-400">{s.code}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-xs text-green-600 font-medium">{s.approved} done</span>
+                      {s.overdue > 0 && <span className="text-xs text-red-500 font-medium">{s.overdue} overdue</span>}
+                      <span className="text-xs text-gray-300">·</span>
+                      <span className={`text-sm font-black ${rateTextColor(s.rate)}`}>{s.rate}%</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Attendance Tab ────────────────────────────────────────────────────────────
+
+function AttendanceTab({ student }: { student: any }) {
+  const today = new Date();
+  const defaultFrom = new Date(today.getFullYear(), today.getMonth() - 2, 1);
+
+  const [dateFrom, setDateFrom] = useState(defaultFrom.toISOString().split("T")[0]);
+  const [dateTo,   setDateTo]   = useState(today.toISOString().split("T")[0]);
+  const [subjectFilter, setSubjectFilter] = useState("");
+  const [view, setView] = useState<"classes" | "stats">("classes");
+
+  const params = new URLSearchParams({ dateFrom, dateTo });
+  if (subjectFilter) params.set("subjectId", subjectFilter);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["student-attendance", student.id, dateFrom, dateTo, subjectFilter],
+    queryFn: () => api.get(`/api/v1/academics/students/${student.id}/attendance?${params}`).then((r) => r.data),
+    enabled: !!student.id,
+  });
+
+  const classes: any[] = data?.data ?? [];
+  const stats = data?.stats ?? { total: 0, present: 0, absent: 0, unrecorded: 0, percentage: 0, bySubject: [] };
+
+  const subjects = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; code: string }>();
+    for (const c of classes) { if (c.subject) map.set(c.subject.id, c.subject); }
+    return Array.from(map.values());
+  }, [classes]);
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const c of classes) {
+      const key = (c.date as string).split("T")[0];
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(c);
+    }
+    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [classes]);
+
+  const monthlyTrend = useMemo(() => {
+    const map = new Map<string, { label: string; total: number; present: number; absent: number }>();
+    for (const c of classes) {
+      const d = new Date(c.date);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const label = d.toLocaleDateString("en-IN", { month: "short", year: "numeric" });
+      if (!map.has(key)) map.set(key, { label, total: 0, present: 0, absent: 0 });
+      const entry = map.get(key)!;
+      entry.total++;
+      if (c.attendanceStatus === "PRESENT") entry.present++;
+      else if (c.attendanceStatus === "ABSENT") entry.absent++;
+    }
+    return Array.from(map.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([, v]) => ({
+        ...v,
+        percentage: v.present + v.absent > 0 ? Math.round((v.present / (v.present + v.absent)) * 100) : 0,
+      }));
+  }, [classes]);
+
+  function attStyle(s: string) {
+    if (s === "PRESENT") return { bar: "bg-green-500", bg: "bg-green-50", text: "text-green-700", border: "border-green-200", label: "Present" };
+    if (s === "ABSENT")  return { bar: "bg-red-500",   bg: "bg-red-50",   text: "text-red-700",   border: "border-red-200",   label: "Absent"  };
+    return { bar: "bg-gray-300", bg: "bg-gray-50", text: "text-gray-500", border: "border-gray-200", label: "Unrecorded" };
+  }
+  const pctTextColor = (p: number) => p >= 85 ? "text-green-600" : p >= 75 ? "text-amber-600" : "text-red-600";
+  const pctBarColor  = (p: number) => p >= 85 ? "bg-green-500"   : p >= 75 ? "bg-amber-500"   : "bg-red-500";
+
+  return (
+    <div className="space-y-4">
+      {/* Controls */}
+      <div className="bg-white rounded-xl border border-gray-100 p-4">
+        <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
+          <div className="flex rounded-lg border border-gray-200 overflow-hidden shrink-0">
+            {(["classes", "stats"] as const).map((v) => (
+              <button key={v} onClick={() => setView(v)}
+                className={`px-3 py-1.5 text-xs font-semibold capitalize transition-colors ${
+                  view === v ? "bg-indigo-600 text-white" : "text-gray-500 hover:bg-gray-50"
+                }`}>
+                {v === "classes" ? "Class List" : "Statistics"}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs text-gray-400 font-medium whitespace-nowrap">From</label>
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+                className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-indigo-400" />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs text-gray-400 font-medium whitespace-nowrap">To</label>
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+                className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-indigo-400" />
+            </div>
+          </div>
+          {subjects.length > 0 && (
+            <select value={subjectFilter} onChange={(e) => setSubjectFilter(e.target.value)}
+              className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 bg-white focus:outline-none focus:border-indigo-400">
+              <option value="">All Subjects</option>
+              {subjects.map((s) => (
+                <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+              ))}
+            </select>
+          )}
+        </div>
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: "Total Classes",  value: String(stats.total),      color: "text-gray-800",  bg: "bg-white"      },
+          { label: "Present",        value: String(stats.present),    color: "text-green-700", bg: "bg-green-50"   },
+          { label: "Absent",         value: String(stats.absent),     color: "text-red-700",   bg: "bg-red-50"     },
+          { label: "Attendance %",   value: `${stats.percentage}%`,   color: pctTextColor(stats.percentage), bg: "bg-indigo-50" },
+        ].map(({ label, value, color, bg }) => (
+          <div key={label} className={`${bg} rounded-xl border border-gray-100 px-4 py-3 text-center`}>
+            <p className={`text-2xl font-black ${color}`}>{isLoading ? "—" : value}</p>
+            <p className="text-xs text-gray-400 mt-0.5 font-medium">{label}</p>
+          </div>
+        ))}
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center h-40">
+          <div className="h-6 w-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : classes.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-40 text-center">
+          <CalendarCheck className="h-8 w-8 text-gray-200 mb-3" />
+          <p className="text-sm font-semibold text-gray-400">No classes found</p>
+          <p className="text-xs text-gray-400 mt-1">Try adjusting the date range or subject filter.</p>
+        </div>
+      ) : view === "classes" ? (
+        <div className="space-y-5">
+          {grouped.map(([dateKey, dayClasses]) => {
+            const d = new Date(dateKey + "T00:00:00");
+            const dayLabel = d.toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
+            return (
+              <div key={dateKey}>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 px-1">{dayLabel}</p>
+                <div className="space-y-2">
+                  {dayClasses.map((c: any) => {
+                    const col   = attStyle(c.attendanceStatus);
+                    const start = new Date(c.startTime).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+                    const end   = new Date(c.endTime).toLocaleTimeString("en-IN",   { hour: "2-digit", minute: "2-digit", hour12: true });
+                    return (
+                      <div key={c.id} className={`bg-white rounded-xl border ${col.border} flex overflow-hidden`}>
+                        <div className={`w-1.5 shrink-0 ${col.bar}`} />
+                        <div className="flex-1 px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 min-w-0">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-800 truncate">
+                              {c.subject ? c.subject.name : "—"}
+                              {c.subject?.code && <span className="ml-1.5 text-xs font-normal text-gray-400">({c.subject.code})</span>}
+                            </p>
+                            {c.topics && <p className="text-xs text-gray-400 truncate mt-0.5">{c.topics}</p>}
+                            {c.faculty && (
+                              <p className="text-xs text-gray-400 mt-0.5">{c.faculty.firstName} {c.faculty.lastName}</p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 sm:flex-col sm:items-end shrink-0">
+                            <p className="text-xs text-gray-400 font-medium whitespace-nowrap">{start} – {end}</p>
+                            <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${col.bg} ${col.text}`}>
+                              {col.label}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {/* Monthly trend */}
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-50">
+              <p className="text-sm font-semibold text-gray-800">Monthly Attendance Trend</p>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              {monthlyTrend.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-4">No data</p>
+              ) : monthlyTrend.map((m) => (
+                <div key={m.label} className="flex items-center gap-3">
+                  <p className="text-xs font-medium text-gray-500 w-20 shrink-0">{m.label}</p>
+                  <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
+                    <div className={`h-2 rounded-full transition-all ${pctBarColor(m.percentage)}`}
+                      style={{ width: `${m.percentage}%` }} />
+                  </div>
+                  <p className={`text-xs font-bold w-9 text-right shrink-0 ${pctTextColor(m.percentage)}`}>{m.percentage}%</p>
+                  <p className="text-xs text-gray-400 w-16 text-right shrink-0">{m.present}/{m.present + m.absent} cls</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Subject breakdown */}
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-50">
+              <p className="text-sm font-semibold text-gray-800">Subject-wise Breakdown</p>
+            </div>
+            {stats.bySubject.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-8">No subject data</p>
+            ) : (
+              <div className="divide-y divide-gray-50">
+                {(stats.bySubject as any[]).map((s) => (
+                  <div key={s.id} className="px-5 py-3 flex items-center gap-4">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-800 truncate">{s.name}</p>
+                      <p className="text-xs text-gray-400">{s.code}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-xs text-green-600 font-medium">{s.present}P</span>
+                      <span className="text-xs text-gray-300">·</span>
+                      <span className="text-xs text-red-600 font-medium">{s.absent}A</span>
+                      <span className="text-xs text-gray-300">·</span>
+                      <span className={`text-sm font-black ${pctTextColor(s.percentage)}`}>{s.percentage}%</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LoginTab({ student, canEdit, onRefetch }: { student: any; canEdit: boolean; onRefetch: () => void }) {
   const qc = useQueryClient();
   const [showPassword, setShowPassword] = useState(false);
-  const portalUrl = `${process.env.NEXT_PUBLIC_API_URL?.replace(":4000", ":3000") ?? "http://localhost:3000"}/student-login`;
+  const portalUrl = `${(process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000")
+    .replace(":4001", ":3002")   // staging
+    .replace(":4000", ":3000")   // production
+  }/student/login`;
 
   const resetPwdMut = useMutation({
     mutationFn: () => api.post(`/api/v1/academics/students/${student.id}/reset-password`, {}),
@@ -1476,8 +2034,8 @@ export default function StudentDetailPage() {
           {tab === "profile"     && <ProfileTab   student={student} canEdit={canEdit} onRefetch={refetch} />}
           {tab === "admission"   && <AdmissionTab student={student} canEdit={canEdit} onRefetch={refetch} />}
           {tab === "batch"       && <BatchTab     student={student} canEdit={canEdit} onRefetch={refetch} />}
-          {tab === "attendance"  && <ComingSoon label="Attendance"   icon={CalendarCheck}  />}
-          {tab === "assignments" && <ComingSoon label="Assignments"  icon={BookOpenCheck}  />}
+          {tab === "attendance"  && <AttendanceTab student={student} />}
+          {tab === "assignments" && <AssignmentsTab student={student} />}
           {tab === "assessments" && <ComingSoon label="Assessments"  icon={BarChart2}      />}
           {tab === "ptms"        && <ComingSoon label="PTMs"         icon={MessageSquare}  />}
           {tab === "noticeboard" && <NoticeBoardTab />}

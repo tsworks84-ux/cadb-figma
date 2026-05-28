@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { api } from "@/lib/api";
+import { studentApi as api } from "@/lib/studentApi";
 import { useStudentAuthStore } from "@/store/studentAuth";
 import { toast } from "sonner";
 import { Eye, EyeOff, ShieldCheck } from "lucide-react";
@@ -40,8 +40,7 @@ export default function StudentChangePasswordPage() {
     try {
       await api.post(
         "/api/v1/student/auth/change-password",
-        { currentPassword: data.currentPassword, newPassword: data.newPassword },
-        { headers: { Authorization: `Bearer ${accessToken}` } }
+        { currentPassword: data.currentPassword, newPassword: data.newPassword }
       );
       toast.success("Password changed. Please sign in again.");
       clearAuth();

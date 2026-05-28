@@ -134,12 +134,13 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
         student: {
           select: {
             id: true, firstName: true, lastName: true,
-            studentCode: true, rollNumber: true, batchId: true,
-            batch: {
+            studentCode: true, rollNumber: true,
+            studentBatches: {
               select: {
-                id: true, name: true, locationId: true,
-                location: { select: { id: true, name: true } },
+                batchId: true,
+                batch: { select: { id: true, name: true, locationId: true, location: { select: { id: true, name: true } } } },
               },
+              take: 1,
             },
           },
         },
@@ -151,16 +152,17 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
     const studentMap = new Map<string, StudentStat>();
     for (const sub of submissions) {
       const s = sub.student;
+      const firstBatch = (s as any).studentBatches?.[0];
       if (!studentMap.has(s.id)) {
         studentMap.set(s.id, {
           id: s.id,
           name: `${s.firstName} ${s.lastName}`,
           code: s.studentCode,
           rollNumber: s.rollNumber ?? "",
-          batchId:   s.batchId ?? "",
-          batchName: s.batch?.name ?? "—",
-          cityId:    (s.batch as any)?.locationId ?? "",
-          cityName:  (s.batch as any)?.location?.name ?? "—",
+          batchId:   firstBatch?.batchId ?? "",
+          batchName: firstBatch?.batch?.name ?? "—",
+          cityId:    firstBatch?.batch?.locationId ?? "",
+          cityName:  firstBatch?.batch?.location?.name ?? "—",
           total: 0, submitted: 0,
         });
       }
@@ -174,12 +176,13 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
     const batchMap = new Map<string, BatchStat>();
     for (const sub of submissions) {
       const s = sub.student;
-      const bid = s.batchId ?? "__none__";
+      const firstBatch = (s as any).studentBatches?.[0];
+      const bid = firstBatch?.batchId ?? "__none__";
       if (!batchMap.has(bid)) {
         batchMap.set(bid, {
-          id: bid, name: s.batch?.name ?? "—",
-          cityId:   (s.batch as any)?.locationId ?? "",
-          cityName: (s.batch as any)?.location?.name ?? "—",
+          id: bid, name: firstBatch?.batch?.name ?? "—",
+          cityId:   firstBatch?.batch?.locationId ?? "",
+          cityName: firstBatch?.batch?.location?.name ?? "—",
           total: 0, submitted: 0,
         });
       }
@@ -192,8 +195,9 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
     const cityMap = new Map<string, { id: string; name: string; total: number; submitted: number }>();
     for (const sub of submissions) {
       const s = sub.student;
-      const cid = (s.batch as any)?.locationId ?? "__none__";
-      if (!cityMap.has(cid)) cityMap.set(cid, { id: cid, name: (s.batch as any)?.location?.name ?? "—", total: 0, submitted: 0 });
+      const firstBatchC = (s as any).studentBatches?.[0];
+      const cid = firstBatchC?.batch?.locationId ?? "__none__";
+      if (!cityMap.has(cid)) cityMap.set(cid, { id: cid, name: firstBatchC?.batch?.location?.name ?? "—", total: 0, submitted: 0 });
       const e = cityMap.get(cid)!;
       e.total++;
       if (sub.status !== "NOT_SUBMITTED") e.submitted++;
@@ -355,7 +359,8 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
             student: {
               select: {
                 id: true, firstName: true, lastName: true,
-                studentCode: true, rollNumber: true, batchId: true,
+                studentCode: true, rollNumber: true,
+                studentBatches: { select: { batchId: true }, take: 1 },
               },
             },
           },
@@ -368,8 +373,8 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
 
     // All active students currently in these batches
     const currentStudents = await prisma.student.findMany({
-      where: { batchId: { in: batchIds }, isArchived: false },
-      select: { id: true, firstName: true, lastName: true, studentCode: true, rollNumber: true, batchId: true },
+      where: { studentBatches: { some: { batchId: { in: batchIds } } }, isArchived: false },
+      select: { id: true, firstName: true, lastName: true, studentCode: true, rollNumber: true, studentBatches: { select: { batchId: true }, take: 1 } },
       orderBy: [{ rollNumber: "asc" }, { firstName: "asc" }],
     });
 

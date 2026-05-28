@@ -9,7 +9,9 @@ import {
   ArrowLeft, Users, School, GraduationCap, MapPin, Calendar,
   Search, X, Plus, UserMinus, UserCheck, Download, Printer,
   ChevronLeft, ChevronRight, AlertCircle, Pencil, Check,
-  Archive, BookOpen, Filter,
+  Archive, BookOpen, Filter, UserCircle2,
+  CalendarCheck, ClipboardList, BarChart2, MessageSquare,
+  TrendingUp, CheckCircle2, XCircle, Clock,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -104,6 +106,9 @@ export default function BatchDetailPage() {
   const [page,         setPage]         = useState(1);
   const LIMIT = 25;
 
+  // ── Tab state ─────────────────────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState<"students" | "attendance" | "assignments" | "assessments" | "ptm">("students");
+
   // ── Add modal state ──────────────────────────────────────────────────────────
   const [addOpen,       setAddOpen]       = useState(false);
   const [addSearch,     setAddSearch]     = useState("");
@@ -130,6 +135,35 @@ export default function BatchDetailPage() {
   const { data: batch, isLoading: batchLoading } = useQuery({
     queryKey: ["batch", id],
     queryFn: () => api.get(`/api/v1/academics/batches/${id}`).then((r) => r.data.data),
+  });
+
+  // ── Tab data queries ─────────────────────────────────────────────────────────
+  const { data: attendanceSummary, isLoading: attendanceLoading } = useQuery({
+    queryKey: ["batch-attendance-summary", id],
+    queryFn: () => api.get(`/api/v1/academics/batches/${id}/attendance-summary`).then((r) => r.data.data),
+    enabled: activeTab === "attendance",
+  });
+  const [attendanceDate, setAttendanceDate] = useState("");
+  const attendanceDateClasses: any[] = (attendanceSummary?.classes ?? []).filter((c: any) =>
+    attendanceDate ? c.date?.startsWith(attendanceDate) : false
+  );
+
+  const { data: assignmentSummary, isLoading: assignmentLoading } = useQuery({
+    queryKey: ["batch-assignment-summary", id],
+    queryFn: () => api.get(`/api/v1/academics/batches/${id}/assignment-summary`).then((r) => r.data.data),
+    enabled: activeTab === "assignments",
+  });
+
+  const { data: examSummary, isLoading: examLoading } = useQuery({
+    queryKey: ["batch-exam-summary", id],
+    queryFn: () => api.get(`/api/v1/academics/batches/${id}/exam-summary`).then((r) => r.data.data),
+    enabled: activeTab === "assessments",
+  });
+  const [selectedExamId, setSelectedExamId] = useState<string | null>(null);
+  const { data: examResultsRes, isLoading: examResultsLoading } = useQuery({
+    queryKey: ["exam-results", selectedExamId],
+    queryFn: () => api.get(`/api/v1/academics/assessments/${selectedExamId}/results`).then((r) => r.data),
+    enabled: !!selectedExamId,
   });
 
   // ── Students in batch ────────────────────────────────────────────────────────
@@ -165,6 +199,8 @@ export default function BatchDetailPage() {
       qc.invalidateQueries({ queryKey: ["batch-students", id] });
       qc.invalidateQueries({ queryKey: ["batch", id] });
       qc.invalidateQueries({ queryKey: ["students-for-add"] });
+      qc.invalidateQueries({ queryKey: ["batches"] });
+      qc.invalidateQueries({ queryKey: ["batches-filtered"] });
     },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
   });
@@ -176,6 +212,8 @@ export default function BatchDetailPage() {
       setConfirmStudent(null);
       qc.invalidateQueries({ queryKey: ["batch-students", id] });
       qc.invalidateQueries({ queryKey: ["batch", id] });
+      qc.invalidateQueries({ queryKey: ["batches"] });
+      qc.invalidateQueries({ queryKey: ["batches-filtered"] });
     },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
   });
@@ -253,6 +291,64 @@ export default function BatchDetailPage() {
           {batch.location && <InfoChip icon={<MapPin className="h-3.5 w-3.5 text-green-400" />} label="Location" value={batch.location.name} />}
           {batchStartDate && <InfoChip icon={<Calendar className="h-3.5 w-3.5 text-amber-400" />} label="Start Date" value={batchStartDate} />}
           <InfoChip icon={<Users className="h-3.5 w-3.5 text-gray-400" />} label="Students" value={batch._count?.students ?? 0} />
+          {batch.facultyMentor && (
+            <InfoChip
+              icon={<UserCircle2 className="h-3.5 w-3.5 text-rose-400" />}
+              label="Faculty Mentor"
+              value={`${batch.facultyMentor.firstName} ${batch.facultyMentor.lastName}`}
+            />
+          )}
+        </div>
+
+        {/* Subject teachers row */}
+        {batch.batchSubjects?.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <span className="flex items-center gap-1 text-xs text-gray-400 shrink-0">
+              <BookOpen className="h-3.5 w-3.5" /> Subjects:
+            </span>
+            {batch.batchSubjects.map((bs: any) => (
+              <span
+                key={bs.id}
+                className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 border border-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-700"
+              >
+                {bs.subject?.name ?? "—"}
+                {bs.employee && (
+                  <span className="text-indigo-400">·</span>
+                )}
+                {bs.employee && (
+                  <span className="text-indigo-500 font-normal">
+                    {bs.employee.firstName} {bs.employee.lastName}
+                  </span>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Tab navigation ──────────────────────────────────────────────────── */}
+      <div className="bg-white border-b border-gray-100 px-4 sm:px-6 print:hidden">
+        <div className="flex gap-1 overflow-x-auto">
+          {([
+            { key: "students",    label: "Students",    icon: Users },
+            { key: "attendance",  label: "Attendance",  icon: CalendarCheck },
+            { key: "assignments", label: "Assignments", icon: ClipboardList },
+            { key: "assessments", label: "Assessments", icon: BarChart2 },
+            { key: "ptm",         label: "PTM",         icon: MessageSquare },
+          ] as const).map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              className={`flex items-center gap-1.5 px-3 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
+                activeTab === key
+                  ? "border-indigo-600 text-indigo-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-200"
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -268,8 +364,8 @@ export default function BatchDetailPage() {
         </div>
       </div>
 
-      {/* ── Toolbar ─────────────────────────────────────────────────────────── */}
-      <div className="bg-white border-b border-gray-100 px-4 sm:px-6 py-3 print:hidden">
+      {/* ── Toolbar (Students tab only) ─────────────────────────────────────── */}
+      {activeTab === "students" && <div className="bg-white border-b border-gray-100 px-4 sm:px-6 py-3 print:hidden">
         <div className="flex flex-wrap items-center gap-2">
           {/* Search */}
           <div className="relative flex-1 min-w-0 max-w-xs">
@@ -320,10 +416,13 @@ export default function BatchDetailPage() {
             </button>
           )}
         </div>
-      </div>
+      </div>}
 
-      {/* ── Student table ────────────────────────────────────────────────────── */}
+      {/* ── Tab content area ─────────────────────────────────────────────────── */}
       <div className="flex-1 p-4 sm:p-6">
+
+      {/* Students tab */}
+      {activeTab === "students" && (<div>
         {studentsLoading ? (
           <div className="space-y-2">
             {[1, 2, 3, 4, 5].map((i) => <div key={i} className="h-14 rounded-xl bg-white animate-pulse" />)}
@@ -491,7 +590,213 @@ export default function BatchDetailPage() {
             )}
           </>
         )}
-      </div>
+      </div>)}
+
+      {/* ── Attendance tab ───────────────────────────────────────────────────── */}
+      {activeTab === "attendance" && (
+        <div className="space-y-4">
+          {/* Summary cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <StatCard label="Total Classes" value={attendanceSummary?.totalClasses ?? "—"} loading={attendanceLoading} color="indigo" />
+            <StatCard label="With Attendance" value={attendanceSummary?.recordedClasses ?? "—"} loading={attendanceLoading} color="blue" />
+            <StatCard label="Avg Attendance" value={attendanceSummary?.avgPct != null ? `${attendanceSummary.avgPct}%` : "—"} loading={attendanceLoading} color="green" />
+            <StatCard label="Total Students" value={attendanceSummary?.totalStudents ?? "—"} loading={attendanceLoading} color="purple" />
+          </div>
+
+          {/* Date picker */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <p className="font-semibold text-gray-800 text-sm">Class-wise Attendance</p>
+              <input type="date" value={attendanceDate} onChange={(e) => setAttendanceDate(e.target.value)}
+                className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none" />
+            </div>
+
+            {attendanceLoading ? (
+              <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-12 rounded-xl bg-gray-100 animate-pulse" />)}</div>
+            ) : attendanceDate && attendanceDateClasses.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-8">No classes scheduled on this date.</p>
+            ) : !attendanceDate ? (
+              <div className="space-y-2">
+                {(attendanceSummary?.classes ?? []).map((c: any) => (
+                  <AttendanceClassRow key={c.scheduleId} c={c} />
+                ))}
+                {(attendanceSummary?.classes ?? []).length === 0 && (
+                  <p className="text-sm text-gray-400 text-center py-8">No classes scheduled for this batch yet.</p>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {attendanceDateClasses.map((c: any) => <AttendanceClassRow key={c.scheduleId} c={c} />)}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Assignments tab ──────────────────────────────────────────────────── */}
+      {activeTab === "assignments" && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <StatCard label="Total Assignments" value={assignmentSummary?.totalAssignments ?? "—"} loading={assignmentLoading} color="indigo" />
+            <StatCard label="Avg Submission Rate" value={assignmentSummary?.avgSubmissionPct != null ? `${assignmentSummary.avgSubmissionPct}%` : "—"} loading={assignmentLoading} color="green" />
+            <StatCard label="Total Students" value={assignmentSummary?.totalStudents ?? "—"} loading={assignmentLoading} color="blue" />
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-50">
+              <p className="font-semibold text-gray-800 text-sm">Assignment List</p>
+            </div>
+            {assignmentLoading ? (
+              <div className="p-4 space-y-2">{[1,2,3,4].map(i => <div key={i} className="h-12 rounded-xl bg-gray-100 animate-pulse" />)}</div>
+            ) : (assignmentSummary?.assignments ?? []).length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-12">No assignments for this batch yet.</p>
+            ) : (
+              <div className="divide-y divide-gray-50">
+                {(assignmentSummary?.assignments ?? []).map((a: any) => (
+                  <div key={a.assignmentId} className="px-4 py-3 flex flex-wrap items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900 text-sm truncate">{a.name}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {a.subject ? `${a.subject} · ` : ""}
+                        Given: {fmtDate(a.assignmentDate)} · Due: {fmtDate(a.submissionDate)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium border ${
+                        a.status === "SUBMITTED" ? "bg-green-50 text-green-700 border-green-100"
+                        : a.status === "OVERDUE"  ? "bg-red-50 text-red-600 border-red-100"
+                        : "bg-amber-50 text-amber-600 border-amber-100"
+                      }`}>{a.status}</span>
+                      {a.total > 0 && (
+                        <span className="text-xs text-gray-500 tabular-nums">
+                          {a.submitted}/{a.total} submitted
+                          {a.pct != null && <span className="ml-1 text-indigo-500 font-medium">({a.pct}%)</span>}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Assessments tab ──────────────────────────────────────────────────── */}
+      {activeTab === "assessments" && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <StatCard label="Total Exams" value={examSummary?.overall?.totalExams ?? "—"} loading={examLoading} color="indigo" />
+            <StatCard label="Avg Score" value={examSummary?.overall?.avgScorePct != null ? `${examSummary.overall.avgScorePct}%` : "—"} loading={examLoading} color="green" />
+            <StatCard label="Avg Attendance" value={examSummary?.overall?.avgAttendPct != null ? `${examSummary.overall.avgAttendPct}%` : "—"} loading={examLoading} color="blue" />
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+            {/* Exam list */}
+            <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-50">
+                <p className="font-semibold text-gray-800 text-sm">Exams</p>
+              </div>
+              {examLoading ? (
+                <div className="p-4 space-y-2">{[1,2,3].map(i => <div key={i} className="h-12 rounded-xl bg-gray-100 animate-pulse" />)}</div>
+              ) : (examSummary?.exams ?? []).length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-12">No assessments for this batch yet.</p>
+              ) : (
+                <div className="divide-y divide-gray-50">
+                  {(examSummary?.exams ?? []).map((e: any) => (
+                    <button key={e.examId} onClick={() => setSelectedExamId(e.examId === selectedExamId ? null : e.examId)}
+                      className={`w-full text-left px-4 py-3 transition-colors ${selectedExamId === e.examId ? "bg-indigo-50" : "hover:bg-gray-50"}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-medium text-gray-900 text-sm truncate">{e.name}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">{fmtDate(e.date)}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          {e.avgPct != null && <p className="text-sm font-semibold text-indigo-600">{e.avgPct}%</p>}
+                          {e.attendPct != null && <p className="text-xs text-gray-400">{e.attendPct}% attended</p>}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Results panel */}
+            <div className="lg:col-span-3 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-50">
+                <p className="font-semibold text-gray-800 text-sm">
+                  {selectedExamId ? `Results — ${(examSummary?.exams ?? []).find((e: any) => e.examId === selectedExamId)?.name ?? ""}` : "Select an exam to view results"}
+                </p>
+              </div>
+              {!selectedExamId ? (
+                <div className="flex flex-col items-center justify-center py-16 text-gray-300">
+                  <BarChart2 className="h-10 w-10 mb-2" />
+                  <p className="text-sm">Click an exam on the left</p>
+                </div>
+              ) : examResultsLoading ? (
+                <div className="p-4 space-y-2">{[1,2,3,4,5].map(i => <div key={i} className="h-10 rounded-xl bg-gray-100 animate-pulse" />)}</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b border-gray-100">
+                      <tr>
+                        <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Student</th>
+                        <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Attended</th>
+                        <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Score</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {(examResultsRes?.data ?? []).map((r: any) => {
+                        const totalScore = r.result?.marks?.reduce((s: number, m: any) => s + (m.marks ?? 0), 0) ?? null;
+                        const exam = (examSummary?.exams ?? []).find((e: any) => e.examId === selectedExamId);
+                        const pct = totalScore != null && exam?.totalMarks ? Math.round((totalScore / exam.totalMarks) * 100) : null;
+                        return (
+                          <tr key={r.student.id} className="hover:bg-indigo-50/30 transition-colors">
+                            <td className="px-4 py-2.5">
+                              <p className="font-medium text-gray-900">{r.student.firstName} {r.student.lastName}</p>
+                              <p className="text-xs text-gray-400">{r.student.studentCode}</p>
+                            </td>
+                            <td className="px-4 py-2.5 text-center">
+                              {r.result ? (
+                                r.result.attended
+                                  ? <CheckCircle2 className="h-4 w-4 text-green-500 mx-auto" />
+                                  : <XCircle className="h-4 w-4 text-red-400 mx-auto" />
+                              ) : <Clock className="h-4 w-4 text-gray-300 mx-auto" />}
+                            </td>
+                            <td className="px-4 py-2.5 text-right">
+                              {totalScore != null ? (
+                                <span className="font-semibold text-gray-800">
+                                  {totalScore}{exam?.totalMarks ? `/${exam.totalMarks}` : ""}
+                                  {pct != null && <span className="ml-1 text-xs text-indigo-500">({pct}%)</span>}
+                                </span>
+                              ) : <span className="text-gray-300 text-xs">—</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {(examResultsRes?.data ?? []).length === 0 && (
+                        <tr><td colSpan={3} className="px-4 py-8 text-center text-sm text-gray-400">No results recorded yet.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── PTM tab ──────────────────────────────────────────────────────────── */}
+      {activeTab === "ptm" && (
+        <div className="flex flex-col items-center justify-center py-24 text-center">
+          <MessageSquare className="h-12 w-12 text-gray-200 mb-3" />
+          <p className="font-semibold text-gray-600 text-base">PTM Reports</p>
+          <p className="text-sm text-gray-400 mt-1 max-w-xs">Parent-Teacher Meeting reports are coming soon. You'll be able to log and review student-wise PTM notes here.</p>
+        </div>
+      )}
+
+      </div>{/* end tab content area */}
 
       {/* ── Add Students Modal ───────────────────────────────────────────────── */}
       {addOpen && (
@@ -613,6 +918,60 @@ export default function BatchDetailPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Tab helpers ───────────────────────────────────────────────────────────────
+
+function fmtDate(iso: string | null | undefined) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+const STAT_COLORS: Record<string, string> = {
+  indigo: "bg-indigo-50 text-indigo-700",
+  green:  "bg-green-50  text-green-700",
+  blue:   "bg-blue-50   text-blue-700",
+  purple: "bg-purple-50 text-purple-700",
+  amber:  "bg-amber-50  text-amber-700",
+};
+
+function StatCard({ label, value, loading, color = "indigo" }: { label: string; value: string | number; loading?: boolean; color?: string }) {
+  return (
+    <div className={`rounded-2xl p-4 border border-gray-100 shadow-sm ${STAT_COLORS[color] ?? STAT_COLORS.indigo}`}>
+      {loading ? (
+        <div className="h-7 w-16 rounded-lg bg-white/60 animate-pulse mb-1" />
+      ) : (
+        <p className="text-2xl font-bold tabular-nums">{value}</p>
+      )}
+      <p className="text-xs font-medium opacity-70 mt-0.5">{label}</p>
+    </div>
+  );
+}
+
+function AttendanceClassRow({ c }: { c: any }) {
+  const pct = c.pct;
+  const barColor = pct == null ? "bg-gray-200" : pct >= 75 ? "bg-green-400" : pct >= 50 ? "bg-amber-400" : "bg-red-400";
+  return (
+    <div className="flex items-center gap-3 py-2 px-1">
+      <div className="w-20 shrink-0 text-xs text-gray-400 tabular-nums">{fmtDate(c.date)}</div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-gray-700 font-medium truncate">{c.subject ?? "—"}{c.topic ? ` · ${c.topic}` : ""}</p>
+        <div className="mt-1 h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
+          <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${pct ?? 0}%` }} />
+        </div>
+      </div>
+      <div className="shrink-0 text-right w-20">
+        {c.recorded > 0 ? (
+          <span className="text-xs tabular-nums text-gray-600">
+            <span className="font-semibold">{c.present}</span>/{c.recorded}
+            {pct != null && <span className="ml-1 text-indigo-500">({pct}%)</span>}
+          </span>
+        ) : (
+          <span className="text-xs text-gray-300">Not recorded</span>
+        )}
+      </div>
     </div>
   );
 }

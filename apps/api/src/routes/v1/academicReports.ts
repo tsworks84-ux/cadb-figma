@@ -83,7 +83,7 @@ export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
           where:   { isExcluded: false },
           include: {
             marks:   true,
-            student: { select: { id: true, firstName: true, lastName: true, rollNumber: true, batch: { select: { name: true } } } },
+            student: { select: { id: true, firstName: true, lastName: true, rollNumber: true, studentBatches: { select: { batch: { select: { name: true } } }, take: 1, orderBy: { joinedAt: "asc" } } } },
           },
         },
       },
@@ -194,7 +194,7 @@ export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
     const [student, exams] = await Promise.all([
       prisma.student.findUnique({
         where: { id: q.studentId },
-        select: { id: true, firstName: true, lastName: true, rollNumber: true, batch: { select: { name: true, grade: { select: { name: true } }, location: { select: { name: true } } } } },
+        select: { id: true, firstName: true, lastName: true, rollNumber: true, studentBatches: { select: { batch: { select: { name: true, grade: { select: { name: true } }, location: { select: { name: true } } } } }, take: 1, orderBy: { joinedAt: "asc" } } },
       }),
       prisma.exam.findMany({
         where: { AND: conds },
@@ -253,9 +253,9 @@ export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
     const infoRows = [
       ["Name", `${student.firstName} ${student.lastName}`],
       ["Roll No", student.rollNumber ?? "—"],
-      ["Batch", student.batch?.name ?? "—"],
-      ["Grade", student.batch?.grade?.name ?? "—"],
-      ["Centre", student.batch?.location?.name ?? "—"],
+      ["Batch", (student as any).studentBatches?.[0]?.batch?.name ?? "—"],
+      ["Grade", (student as any).studentBatches?.[0]?.batch?.grade?.name ?? "—"],
+      ["Centre", (student as any).studentBatches?.[0]?.batch?.location?.name ?? "—"],
     ];
     infoRows.forEach(([k, v]) => {
       const r = ws1.addRow([k, v]);
@@ -311,7 +311,7 @@ export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
       include: {
         results: {
           where:   { isExcluded: false },
-          include: { student: { select: { id: true, firstName: true, lastName: true, rollNumber: true, batch: { select: { name: true } } } } },
+          include: { student: { select: { id: true, firstName: true, lastName: true, rollNumber: true, studentBatches: { select: { batch: { select: { name: true } } }, take: 1, orderBy: { joinedAt: "asc" } } } } },
         },
       },
     });
@@ -324,7 +324,7 @@ export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
       students: exam.results.map((r) => ({
         name:   `${r.student.firstName} ${r.student.lastName}`,
         roll:   r.student.rollNumber ?? "—",
-        batch:  r.student.batch?.name ?? "—",
+        batch:  (r.student as any).studentBatches?.[0]?.batch?.name ?? "—",
         attended: r.attended !== false,
       })).sort((a, b) => a.name.localeCompare(b.name)),
     }));
@@ -381,7 +381,7 @@ export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
           where:   { isExcluded: false },
           include: {
             marks:   true,
-            student: { select: { id: true, firstName: true, lastName: true, rollNumber: true, batch: { select: { name: true } } } },
+            student: { select: { id: true, firstName: true, lastName: true, rollNumber: true, studentBatches: { select: { batch: { select: { name: true } } }, take: 1, orderBy: { joinedAt: "asc" } } } },
           },
         },
       },
@@ -474,7 +474,7 @@ export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
         batches:     { include: { batch: { select: { name: true } } } },
         submissions: {
           include: {
-            student: { select: { id: true, firstName: true, lastName: true, rollNumber: true, batch: { select: { name: true } } } },
+            student: { select: { id: true, firstName: true, lastName: true, rollNumber: true, studentBatches: { select: { batch: { select: { name: true } } }, take: 1, orderBy: { joinedAt: "asc" } } } },
           },
         },
       },
@@ -490,7 +490,7 @@ export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
       students:  a.submissions.map((s) => ({
         name:  `${s.student.firstName} ${s.student.lastName}`,
         roll:  s.student.rollNumber ?? "—",
-        batch: s.student.batch?.name ?? "—",
+        batch: (s.student as any).studentBatches?.[0]?.batch?.name ?? "—",
         status: s.status,
         submittedAt: s.submittedAt,
       })).sort((a, b) => a.name.localeCompare(b.name)),

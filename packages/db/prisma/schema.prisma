@@ -408,6 +408,7 @@ model Employee {
   facultySubjects      BatchSubject[]      @relation("FacultySubjects")
   schedulesTaught      Schedule[]          @relation("FacultySchedules")
   assignmentsTaught    Assignment[]        @relation("FacultyAssignments")
+  mentorBatches        Batch[]             @relation("BatchFacultyMentor")
 
   @@index([departmentId])
   @@index([designationId])
@@ -1174,9 +1175,7 @@ model Student {
   courseId           String?
   course             Course?       @relation(fields: [courseId], references: [id], onDelete: SetNull)
 
-  batchId            String?
-  batch              Batch?        @relation(fields: [batchId], references: [id])
-  batchAssignedAt    DateTime?
+  studentBatches     StudentBatch[]
   batchHistory       StudentBatchHistory[]
 
   initialPasswordHash String?
@@ -1195,7 +1194,6 @@ model Student {
   examResults         ExamResult[]
   scheduleAttendances ScheduleAttendance[]
 
-  @@index([batchId])
   @@index([schoolId])
   @@index([status])
   @@index([email])
@@ -1246,26 +1244,28 @@ model Centre {
 }
 
 model Batch {
-  id             String    @id @default(cuid())
-  name           String
-  description    String?
-  locationId     String?
-  academicYear   String
-  startDate      DateTime?
-  schoolId       String?
-  gradeId        String?
-  schoolIds      String[]  @default([])
-  courseIds      String[]  @default([])
-  targetStrength Int?
-  isActive       Boolean   @default(true)
-  isArchived     Boolean   @default(false)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id               String    @id @default(cuid())
+  name             String
+  description      String?
+  locationId       String?
+  academicYear     String
+  startDate        DateTime?
+  schoolId         String?
+  gradeId          String?
+  facultyMentorId  String?
+  schoolIds        String[]  @default([])
+  courseIds        String[]  @default([])
+  targetStrength   Int?
+  isActive         Boolean   @default(true)
+  isArchived       Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  location        Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
-  school          School?   @relation(fields: [schoolId],   references: [id], onDelete: SetNull)
-  grade           Grade?    @relation(fields: [gradeId],    references: [id], onDelete: SetNull)
-  students        Student[]
+  location        Location? @relation(fields: [locationId],    references: [id], onDelete: SetNull)
+  school          School?   @relation(fields: [schoolId],      references: [id], onDelete: SetNull)
+  grade           Grade?    @relation(fields: [gradeId],       references: [id], onDelete: SetNull)
+  facultyMentor   Employee? @relation("BatchFacultyMentor",    fields: [facultyMentorId], references: [id], onDelete: SetNull)
+  studentBatches  StudentBatch[]
   batchSubjects   BatchSubject[]
   batchHistories  StudentBatchHistory[]
   schedules       ScheduleBatch[]
@@ -1292,6 +1292,20 @@ model StudentBatchHistory {
   batch        Batch?    @relation(fields: [batchId], references: [id], onDelete: SetNull)
 
   @@index([studentId])
+}
+
+model StudentBatch {
+  id        String   @id @default(cuid())
+  studentId String
+  batchId   String
+  joinedAt  DateTime @default(now())
+
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  batch     Batch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, batchId])
+  @@index([studentId])
+  @@index([batchId])
 }
 
 model Subject {

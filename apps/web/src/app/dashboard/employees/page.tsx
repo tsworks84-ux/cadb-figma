@@ -157,7 +157,7 @@ export default function EmployeesPage() {
 
   const activeFilterCount = [status, departmentId, designationId, employmentType, gender, incompleteOnly ? "1" : ""].filter(Boolean).length;
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["employees", page, search, status, departmentId, designationId, employmentType, gender],
     queryFn: () =>
       api.get<{ success: boolean; data: EmployeeListItem[]; meta: any }>("/api/v1/employees", {
@@ -171,6 +171,8 @@ export default function EmployeesPage() {
         },
       }).then((r) => r.data),
     placeholderData: (prev) => prev,
+    enabled: !!user?.id,
+    retry: 2,
   });
 
   const { data: empStats } = useQuery({
@@ -560,6 +562,13 @@ export default function EmployeesPage() {
                   ))}
                 </tr>
               ))
+            ) : isError ? (
+              <tr>
+                <td colSpan={isAdmin ? 10 : 8} className="px-6 py-16 text-center text-sm text-gray-400">
+                  Failed to load employees.{" "}
+                  <button onClick={() => refetch()} className="text-blue-600 hover:underline">Try again</button>
+                </td>
+              </tr>
             ) : employees.length === 0 ? (
               <tr>
                 <td colSpan={isAdmin ? 10 : 8} className="px-6 py-16 text-center text-sm text-gray-400">

@@ -4,17 +4,22 @@ import { prisma } from "@cadb/db";
 import { authenticate } from "../../middleware/authenticate.js";
 
 const batchSchema = z.object({
-  name:           z.string().min(1),
-  description:    z.string().optional(),
-  locationId:     z.string().optional().nullable(),
-  academicYear:   z.string().min(1),
-  startDate:      z.string().optional(),
-  schoolId:       z.string().optional().nullable(),
-  gradeId:        z.string().optional().nullable(),
-  schoolIds:      z.string().array().optional().default([]),
-  courseIds:      z.string().array().optional().default([]),
-  targetStrength: z.number().int().positive().optional().nullable(),
-  isActive:       z.boolean().optional(),
+  name:            z.string().min(1),
+  description:     z.string().optional(),
+  locationId:      z.string().optional().nullable(),
+  academicYear:    z.string().min(1),
+  startDate:       z.string().optional(),
+  schoolId:        z.string().optional().nullable(),
+  gradeId:         z.string().optional().nullable(),
+  schoolIds:       z.string().array().optional().default([]),
+  courseIds:       z.string().array().optional().default([]),
+  targetStrength:  z.number().int().positive().optional().nullable(),
+  isActive:        z.boolean().optional(),
+  facultyMentorId: z.string().optional().nullable(),
+  subjects:        z.array(z.object({
+    subjectId:  z.string(),
+    employeeId: z.string().optional().nullable(),
+  })).optional(),
 });
 
 const subjectSchema = z.object({
@@ -50,13 +55,14 @@ export async function academicsRoutes(fastify: FastifyInstance) {
         where: { isArchived: false },
         select: {
           id: true, status: true,
-          schoolId: true, gradeId: true, batchId: true, courseId: true, academicYear: true,
+          schoolId: true, gradeId: true, courseId: true, academicYear: true,
           totalFee: true, paidFee: true,
+          studentBatches: { select: { batchId: true } },
         },
       }),
       prisma.batch.findMany({
         where: { isArchived: false },
-        select: { id: true, name: true, academicYear: true, _count: { select: { students: true } } },
+        select: { id: true, name: true, academicYear: true, _count: { select: { studentBatches: true } } },
       }),
       prisma.examMark.aggregate({
         _avg: { marks: true },
@@ -103,7 +109,22 @@ export async function academicsRoutes(fastify: FastifyInstance) {
 
     const byGrade   = groupStudents((s) => s.gradeId,      (k) => gradeMap[k]?.name  ?? "");
     const bySchool  = groupStudents((s) => s.schoolId,     (k) => schoolMap[k]?.name ?? "");
-    const byBatch   = groupStudents((s) => s.batchId,      (k) => batchMap[k]?.name  ?? "");
+    // For byBatch: a student can be in multiple batches — count them in each
+    const byBatch = (() => {
+      const m: Record<string, { label: string; count: number; revenue: number; collected: number }> = {};
+      for (const st of students) {
+        for (const sb of (st as any).studentBatches) {
+          const key = sb.batchId;
+          const label = batchMap[key]?.name ?? "";
+          if (!label) continue;
+          if (!m[key]) m[key] = { label, count: 0, revenue: 0, collected: 0 };
+          m[key].count++;
+          m[key].revenue   += st.totalFee ?? 0;
+          m[key].collected += st.paidFee  ?? 0;
+        }
+      }
+      return Object.values(m).filter((g) => g.label).sort((a, b) => b.count - a.count);
+    })();
     const byCourse  = groupStudents((s) => s.courseId,     (k) => courseMap[k]?.name ?? "");
     const byYear    = groupStudents((s) => s.academicYear,  (k) => k);
     const byCity    = groupStudents(
@@ -116,9 +137,9 @@ export async function academicsRoutes(fastify: FastifyInstance) {
     const collectedRevenue = students.reduce((s, st) => s + (st.paidFee  ?? 0), 0);
 
     // Avg batch strength (only batches with at least one student)
-    const activeBatches = batches.filter((b) => b._count.students > 0);
+    const activeBatches = batches.filter((b) => b._count.studentBatches > 0);
     const avgStrength = activeBatches.length > 0
-      ? Math.round(activeBatches.reduce((s, b) => s + b._count.students, 0) / activeBatches.length)
+      ? Math.round(activeBatches.reduce((s, b) => s + b._count.studentBatches, 0) / activeBatches.length)
       : 0;
 
     // Performance metrics
@@ -173,10 +194,12 @@ export async function academicsRoutes(fastify: FastifyInstance) {
     const batches = await prisma.batch.findMany({
       where,
       include: {
-        _count:    { select: { students: true } },
-        location:  { select: { id: true, name: true } },
-        school:    { select: { id: true, name: true } },
-        grade:     { select: { id: true, name: true } },
+        _count:        { select: { studentBatches: true } },
+        location:      { select: { id: true, name: true } },
+        school:        { select: { id: true, name: true } },
+        grade:         { select: { id: true, name: true } },
+        facultyMentor: { select: { id: true, firstName: true, lastName: true } },
+        batchSubjects: { include: { subject: { select: { id: true, code: true, name: true } }, employee: { select: { id: true, firstName: true, lastName: true } } } },
       },
       orderBy: [{ academicYear: "desc" }, { name: "asc" }],
     });
@@ -189,7 +212,7 @@ export async function academicsRoutes(fastify: FastifyInstance) {
     const batch = await prisma.batch.findUnique({
       where: { id },
       include: {
-        _count:   { select: { students: true } },
+        _count:   { select: { studentBatches: true } },
         location: { select: { id: true, name: true } },
         school:   { select: { id: true, name: true, city: true } },
         grade:    { select: { id: true, name: true } },
@@ -211,16 +234,27 @@ export async function academicsRoutes(fastify: FastifyInstance) {
     const parsed = batchSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
-    const { startDate, schoolIds, ...rest } = parsed.data;
-    // Sync schoolId (primary FK) from first of schoolIds if provided
+    const { startDate, schoolIds, subjects, ...rest } = parsed.data;
     const schoolId = rest.schoolId ?? (schoolIds?.length ? schoolIds[0] : undefined);
-    const batch = await prisma.batch.create({
-      data: { ...rest, schoolId, schoolIds: schoolIds ?? [], startDate: startDate ? new Date(startDate) : undefined },
-      include: {
-        location: { select: { id: true, name: true } },
-        school:   { select: { id: true, name: true } },
-        grade:    { select: { id: true, name: true } },
-      },
+
+    const batch = await prisma.$transaction(async (tx) => {
+      const created = await tx.batch.create({
+        data: { ...rest, schoolId, schoolIds: schoolIds ?? [], startDate: startDate ? new Date(startDate) : undefined },
+        include: {
+          location:       { select: { id: true, name: true } },
+          school:         { select: { id: true, name: true } },
+          grade:          { select: { id: true, name: true } },
+          facultyMentor:  { select: { id: true, firstName: true, lastName: true } },
+          batchSubjects:  { include: { subject: { select: { id: true, code: true, name: true } }, employee: { select: { id: true, firstName: true, lastName: true } } } },
+        },
+      });
+      if (subjects?.length) {
+        await tx.batchSubject.createMany({
+          data: subjects.map((s) => ({ batchId: created.id, subjectId: s.subjectId, employeeId: s.employeeId ?? null })),
+          skipDuplicates: true,
+        });
+      }
+      return created;
     });
     return reply.status(201).send({ success: true, data: batch });
   });
@@ -231,16 +265,30 @@ export async function academicsRoutes(fastify: FastifyInstance) {
     const parsed = batchSchema.partial().safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
-    const { startDate, schoolIds, ...rest } = parsed.data;
+    const { startDate, schoolIds, subjects, ...rest } = parsed.data;
     const schoolId = rest.schoolId !== undefined ? rest.schoolId : (schoolIds?.length ? schoolIds[0] : undefined);
-    const batch = await prisma.batch.update({
-      where: { id },
-      data:  { ...rest, ...(schoolId !== undefined ? { schoolId } : {}), ...(schoolIds ? { schoolIds } : {}), startDate: startDate ? new Date(startDate) : undefined },
-      include: {
-        location: { select: { id: true, name: true } },
-        school:   { select: { id: true, name: true } },
-        grade:    { select: { id: true, name: true } },
-      },
+
+    const batch = await prisma.$transaction(async (tx) => {
+      const updated = await tx.batch.update({
+        where: { id },
+        data:  { ...rest, ...(schoolId !== undefined ? { schoolId } : {}), ...(schoolIds ? { schoolIds } : {}), startDate: startDate ? new Date(startDate) : undefined },
+        include: {
+          location:       { select: { id: true, name: true } },
+          school:         { select: { id: true, name: true } },
+          grade:          { select: { id: true, name: true } },
+          facultyMentor:  { select: { id: true, firstName: true, lastName: true } },
+          batchSubjects:  { include: { subject: { select: { id: true, code: true, name: true } }, employee: { select: { id: true, firstName: true, lastName: true } } } },
+        },
+      });
+      if (subjects !== undefined) {
+        await tx.batchSubject.deleteMany({ where: { batchId: id } });
+        if (subjects.length) {
+          await tx.batchSubject.createMany({
+            data: subjects.map((s) => ({ batchId: id, subjectId: s.subjectId, employeeId: s.employeeId ?? null })),
+          });
+        }
+      }
+      return updated;
     });
     return reply.send({ success: true, data: batch });
   });
@@ -261,7 +309,7 @@ export async function academicsRoutes(fastify: FastifyInstance) {
   fastify.delete("/batches/:id", async (request, reply) => {
     requireAdmin(request, reply);
     const { id } = request.params as any;
-    const count = await prisma.student.count({ where: { batchId: id } });
+    const count = await prisma.studentBatch.count({ where: { batchId: id } });
     if (count > 0) return reply.status(400).send({ success: false, error: `Cannot delete — ${count} student(s) assigned to this batch` });
 
     await prisma.batch.delete({ where: { id } });
@@ -373,60 +421,48 @@ export async function academicsRoutes(fastify: FastifyInstance) {
     requireAdmin(request, reply);
     const { id, studentId } = request.params as any;
 
-    const batch = await prisma.batch.findUnique({ where: { id } });
-    if (!batch) return reply.status(404).send({ success: false, error: "Batch not found" });
-
-    const student = await prisma.student.findUnique({
-      where: { id: studentId },
-      select: { batchId: true, batchAssignedAt: true, batch: { select: { name: true, academicYear: true } } },
-    });
+    const [batch, student] = await Promise.all([
+      prisma.batch.findUnique({ where: { id } }),
+      prisma.student.findUnique({ where: { id: studentId }, select: { id: true, firstName: true, lastName: true, studentCode: true, status: true } }),
+    ]);
+    if (!batch)   return reply.status(404).send({ success: false, error: "Batch not found" });
     if (!student) return reply.status(404).send({ success: false, error: "Student not found" });
 
-    if (student.batchId && student.batchId !== id) {
-      await prisma.studentBatchHistory.create({
-        data: {
-          studentId, batchId: student.batchId,
-          batchName: student.batch?.name ?? "",
-          academicYear: student.batch?.academicYear,
-          assignedAt: student.batchAssignedAt ?? new Date(),
-          removedAt: new Date(),
-        },
-      });
-    }
-
-    const updated = await prisma.student.update({
-      where: { id: studentId },
-      data:  { batchId: id, batchAssignedAt: new Date() },
-      select: { id: true, firstName: true, lastName: true, studentCode: true, status: true },
+    // Upsert — idempotent if already in batch
+    await prisma.studentBatch.upsert({
+      where:  { studentId_batchId: { studentId, batchId: id } },
+      create: { studentId, batchId: id },
+      update: {},
     });
-    return reply.send({ success: true, data: updated });
+
+    return reply.send({ success: true, data: student });
   });
 
   fastify.delete("/batches/:id/students/:studentId", async (request, reply) => {
     requireAdmin(request, reply);
     const { id, studentId } = request.params as any;
 
-    const student = await prisma.student.findUnique({
-      where: { id: studentId },
-      select: { batchId: true, batchAssignedAt: true, batch: { select: { name: true, academicYear: true } } },
+    const membership = await prisma.studentBatch.findUnique({
+      where: { studentId_batchId: { studentId, batchId: id } },
+      include: { batch: { select: { name: true, academicYear: true } } },
     });
-    if (!student) return reply.status(404).send({ success: false, error: "Student not found" });
-    if (student.batchId !== id) return reply.status(400).send({ success: false, error: "Student is not in this batch" });
+    if (!membership) return reply.status(400).send({ success: false, error: "Student is not in this batch" });
 
-    await prisma.studentBatchHistory.create({
-      data: {
-        studentId, batchId: id,
-        batchName: student.batch?.name ?? "",
-        academicYear: student.batch?.academicYear,
-        assignedAt: student.batchAssignedAt ?? new Date(),
-        removedAt: new Date(),
-      },
-    });
+    await prisma.$transaction([
+      prisma.studentBatchHistory.create({
+        data: {
+          studentId, batchId: id,
+          batchName: membership.batch?.name ?? "",
+          academicYear: membership.batch?.academicYear ?? null,
+          assignedAt: membership.joinedAt,
+          removedAt: new Date(),
+        },
+      }),
+      prisma.studentBatch.delete({
+        where: { studentId_batchId: { studentId, batchId: id } },
+      }),
+    ]);
 
-    await prisma.student.update({
-      where: { id: studentId },
-      data:  { batchId: null, batchAssignedAt: null },
-    });
     return reply.send({ success: true });
   });
 
@@ -444,6 +480,177 @@ export async function academicsRoutes(fastify: FastifyInstance) {
       select: { id: true, status: true },
     });
     return reply.send({ success: true, data: updated });
+  });
+
+  // ── BATCH ATTENDANCE SUMMARY ───────────────────────────────────────────────
+
+  fastify.get("/batches/:id/attendance-summary", async (request, reply) => {
+    const { id } = request.params as any;
+
+    const [schedules, totalStudents] = await Promise.all([
+      prisma.schedule.findMany({
+        where: { batches: { some: { batchId: id } } },
+        select: {
+          id: true, date: true, topics: true, status: true,
+          subject: { select: { name: true } },
+          attendances: { select: { isPresent: true } },
+        },
+        orderBy: { date: "asc" },
+      }),
+      prisma.studentBatch.count({ where: { batchId: id, student: { isArchived: false, status: "ACTIVE" } } }),
+    ]);
+
+    const classes = schedules.map((s) => {
+      const present = s.attendances.filter((a) => a.isPresent).length;
+      const absent  = s.attendances.filter((a) => !a.isPresent).length;
+      const recorded = s.attendances.length;
+      const pct = recorded > 0 ? Math.round((present / recorded) * 100) : null;
+      return {
+        scheduleId: s.id,
+        date: s.date,
+        subject: s.subject?.name ?? null,
+        topic: s.topics ?? null,
+        status: s.status,
+        present,
+        absent,
+        recorded,
+        pct,
+      };
+    });
+
+    const withAttendance = classes.filter((c) => c.recorded > 0);
+    const avgPct = withAttendance.length > 0
+      ? Math.round(withAttendance.reduce((sum, c) => sum + (c.pct ?? 0), 0) / withAttendance.length)
+      : null;
+
+    return reply.send({
+      success: true,
+      data: { totalClasses: schedules.length, recordedClasses: withAttendance.length, totalStudents, avgPct, classes },
+    });
+  });
+
+  // ── BATCH ASSIGNMENT SUMMARY ───────────────────────────────────────────────
+
+  fastify.get("/batches/:id/assignment-summary", async (request, reply) => {
+    const { id } = request.params as any;
+
+    const totalStudents = await prisma.studentBatch.count({
+      where: { batchId: id, student: { isArchived: false, status: "ACTIVE" } },
+    });
+
+    const assignments = await prisma.assignment.findMany({
+      where: { batches: { some: { batchId: id } } },
+      select: {
+        id: true, name: true, assignmentDate: true, submissionDate: true, status: true,
+        subject: { select: { name: true } },
+        submissions: { select: { status: true } },
+      },
+      orderBy: { assignmentDate: "desc" },
+    });
+
+    const items = assignments.map((a) => {
+      const submitted = a.submissions.filter((s) => s.status !== "NOT_SUBMITTED").length;
+      const total = a.submissions.length || totalStudents;
+      const pct = total > 0 ? Math.round((submitted / total) * 100) : null;
+      return {
+        assignmentId: a.id,
+        name: a.name,
+        subject: a.subject?.name ?? null,
+        assignmentDate: a.assignmentDate,
+        submissionDate: a.submissionDate,
+        status: a.status,
+        submitted,
+        total: a.submissions.length,
+        pct,
+      };
+    });
+
+    const avgPct = items.length > 0
+      ? Math.round(items.reduce((sum, i) => sum + (i.pct ?? 0), 0) / items.length)
+      : null;
+
+    return reply.send({
+      success: true,
+      data: { totalAssignments: assignments.length, totalStudents, avgSubmissionPct: avgPct, assignments: items },
+    });
+  });
+
+  // ── BATCH EXAM SUMMARY ─────────────────────────────────────────────────────
+
+  fastify.get("/batches/:id/exam-summary", async (request, reply) => {
+    const { id } = request.params as any;
+
+    const exams = await prisma.exam.findMany({
+      where: { batches: { some: { batchId: id } } },
+      select: {
+        id: true, name: true, examDate: true, totalMarks: true, status: true,
+        subjects: { select: { paperNum: true, subjectSlot: true, maxMarks: true, subject: { select: { name: true } } } },
+        results: {
+          where: { isExcluded: false },
+          select: { attended: true, marks: { select: { marks: true } } },
+        },
+      },
+      orderBy: { examDate: "desc" },
+    });
+
+    const items = exams.map((e) => {
+      const total    = e.results.length;
+      const attended = e.results.filter((r) => r.attended).length;
+      const attendPct = total > 0 ? Math.round((attended / total) * 100) : null;
+
+      const scores = e.results
+        .filter((r) => r.attended)
+        .map((r) => r.marks.reduce((sum, m) => sum + (m.marks ?? 0), 0));
+      const avgScore = scores.length > 0 ? Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : null;
+      const avgPct   = avgScore != null && e.totalMarks ? Math.round((avgScore / e.totalMarks) * 100) : null;
+
+      return {
+        examId: e.id, name: e.name, date: e.examDate, status: e.status,
+        totalMarks: e.totalMarks, total, attended, attendPct, avgScore, avgPct,
+      };
+    });
+
+    const withResults = items.filter((i) => i.total > 0);
+    const overall = {
+      totalExams: exams.length,
+      avgAttendPct: withResults.length > 0
+        ? Math.round(withResults.reduce((s, i) => s + (i.attendPct ?? 0), 0) / withResults.length)
+        : null,
+      avgScorePct: items.filter((i) => i.avgPct != null).length > 0
+        ? Math.round(items.filter((i) => i.avgPct != null).reduce((s, i) => s + (i.avgPct ?? 0), 0) / items.filter((i) => i.avgPct != null).length)
+        : null,
+    };
+
+    return reply.send({ success: true, data: { overall, exams: items } });
+  });
+
+  // ── EMPLOYEE'S ASSOCIATED BATCHES ──────────────────────────────────────────
+
+  fastify.get("/employees/:employeeId/batches", async (request, reply) => {
+    const { employeeId } = request.params as any;
+
+    const batches = await prisma.batch.findMany({
+      where: {
+        isArchived: false,
+        OR: [
+          { facultyMentorId: employeeId },
+          { batchSubjects: { some: { employeeId } } },
+        ],
+      },
+      include: {
+        location:     { select: { id: true, name: true } },
+        grade:        { select: { id: true, name: true } },
+        facultyMentor: { select: { id: true, firstName: true, lastName: true } },
+        batchSubjects: {
+          where:   { employeeId },
+          include: { subject: { select: { id: true, name: true } } },
+        },
+        _count: { select: { studentBatches: true } },
+      },
+      orderBy: [{ academicYear: "desc" }, { name: "asc" }],
+    });
+
+    return reply.send({ success: true, data: batches });
   });
 
 }

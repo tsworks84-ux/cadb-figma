@@ -120,13 +120,17 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
           include: {
             batch: {
               include: {
-                students: {
-                  where: { isArchived: false, status: "ACTIVE" },
-                  select: {
-                    id: true, firstName: true, lastName: true,
-                    studentCode: true, rollNumber: true, photoUrl: true,
+                studentBatches: {
+                  where: { student: { isArchived: false, status: "ACTIVE" } },
+                  orderBy: [{ student: { firstName: "asc" } }, { student: { lastName: "asc" } }],
+                  include: {
+                    student: {
+                      select: {
+                        id: true, firstName: true, lastName: true,
+                        studentCode: true, rollNumber: true, photoUrl: true,
+                      },
+                    },
                   },
-                  orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
                 },
               },
             },
@@ -154,8 +158,8 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
     // Deduplicate students across batches
     const studentMap = new Map<string, any>();
     for (const sb of schedule.batches) {
-      for (const student of (sb.batch as any).students ?? []) {
-        studentMap.set(student.id, student);
+      for (const entry of (sb.batch as any).studentBatches ?? []) {
+        studentMap.set(entry.student.id, entry.student);
       }
     }
     const batchStudents = [...studentMap.values()];

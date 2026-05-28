@@ -72,9 +72,9 @@ export function Sidebar() {
 
   const mgmtNav = [
     profileEntry,
-    ...(canViewAdmin      ? [{ name: "Administration", href: "/dashboard/admin",      icon: Building2 }] : []),
-    ...(canViewAcademics  ? [{ name: "Academics",      href: "/dashboard/academics",  icon: School    }] : []),
-    ...(canViewMIS        ? [{ name: "MIS Reports",    href: "/dashboard/mis",        icon: BarChart3 }] : []),
+    ...(canViewAdmin ? [{ name: "Administration", href: "/dashboard/admin",     icon: Building2 }] : []),
+    { name: "Academics",  href: "/dashboard/academics", icon: School },
+    ...(canViewMIS   ? [{ name: "MIS Reports",    href: "/dashboard/mis",       icon: BarChart3 }] : []),
   ];
 
   // Fire API prefetches when the user hovers a link — data is ready by the time they click
@@ -237,7 +237,8 @@ export function Sidebar() {
           <>
             <p className={cn("px-3 mt-6 mb-2 text-xs font-semibold uppercase tracking-wider", theme.sectionLabel)}>Management</p>
             {mgmtNav.map((item) => {
-              const active = pathname.startsWith(item.href);
+              const itemPath = item.href.split("?")[0];
+              const active = pathname.startsWith(itemPath);
               return (
                 <Link
                   key={item.href}

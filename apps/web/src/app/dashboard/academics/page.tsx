@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
+import { useRouter } from "next/navigation";
+import { useAuthStore } from "@/store/auth";
 import Link from "next/link";
 import {
   BarChart2, X, ChevronRight, Clock, MapPin, BookOpen,
@@ -298,6 +300,15 @@ function ScheduleModal({ schedules, onClose }: { schedules: any[]; onClose: () =
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function AcademicsOverviewPage() {
+  const router = useRouter();
+  const { user } = useAuthStore();
+
+  useEffect(() => {
+    if (user?.role === "EMPLOYEE") {
+      router.replace("/dashboard/academics/batches");
+    }
+  }, [user?.role, router]);
+
   const [revenueOpen,      setRevenueOpen]      = useState(false);
   const [scheduleOpen,     setScheduleOpen]     = useState(false);
   const [studentStatsOpen, setStudentStatsOpen] = useState(false);

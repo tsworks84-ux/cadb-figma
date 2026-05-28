@@ -37,8 +37,9 @@ export async function studentAuthRoutes(fastify: FastifyInstance) {
       select: {
         id: true, studentCode: true, passwordHash: true,
         firstName: true, lastName: true, email: true,
-        photoUrl: true, batchId: true, mustChangePassword: true,
+        photoUrl: true, mustChangePassword: true,
         status: true, isArchived: true,
+        studentBatches: { select: { batchId: true }, take: 1, orderBy: { joinedAt: "asc" } },
       },
     });
 
@@ -82,7 +83,7 @@ export async function studentAuthRoutes(fastify: FastifyInstance) {
           lastName: student.lastName,
           email: student.email,
           photoUrl: student.photoUrl,
-          batchId: student.batchId,
+          batchId: (student as any).studentBatches?.[0]?.batchId ?? null,
         },
       },
     });

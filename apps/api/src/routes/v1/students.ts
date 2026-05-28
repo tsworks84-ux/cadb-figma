@@ -77,7 +77,6 @@ const createSchema = z.object({
   paymentNote:      z.string().optional(),
   gradeId:          z.string().optional(),
   courseId:         z.string().optional(),
-  batchId:          z.string().optional(),
   initialPassword:  z.string().min(8).optional(),
   instalments: z.array(z.object({
     instalmentNo: z.number().int().positive(),
@@ -112,7 +111,7 @@ export async function studentRoutes(fastify: FastifyInstance) {
 
     if (status && status !== "ALL") where.status = status;
 
-    if (batchId)      where.batchId      = batchId;
+    if (batchId)      where.studentBatches = { some: { batchId } };
     if (academicYear) where.academicYear = academicYear;
     if (schoolId)     where.schoolId     = schoolId;
     if (gradeId)      where.gradeId      = gradeId;
@@ -147,7 +146,7 @@ export async function studentRoutes(fastify: FastifyInstance) {
           status: true, isArchived: true, mustChangePassword: true,
           academicYear: true, admissionNumber: true, admissionDate: true,
           createdAt: true,
-          batch:   { select: { id: true, name: true, academicYear: true } },
+          studentBatches: { select: { batchId: true, joinedAt: true, batch: { select: { id: true, name: true, academicYear: true } } } },
           school:  { select: { id: true, name: true } },
           grade:   { select: { id: true, name: true } },
           address: true,
@@ -155,18 +154,16 @@ export async function studentRoutes(fastify: FastifyInstance) {
       }),
       prisma.student.count({ where }),
       prisma.student.groupBy({ by: ["status"], where, _count: { _all: true } }),
-      prisma.student.groupBy({ by: ["batchId"], where, _count: { _all: true } }),
+      prisma.studentBatch.groupBy({ by: ["batchId"], _count: { _all: true } }),
     ]);
 
     const stats = {
       total,
       byStatus: Object.fromEntries(statusCounts.map((r) => [r.status, r._count._all])),
-      batchCount: batchCounts.filter((r) => r.batchId !== null).length,
-      avgBatchStrength: (() => {
-        const assigned = batchCounts.filter((r) => r.batchId !== null);
-        if (!assigned.length) return 0;
-        return Math.round(assigned.reduce((s, r) => s + r._count._all, 0) / assigned.length);
-      })(),
+      batchCount: batchCounts.length,
+      avgBatchStrength: batchCounts.length > 0
+        ? Math.round(batchCounts.reduce((s, r) => s + r._count._all, 0) / batchCounts.length)
+        : 0,
     };
 
     return reply.send({ success: true, data: students, meta: { total, page: parseInt(page), limit: take }, stats });
@@ -192,8 +189,10 @@ export async function studentRoutes(fastify: FastifyInstance) {
         paymentDate: true, paymentMode: true, receiptNumber: true, paymentNote: true,
         status: true, isArchived: true, mustChangePassword: true,
         createdAt: true, updatedAt: true,
-        batch:   { select: { id: true, name: true, academicYear: true, isActive: true } },
-        batchAssignedAt: true,
+        studentBatches: {
+          select: { id: true, batchId: true, joinedAt: true, batch: { select: { id: true, name: true, academicYear: true, isActive: true, grade: { select: { id: true, name: true } }, location: { select: { id: true, name: true } } } } },
+          orderBy: { joinedAt: "asc" },
+        },
         batchHistory: {
           orderBy: { removedAt: "desc" },
           select: { id: true, batchName: true, academicYear: true, assignedAt: true, removedAt: true,
@@ -253,7 +252,7 @@ export async function studentRoutes(fastify: FastifyInstance) {
         id: true, studentCode: true, admissionNumber: true,
         firstName: true, lastName: true, email: true,
         phone: true, status: true, createdAt: true,
-        batch:   { select: { id: true, name: true, academicYear: true } },
+        studentBatches: { select: { batchId: true, batch: { select: { id: true, name: true, academicYear: true } } } },
         grade:   { select: { id: true, name: true } },
         course:  { select: { id: true, name: true, fee: true } },
       },
@@ -287,43 +286,17 @@ export async function studentRoutes(fastify: FastifyInstance) {
     const parsed = updateSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
-    const { dateOfBirth, admissionDate, email, batchId, ...rest } = parsed.data as any;
+    const { dateOfBirth, admissionDate, email, batchId: _batchId, ...rest } = parsed.data as any;
 
     if (email) {
       const conflict = await prisma.student.findFirst({ where: { email, NOT: { id } } });
       if (conflict) return reply.status(400).send({ success: false, error: `Email "${email}" is already in use` });
     }
 
-    // If batch is being changed, record the old one in history
-    let batchData: Record<string, any> = {};
-    if (batchId !== undefined) {
-      const current = await prisma.student.findUnique({
-        where: { id },
-        select: { batchId: true, batchAssignedAt: true, batch: { select: { name: true, academicYear: true } } },
-      });
-      if (current?.batchId && current.batchId !== batchId) {
-        await prisma.studentBatchHistory.create({
-          data: {
-            studentId:   id,
-            batchId:     current.batchId,
-            batchName:   current.batch?.name ?? "",
-            academicYear: current.batch?.academicYear ?? null,
-            assignedAt:  current.batchAssignedAt ?? current.batch ? new Date() : new Date(),
-            removedAt:   new Date(),
-          },
-        });
-      }
-      batchData = {
-        batchId:        batchId || null,
-        batchAssignedAt: batchId ? new Date() : null,
-      };
-    }
-
     const student = await prisma.student.update({
       where: { id },
       data: {
         ...rest,
-        ...batchData,
         ...(email         ? { email }                                 : {}),
         ...(dateOfBirth   ? { dateOfBirth:   new Date(dateOfBirth)   } : {}),
         ...(admissionDate ? { admissionDate: new Date(admissionDate) } : {}),
@@ -331,8 +304,7 @@ export async function studentRoutes(fastify: FastifyInstance) {
       select: {
         id: true, studentCode: true, firstName: true, lastName: true, email: true,
         phone: true, status: true, isArchived: true, createdAt: true,
-        batch: { select: { id: true, name: true, academicYear: true } },
-        batchAssignedAt: true,
+        studentBatches: { select: { batchId: true, batch: { select: { id: true, name: true, academicYear: true } } } },
       },
     });
     return reply.send({ success: true, data: student });
@@ -504,6 +476,173 @@ export async function studentRoutes(fastify: FastifyInstance) {
       },
     });
     return reply.status(201).send({ success: true, data: ins });
+  });
+
+  // ── STUDENT ASSIGNMENTS ────────────────────────────────────────────────────
+
+  fastify.get("/:id/assignments", async (request, reply) => {
+    const { id } = request.params as any;
+    const { dateFrom, dateTo, subjectId } = request.query as any;
+
+    const student = await prisma.student.findUnique({
+      where: { id },
+      select: { id: true, studentBatches: { select: { batchId: true } } },
+    });
+    if (!student) return reply.status(404).send({ success: false, error: "Student not found" });
+
+    const batchIds = student.studentBatches.map((sb) => sb.batchId);
+    if (batchIds.length === 0) {
+      return reply.send({
+        success: true, data: [],
+        stats: { total: 0, approved: 0, submitted: 0, inProcess: 0, rejected: 0, notSubmitted: 0, overdue: 0, completionRate: 0 },
+      });
+    }
+
+    const where: any = { batches: { some: { batchId: { in: batchIds } } } };
+    if (dateFrom || dateTo) {
+      where.submissionDate = {};
+      if (dateFrom) where.submissionDate.gte = new Date(dateFrom);
+      if (dateTo)   where.submissionDate.lte = new Date(dateTo);
+    }
+    if (subjectId) where.subjectId = subjectId;
+
+    const assignments = await prisma.assignment.findMany({
+      where,
+      orderBy: { submissionDate: "asc" },
+      select: {
+        id: true, name: true, assignmentDate: true, submissionDate: true,
+        topics: true, note: true, attachmentUrl: true, attachmentName: true,
+        status: true, academicYear: true,
+        subject:  { select: { id: true, code: true, name: true } },
+        employee: { select: { id: true, firstName: true, lastName: true } },
+        submissions: {
+          where: { studentId: id },
+          select: { status: true, submittedAt: true, reviewNote: true },
+        },
+      },
+    });
+
+    const todayMidnight = new Date();
+    todayMidnight.setHours(0, 0, 0, 0);
+
+    const data = assignments.map((a) => {
+      const sub = a.submissions[0];
+      const dueDate = new Date(a.submissionDate);
+      dueDate.setHours(0, 0, 0, 0);
+      const isOverdue = dueDate < todayMidnight;
+
+      let displayStatus: string;
+      if (a.status === "ARCHIVED") {
+        displayStatus = "ARCHIVED";
+      } else if (sub && sub.status !== "NOT_SUBMITTED") {
+        displayStatus = sub.status;
+      } else {
+        displayStatus = isOverdue ? "OVERDUE" : "NOT_SUBMITTED";
+      }
+
+      return {
+        id: a.id, name: a.name, assignmentDate: a.assignmentDate, submissionDate: a.submissionDate,
+        topics: a.topics, note: a.note, attachmentUrl: a.attachmentUrl, attachmentName: a.attachmentName,
+        status: a.status, academicYear: a.academicYear, subject: a.subject, faculty: a.employee,
+        submission: sub ? { status: sub.status, submittedAt: sub.submittedAt, reviewNote: sub.reviewNote } : null,
+        displayStatus,
+      };
+    });
+
+    const active       = data.filter((d) => d.status !== "ARCHIVED");
+    const total        = active.length;
+    const approved     = active.filter((d) => d.displayStatus === "APPROVED").length;
+    const submitted    = active.filter((d) => d.displayStatus === "SUBMITTED").length;
+    const inProcess    = active.filter((d) => d.displayStatus === "IN_PROCESS").length;
+    const rejected     = active.filter((d) => d.displayStatus === "REJECTED").length;
+    const notSubmitted = active.filter((d) => d.displayStatus === "NOT_SUBMITTED").length;
+    const overdue      = active.filter((d) => d.displayStatus === "OVERDUE").length;
+    const completionRate = total > 0 ? Math.round((approved / total) * 100) : 0;
+
+    return reply.send({
+      success: true, data,
+      stats: { total, approved, submitted, inProcess, rejected, notSubmitted, overdue, completionRate },
+    });
+  });
+
+  // ── ATTENDANCE ─────────────────────────────────────────────────────────────
+
+  fastify.get("/:id/attendance", async (request, reply) => {
+    const { id } = request.params as any;
+    const { dateFrom, dateTo, subjectId } = request.query as any;
+
+    const student = await prisma.student.findUnique({
+      where: { id },
+      select: { id: true, studentBatches: { select: { batchId: true } } },
+    });
+    if (!student) return reply.status(404).send({ success: false, error: "Student not found" });
+
+    const batchIds = student.studentBatches.map((sb) => sb.batchId);
+    if (batchIds.length === 0) {
+      return reply.send({
+        success: true, data: [],
+        stats: { total: 0, present: 0, absent: 0, unrecorded: 0, percentage: 0, bySubject: [] },
+      });
+    }
+
+    const where: any = {
+      batches: { some: { batchId: { in: batchIds } } },
+      status: { not: "CANCELLED" },
+    };
+    if (dateFrom || dateTo) {
+      where.date = {};
+      if (dateFrom) where.date.gte = new Date(dateFrom);
+      if (dateTo)   where.date.lte = new Date(dateTo);
+    }
+    if (subjectId) where.subjectId = subjectId;
+
+    const schedules = await prisma.schedule.findMany({
+      where,
+      orderBy: [{ date: "asc" }, { startTime: "asc" }],
+      select: {
+        id: true, date: true, startTime: true, endTime: true, topics: true, status: true,
+        subject:  { select: { id: true, code: true, name: true } },
+        employee: { select: { id: true, firstName: true, lastName: true } },
+        attendances: {
+          where: { studentId: id },
+          select: { isPresent: true, note: true },
+        },
+      },
+    });
+
+    const data = schedules.map((s) => {
+      const att = s.attendances[0];
+      return {
+        id: s.id, date: s.date, startTime: s.startTime, endTime: s.endTime,
+        topics: s.topics, status: s.status, subject: s.subject, faculty: s.employee,
+        attendanceStatus: att ? (att.isPresent ? "PRESENT" : "ABSENT") : "UNRECORDED",
+        note: att?.note ?? null,
+      };
+    });
+
+    const total      = data.length;
+    const present    = data.filter((d) => d.attendanceStatus === "PRESENT").length;
+    const absent     = data.filter((d) => d.attendanceStatus === "ABSENT").length;
+    const unrecorded = data.filter((d) => d.attendanceStatus === "UNRECORDED").length;
+    const recorded   = present + absent;
+    const percentage = recorded > 0 ? Math.round((present / recorded) * 100) : 0;
+
+    const subjectMap = new Map<string, { id: string; name: string; code: string; total: number; present: number; absent: number }>();
+    for (const d of data) {
+      if (!d.subject) continue;
+      const key = d.subject.id;
+      if (!subjectMap.has(key)) subjectMap.set(key, { ...d.subject, total: 0, present: 0, absent: 0 });
+      const entry = subjectMap.get(key)!;
+      entry.total++;
+      if (d.attendanceStatus === "PRESENT") entry.present++;
+      else if (d.attendanceStatus === "ABSENT") entry.absent++;
+    }
+    const bySubject = Array.from(subjectMap.values()).map((s) => ({
+      ...s,
+      percentage: s.present + s.absent > 0 ? Math.round((s.present / (s.present + s.absent)) * 100) : 0,
+    }));
+
+    return reply.send({ success: true, data, stats: { total, present, absent, unrecorded, percentage, bySubject } });
   });
 
   // ── INSTALMENT PAY ─────────────────────────────────────────────────────────

@@ -33,6 +33,7 @@ const PROFILE_TABS = [
   { id: "training",  label: "Training",   icon: BookOpen,   module: "TRAINING"    },
   { id: "policies",  label: "Policies",   icon: Shield,     module: "POLICIES"    },
   { id: "team",      label: "Team",       icon: UsersRound  },
+  { id: "academics", label: "Academics",  icon: GraduationCap },
 ] as const;
 
 const STATUS_COLOR: Record<string, string> = {
@@ -3618,7 +3619,8 @@ export default function EmployeeDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const qc = useQueryClient();
-  const [activeTab, setActiveTab] = useState("personal");
+  const initialTab = searchParams.get("tab") ?? "personal";
+  const [activeTab, setActiveTab] = useState(initialTab);
 
   const { user: currentUser, updateUser } = useAuthStore();
   const isAdmin = currentUser?.role === "SUPER_ADMIN" || currentUser?.role === "HR_ADMIN" || currentUser?.role === "DEPT_HEAD";
@@ -3627,7 +3629,7 @@ export default function EmployeeDetailPage() {
   const permissions = usePermissions();
 
   // Employee self-view: only Personal, Documents, Position, Salary
-  const SELF_VIEW_TABS = new Set(["personal", "documents", "position", "salary"]);
+  const SELF_VIEW_TABS = new Set(["personal", "documents", "position", "salary", "academics"]);
   const visibleTabs = PROFILE_TABS.filter((tab) => {
     if (isSelfView && !isAdmin) return SELF_VIEW_TABS.has(tab.id);
     if (!(tab as any).module) return true;
@@ -3922,6 +3924,12 @@ export default function EmployeeDetailPage() {
     queryFn: () =>
       api.get(`/api/v1/employees/${id}/team/search`, { params: { q: memberSearchQ } }).then((r) => r.data.data),
     enabled: activeTab === "team" && isAdmin,
+  });
+
+  const { data: empBatches = [], isLoading: empBatchesLoading } = useQuery({
+    queryKey: ["emp-batches", id],
+    queryFn: () => api.get(`/api/v1/academics/employees/${id}/batches`).then((r) => r.data.data),
+    enabled: activeTab === "academics",
   });
 
   const addMemberMutation = useMutation({
@@ -5314,6 +5322,84 @@ export default function EmployeeDetailPage() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* ── Academics tab ── */}
+        {activeTab === "academics" && (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+              <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+                <GraduationCap className="h-4 w-4 text-indigo-600" />
+                <div>
+                  <p className="font-semibold text-gray-900 text-sm">My Batches</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Batches where you are assigned as Faculty Mentor or Subject Teacher</p>
+                </div>
+              </div>
+
+              {empBatchesLoading ? (
+                <div className="p-5 space-y-3">
+                  {[1,2,3].map(i => <div key={i} className="h-20 rounded-xl bg-gray-100 animate-pulse" />)}
+                </div>
+              ) : (empBatches as any[]).length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <GraduationCap className="h-10 w-10 text-gray-200 mb-2" />
+                  <p className="text-sm font-medium text-gray-500">No batches assigned yet</p>
+                  <p className="text-xs text-gray-400 mt-1">You'll appear here once you are added as a Faculty Mentor or Subject Teacher to a batch.</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-50">
+                  {(empBatches as any[]).map((b: any) => {
+                    const isMentor = b.facultyMentor?.id === id;
+                    const subjects = (b.batchSubjects ?? []).map((bs: any) => bs.subject?.name).filter(Boolean);
+                    return (
+                      <div
+                        key={b.id}
+                        onClick={() => router.push(`/dashboard/academics/batches/${b.id}`)}
+                        className="flex items-start gap-4 px-5 py-4 hover:bg-indigo-50/40 cursor-pointer transition-colors group"
+                      >
+                        {/* Batch icon */}
+                        <div className="h-10 w-10 rounded-xl bg-indigo-100 flex items-center justify-center shrink-0 mt-0.5">
+                          <GraduationCap className="h-5 w-5 text-indigo-600" />
+                        </div>
+
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-semibold text-gray-900 text-sm">{b.name}</p>
+                            {b.isArchived && (
+                              <span className="rounded-full bg-amber-50 text-amber-600 border border-amber-100 px-2 py-0.5 text-xs font-medium">Archived</span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1">
+                            <span className="text-xs text-gray-400">AY: <span className="text-gray-600">{b.academicYear}</span></span>
+                            {b.grade    && <span className="text-xs text-gray-400">Grade: <span className="text-gray-600">{b.grade.name}</span></span>}
+                            {b.location && <span className="text-xs text-gray-400">Location: <span className="text-gray-600">{b.location.name}</span></span>}
+                            <span className="text-xs text-gray-400">Students: <span className="text-gray-600">{b._count?.students ?? 0}</span></span>
+                          </div>
+                          {/* Role badges */}
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {isMentor && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 text-rose-600 border border-rose-100 px-2.5 py-0.5 text-xs font-medium">
+                                Faculty Mentor
+                              </span>
+                            )}
+                            {subjects.map((s: string) => (
+                              <span key={s} className="inline-flex items-center gap-1 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-100 px-2.5 py-0.5 text-xs font-medium">
+                                <BookOpen className="h-3 w-3" /> {s}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Arrow */}
+                        <ChevronRight className="h-4 w-4 text-gray-300 group-hover:text-indigo-400 transition-colors shrink-0 mt-3" />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         )}
 

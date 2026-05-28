@@ -95,8 +95,8 @@ async function fetchStatsData(q: Record<string, string>) {
           marks: true,
           student: {
             select: {
-              id: true, firstName: true, lastName: true, rollNumber: true, batchId: true,
-              batch: { select: { id: true, name: true, grade: { select: { name: true } } } },
+              id: true, firstName: true, lastName: true, rollNumber: true,
+              studentBatches: { select: { batchId: true, batch: { select: { id: true, name: true, grade: { select: { name: true } } } } } },
             },
           },
         },
@@ -133,8 +133,8 @@ async function fetchStatsData(q: Record<string, string>) {
     studentId:  e.student.id,
     name:       `${e.student.firstName} ${e.student.lastName}`,
     roll:       e.student.rollNumber ?? "—",
-    batch:      e.student.batch?.name ?? "—",
-    grade:      e.student.batch?.grade?.name ?? "—",
+    batch:      e.student.studentBatches[0]?.batch?.name ?? "—",
+    grade:      e.student.studentBatches[0]?.batch?.grade?.name ?? "—",
     examsCount: e.totals.length,
     avgTotal:   +((e.totals.reduce((a, b) => a + b, 0)) / e.totals.length).toFixed(2),
     maxTotal:   Math.max(...e.totals),
@@ -411,12 +411,12 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
 
     const batchIds = exam.batches.map((b) => b.batchId);
     const students = await prisma.student.findMany({
-      where: { batchId: { in: batchIds }, isArchived: false },
+      where: { studentBatches: { some: { batchId: { in: batchIds } } }, isArchived: false },
       select: {
         id: true, firstName: true, lastName: true, rollNumber: true,
-        batchId: true, batch: { select: { id: true, name: true } },
+        studentBatches: { where: { batchId: { in: batchIds } }, select: { batchId: true, batch: { select: { id: true, name: true } } }, take: 1 },
       },
-      orderBy: [{ batchId: "asc" }, { rollNumber: "asc" }, { firstName: "asc" }],
+      orderBy: [{ rollNumber: "asc" }, { firstName: "asc" }],
     });
 
     if (students.length > 0) {

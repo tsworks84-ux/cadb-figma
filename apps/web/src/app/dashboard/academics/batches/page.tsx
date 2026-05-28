@@ -140,16 +140,22 @@ function MultiPicker({ options, selected, onChange, placeholder = "None" }: {
 }
 
 // ── Form type ─────────────────────────────────────────────────────────────────
+type SubjectRow = { subjectId: string; employeeId: string };
+
 type BatchForm = {
   name: string; description: string; locationId: string; academicYear: string;
   startDate: string; gradeId: string; targetStrength: string;
   schoolIds: string[]; courseIds: string[];
+  facultyMentorId: string;
+  subjects: SubjectRow[];
 };
 
 const blankForm = (): BatchForm => ({
   name: "", description: "", locationId: "", academicYear: "",
   startDate: "", gradeId: "", targetStrength: "",
   schoolIds: [], courseIds: [],
+  facultyMentorId: "",
+  subjects: [],
 });
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -176,6 +182,8 @@ export default function BatchesPage() {
     user?.role === "HR_ADMIN" ||
     (permissions["ACA_BATCH"]?.canCreate ?? false);
 
+  const isEmployeeRole = user?.role === "EMPLOYEE";
+
   // ── Queries ───────────────────────────────────────────────────────────────────
   const batchParams = new URLSearchParams({ archived: String(showArchived) });
   if (filterYear)     batchParams.set("academicYear", filterYear);
@@ -184,8 +192,13 @@ export default function BatchesPage() {
   if (filterGrade)    batchParams.set("gradeId", filterGrade);
 
   const { data: batchRes, isLoading } = useQuery({
-    queryKey: ["batches-filtered", batchParams.toString()],
-    queryFn: () => api.get(`/api/v1/academics/batches?${batchParams}`).then((r) => r.data),
+    queryKey: isEmployeeRole
+      ? ["emp-batches", user?.id]
+      : ["batches-filtered", batchParams.toString()],
+    queryFn: isEmployeeRole
+      ? () => api.get(`/api/v1/academics/employees/${user?.id}/batches`).then((r) => r.data)
+      : () => api.get(`/api/v1/academics/batches?${batchParams}`).then((r) => r.data),
+    enabled: isEmployeeRole ? !!user?.id : true,
   });
   const allBatches: any[] = batchRes?.data ?? [];
 
@@ -214,6 +227,17 @@ export default function BatchesPage() {
     queryFn: () => api.get("/api/v1/academics/settings/courses").then((r) => r.data.data),
     staleTime: 10 * 60 * 1000,
   });
+  const { data: subjects = [] } = useQuery({
+    queryKey: ["subjects"],
+    queryFn: () => api.get("/api/v1/academics/subjects").then((r) => r.data.data),
+    staleTime: 10 * 60 * 1000,
+  });
+  const { data: employees = [] } = useQuery({
+    queryKey: ["employees"],
+    queryFn: () => api.get("/api/v1/employees").then((r) => r.data.data),
+    staleTime: 5 * 60 * 1000,
+    enabled: canEdit,
+  });
 
   useEffect(() => {
     const active = (academicYears as any[]).filter((y) => !y.isArchived);
@@ -225,15 +249,20 @@ export default function BatchesPage() {
   const openEdit   = (b: any) => {
     setEditBatch(b);
     setForm({
-      name:           b.name ?? "",
-      description:    b.description ?? "",
-      locationId:     b.location?.id ?? "",
-      academicYear:   b.academicYear ?? "",
-      startDate:      b.startDate ? b.startDate.slice(0, 10) : "",
-      gradeId:        b.grade?.id ?? "",
-      targetStrength: b.targetStrength != null ? String(b.targetStrength) : "",
-      schoolIds:      b.schoolIds ?? (b.school?.id ? [b.school.id] : []),
-      courseIds:      b.courseIds ?? [],
+      name:            b.name ?? "",
+      description:     b.description ?? "",
+      locationId:      b.location?.id ?? "",
+      academicYear:    b.academicYear ?? "",
+      startDate:       b.startDate ? b.startDate.slice(0, 10) : "",
+      gradeId:         b.grade?.id ?? "",
+      targetStrength:  b.targetStrength != null ? String(b.targetStrength) : "",
+      schoolIds:       b.schoolIds ?? (b.school?.id ? [b.school.id] : []),
+      courseIds:       b.courseIds ?? [],
+      facultyMentorId: b.facultyMentor?.id ?? "",
+      subjects:        (b.batchSubjects ?? []).map((bs: any) => ({
+        subjectId:  bs.subject?.id ?? bs.subjectId,
+        employeeId: bs.employee?.id ?? bs.employeeId ?? "",
+      })),
     });
     setModalOpen(true);
   };
@@ -246,15 +275,20 @@ export default function BatchesPage() {
   };
 
   const buildPayload = () => ({
-    name:           form.name,
-    description:    form.description || undefined,
-    academicYear:   form.academicYear,
-    locationId:     form.locationId  || null,
-    gradeId:        form.gradeId     || null,
-    startDate:      form.startDate   || undefined,
-    targetStrength: form.targetStrength ? parseInt(form.targetStrength) : null,
-    schoolIds:      form.schoolIds,
-    courseIds:      form.courseIds,
+    name:            form.name,
+    description:     form.description || undefined,
+    academicYear:    form.academicYear,
+    locationId:      form.locationId  || null,
+    gradeId:         form.gradeId     || null,
+    startDate:       form.startDate   || undefined,
+    targetStrength:  form.targetStrength ? parseInt(form.targetStrength) : null,
+    schoolIds:       form.schoolIds,
+    courseIds:       form.courseIds,
+    facultyMentorId: form.facultyMentorId || null,
+    subjects:        form.subjects.filter((s) => s.subjectId).map((s) => ({
+      subjectId:  s.subjectId,
+      employeeId: s.employeeId || null,
+    })),
   });
 
   const createMut = useMutation({
@@ -282,7 +316,7 @@ export default function BatchesPage() {
   });
 
   // ── Derived stats ─────────────────────────────────────────────────────────────
-  const totalStudents = allBatches.reduce((s, b) => s + (b._count?.students ?? 0), 0);
+  const totalStudents = allBatches.reduce((s, b) => s + (b._count?.studentBatches ?? 0), 0);
   const activeBatches = allBatches.filter((b) => b.isActive && !b.isArchived).length;
   const avgStrength   = allBatches.length > 0 ? Math.round(totalStudents / allBatches.length) : 0;
 
@@ -340,64 +374,68 @@ export default function BatchesPage() {
         ))}
       </div>
 
-      <p style={{ margin: "0 0 14px", color: "#9aa3b4", fontSize: 13, fontWeight: 900, letterSpacing: ".08em", textTransform: "uppercase" }}>
-        Filters
-      </p>
+      {!isEmployeeRole && (
+        <>
+          <p style={{ margin: "0 0 14px", color: "#9aa3b4", fontSize: 13, fontWeight: 900, letterSpacing: ".08em", textTransform: "uppercase" }}>
+            Filters
+          </p>
 
-      <div style={{ marginBottom: 20 }}>
-        <label style={{ display: "block", marginBottom: 8, color: "#4b5563", fontSize: 13, fontWeight: 850 }}>Show</label>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          {([{ label: "Active", val: false }, { label: "Archived", val: true }] as const).map(({ label, val }) => (
-            <button key={label} onClick={() => setShowArchived(val)} style={{
-              minHeight: 34, borderRadius: 999, display: "inline-flex", alignItems: "center",
-              padding: "0 13px", fontSize: 13, fontWeight: 850, cursor: "pointer", border: "1px solid",
-              ...(showArchived === val
-                ? { background: D.nav2, color: "white", borderColor: D.nav2 }
-                : { background: "white", color: "#4b5563", borderColor: D.line }),
-            }}>{label}</button>
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: "block", marginBottom: 8, color: "#4b5563", fontSize: 13, fontWeight: 850 }}>Show</label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {([{ label: "Active", val: false }, { label: "Archived", val: true }] as const).map(({ label, val }) => (
+                <button key={label} onClick={() => setShowArchived(val)} style={{
+                  minHeight: 34, borderRadius: 999, display: "inline-flex", alignItems: "center",
+                  padding: "0 13px", fontSize: 13, fontWeight: 850, cursor: "pointer", border: "1px solid",
+                  ...(showArchived === val
+                    ? { background: D.nav2, color: "white", borderColor: D.nav2 }
+                    : { background: "white", color: "#4b5563", borderColor: D.line }),
+                }}>{label}</button>
+              ))}
+            </div>
+          </div>
+
+          {[
+            { label: "Academic Year", content: (
+              <DSelect value={filterYear} onChange={(e) => setFilterYear(e.target.value)}>
+                <option value="">All years</option>
+                {(academicYears as any[]).filter((y) => !y.isArchived).map((y: any) => (
+                  <option key={y.id} value={y.name}>{y.name}</option>
+                ))}
+              </DSelect>
+            )},
+            { label: "School", content: (
+              <DSelect value={filterSchool} onChange={(e) => setFilterSchool(e.target.value)}>
+                <option value="">All schools</option>
+                {(schools as any[]).filter((s) => s.isActive).map((s: any) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </DSelect>
+            )},
+            { label: "Grade", content: (
+              <DSelect value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)}>
+                <option value="">All grades</option>
+                {(grades as any[]).filter((g) => g.isActive).map((g: any) => (
+                  <option key={g.id} value={g.id}>{g.name}</option>
+                ))}
+              </DSelect>
+            )},
+            { label: "Location", content: (
+              <DSelect value={filterLocation} onChange={(e) => setFilterLocation(e.target.value)}>
+                <option value="">All locations</option>
+                {(locations as any[]).filter((l) => l.isActive).map((l: any) => (
+                  <option key={l.id} value={l.id}>{l.name}</option>
+                ))}
+              </DSelect>
+            )},
+          ].map(({ label, content }) => (
+            <div key={label} style={{ marginBottom: 20 }}>
+              <label style={{ display: "block", marginBottom: 8, color: "#4b5563", fontSize: 13, fontWeight: 850 }}>{label}</label>
+              {content}
+            </div>
           ))}
-        </div>
-      </div>
-
-      {[
-        { label: "Academic Year", content: (
-          <DSelect value={filterYear} onChange={(e) => setFilterYear(e.target.value)}>
-            <option value="">All years</option>
-            {(academicYears as any[]).filter((y) => !y.isArchived).map((y: any) => (
-              <option key={y.id} value={y.name}>{y.name}</option>
-            ))}
-          </DSelect>
-        )},
-        { label: "School", content: (
-          <DSelect value={filterSchool} onChange={(e) => setFilterSchool(e.target.value)}>
-            <option value="">All schools</option>
-            {(schools as any[]).filter((s) => s.isActive).map((s: any) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </DSelect>
-        )},
-        { label: "Grade", content: (
-          <DSelect value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)}>
-            <option value="">All grades</option>
-            {(grades as any[]).filter((g) => g.isActive).map((g: any) => (
-              <option key={g.id} value={g.id}>{g.name}</option>
-            ))}
-          </DSelect>
-        )},
-        { label: "Location", content: (
-          <DSelect value={filterLocation} onChange={(e) => setFilterLocation(e.target.value)}>
-            <option value="">All locations</option>
-            {(locations as any[]).filter((l) => l.isActive).map((l: any) => (
-              <option key={l.id} value={l.id}>{l.name}</option>
-            ))}
-          </DSelect>
-        )},
-      ].map(({ label, content }) => (
-        <div key={label} style={{ marginBottom: 20 }}>
-          <label style={{ display: "block", marginBottom: 8, color: "#4b5563", fontSize: 13, fontWeight: 850 }}>{label}</label>
-          {content}
-        </div>
-      ))}
+        </>
+      )}
     </div>
   );
 
@@ -411,13 +449,15 @@ export default function BatchesPage() {
         justifyContent: "space-between", gap: 24, flexWrap: "wrap",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <button
-            className="lg:hidden"
-            onClick={() => setMobileFilterOpen(true)}
-            style={{ minHeight: 36, border: `1px solid ${D.line}`, borderRadius: 10, padding: "0 14px", background: "white", color: D.muted, fontSize: 13, fontWeight: 850, cursor: "pointer" }}
-          >
-            Filters
-          </button>
+          {!isEmployeeRole && (
+            <button
+              className="lg:hidden"
+              onClick={() => setMobileFilterOpen(true)}
+              style={{ minHeight: 36, border: `1px solid ${D.line}`, borderRadius: 10, padding: "0 14px", background: "white", color: D.muted, fontSize: 13, fontWeight: 850, cursor: "pointer" }}
+            >
+              Filters
+            </button>
+          )}
           <div style={{ width: 44, height: 44, borderRadius: 14, display: "grid", placeItems: "center", background: "#eef2ff", color: D.nav2, fontWeight: 900, fontSize: 16, flexShrink: 0 }}>
             BA
           </div>
@@ -429,8 +469,8 @@ export default function BatchesPage() {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <DBtn>Stats</DBtn>
-          <DBtn>Export</DBtn>
+          {!isEmployeeRole && <DBtn>Stats</DBtn>}
+          {!isEmployeeRole && <DBtn>Export</DBtn>}
           {canEdit && <DBtn primary onClick={openCreate}>+ New Batch</DBtn>}
         </div>
       </div>
@@ -640,6 +680,89 @@ export default function BatchesPage() {
                     <DTextarea placeholder="Optional batch description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
                   </DField>
                 </div>
+
+                {/* ── Faculty Assignment ─────────────────────────────────────── */}
+                <div style={{ marginTop: 20, borderTop: `1px solid ${D.line}`, paddingTop: 18 }}>
+                  <p style={{ margin: "0 0 14px", fontWeight: 850, fontSize: 13, color: D.muted, letterSpacing: ".04em", textTransform: "uppercase" }}>
+                    Faculty Assignment
+                  </p>
+
+                  {/* Faculty Mentor */}
+                  <DField label="Faculty Mentor">
+                    <DSelect
+                      value={form.facultyMentorId}
+                      onChange={(e) => setForm({ ...form, facultyMentorId: e.target.value })}
+                    >
+                      <option value="">None</option>
+                      {(employees as any[]).map((emp: any) => (
+                        <option key={emp.id} value={emp.id}>
+                          {emp.firstName} {emp.lastName}
+                          {emp.designation?.name ? ` — ${emp.designation.name}` : ""}
+                        </option>
+                      ))}
+                    </DSelect>
+                  </DField>
+
+                  {/* Subject Teachers */}
+                  <div style={{ marginTop: 16 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                      <label style={{ color: "#4b5563", fontSize: 13, fontWeight: 850 }}>Subject Teachers</label>
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, subjects: [...form.subjects, { subjectId: "", employeeId: "" }] })}
+                        style={{ fontSize: 12, fontWeight: 850, color: "#4f46e5", background: "none", border: `1px solid #c7d2fe`, borderRadius: 8, padding: "4px 12px", cursor: "pointer" }}
+                      >
+                        + Add Subject
+                      </button>
+                    </div>
+
+                    {form.subjects.length === 0 ? (
+                      <p style={{ fontSize: 13, color: D.muted, margin: 0 }}>No subjects assigned yet.</p>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {form.subjects.map((row, idx) => (
+                          <div key={idx} style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8, alignItems: "center" }}>
+                            <DSelect
+                              value={row.subjectId}
+                              onChange={(e) => {
+                                const updated = [...form.subjects];
+                                updated[idx] = { ...updated[idx], subjectId: e.target.value };
+                                setForm({ ...form, subjects: updated });
+                              }}
+                            >
+                              <option value="">Subject…</option>
+                              {(subjects as any[]).map((s: any) => (
+                                <option key={s.id} value={s.id}>{s.name}</option>
+                              ))}
+                            </DSelect>
+                            <DSelect
+                              value={row.employeeId}
+                              onChange={(e) => {
+                                const updated = [...form.subjects];
+                                updated[idx] = { ...updated[idx], employeeId: e.target.value };
+                                setForm({ ...form, subjects: updated });
+                              }}
+                            >
+                              <option value="">Teacher…</option>
+                              {(employees as any[]).map((emp: any) => (
+                                <option key={emp.id} value={emp.id}>
+                                  {emp.firstName} {emp.lastName}
+                                </option>
+                              ))}
+                            </DSelect>
+                            <button
+                              type="button"
+                              onClick={() => setForm({ ...form, subjects: form.subjects.filter((_, i) => i !== idx) })}
+                              style={{ width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", border: `1px solid ${D.line}`, borderRadius: 8, background: "white", cursor: "pointer", color: "#ef4444", flexShrink: 0 }}
+                            >
+                              <X style={{ width: 14, height: 14 }} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {/* Preview card */}
@@ -754,7 +877,7 @@ function BatchRow({
 
       {/* Students */}
       <td style={{ padding: "14px 16px" }}>
-        <span style={{ fontSize: 14, fontWeight: 700, color: D.ink }}>{b._count.students}</span>
+        <span style={{ fontSize: 14, fontWeight: 700, color: D.ink }}>{b._count.studentBatches}</span>
       </td>
 
       {/* Status */}
@@ -781,8 +904,8 @@ function BatchRow({
               <ActionBtn onClick={onArchive} title={b.isArchived ? "Unarchive" : "Archive"}>
                 {b.isArchived ? <ArchiveRestore style={{ width: 14, height: 14 }} /> : <Archive style={{ width: 14, height: 14 }} />}
               </ActionBtn>
-              {b._count.students > 0 ? (
-                <ActionBtn disabled title={`Cannot delete — ${b._count.students} student(s) assigned`}>
+              {b._count.studentBatches > 0 ? (
+                <ActionBtn disabled title={`Cannot delete — ${b._count.studentBatches} student(s) assigned`}>
                   <Trash2 style={{ width: 14, height: 14 }} />
                 </ActionBtn>
               ) : (

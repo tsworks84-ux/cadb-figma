@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { api } from "@/lib/api";
+import { studentApi as api } from "@/lib/studentApi";
 import { useStudentAuthStore } from "@/store/studentAuth";
 import { toast } from "sonner";
 import { Eye, EyeOff, GraduationCap, ArrowLeft } from "lucide-react";

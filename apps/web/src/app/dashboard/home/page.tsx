@@ -11,7 +11,7 @@ import {
   CheckCircle, AlertCircle, User, Pencil, AlertTriangle,
   Megaphone, Info, Pin, Bell, TrendingUp, TrendingDown,
   Users, Briefcase, Headphones, BarChart2, UserCheck, FileText,
-  Activity, Star, ChevronRight, X,
+  Activity, Star, ChevronRight, X, CalendarDays,
 } from "lucide-react";
 
 // ── Super Admin Dashboard ──────────────────────────────────────────────────────
@@ -281,6 +281,152 @@ const LEAVE_COLOR: Record<string, string> = {
   COMPENSATORY: "bg-yellow-500", UNPAID: "bg-gray-400", SPECIAL: "bg-purple-500",
 };
 
+// ── Faculty Schedule Widget ────────────────────────────────────────────────────
+
+const SLOT_STATUS: Record<string, { bg: string; text: string; border: string; dot: string; label: string }> = {
+  UPCOMING:  { bg: "bg-blue-50",   text: "text-blue-700",  border: "border-blue-200",  dot: "bg-blue-500",   label: "Upcoming"  },
+  ONGOING:   { bg: "bg-green-50",  text: "text-green-700", border: "border-green-200", dot: "bg-green-500",  label: "Ongoing"   },
+  COMPLETED: { bg: "bg-gray-50",   text: "text-gray-500",  border: "border-gray-200",  dot: "bg-gray-400",   label: "Completed" },
+  CONCLUDED: { bg: "bg-gray-50",   text: "text-gray-500",  border: "border-gray-200",  dot: "bg-gray-400",   label: "Concluded" },
+  CANCELLED: { bg: "bg-red-50",    text: "text-red-600",   border: "border-red-200",   dot: "bg-red-400",    label: "Cancelled" },
+};
+
+function toLocalDateStr(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function fmtTime(iso: string) {
+  return new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+}
+
+function ScheduleSlotCard({ s }: { s: any }) {
+  const st = SLOT_STATUS[s.status] ?? SLOT_STATUS.UPCOMING;
+  const batches = s.batches?.map((b: any) => b.batch?.name).filter(Boolean).join(", ");
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-gray-100 bg-white p-3 shadow-sm">
+      {/* Time */}
+      <div className="shrink-0 w-[68px] text-right">
+        <p className="text-xs font-bold text-gray-800 tabular-nums">{fmtTime(s.startTime)}</p>
+        <p className="text-[11px] text-gray-400 tabular-nums">{fmtTime(s.endTime)}</p>
+      </div>
+      {/* Dot */}
+      <div className="flex items-center justify-center pt-1.5 shrink-0">
+        <div className={`w-2.5 h-2.5 rounded-full ${st.dot}`} />
+      </div>
+      {/* Content */}
+      <div className="flex-1 min-w-0">
+        <div className="flex flex-wrap items-center gap-2 mb-0.5">
+          <span className="text-sm font-semibold text-gray-900 truncate">{s.subject?.name ?? "Class"}</span>
+          <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full border font-semibold ${st.bg} ${st.text} ${st.border}`}>
+            {st.label}
+          </span>
+        </div>
+        {batches && <p className="text-xs text-gray-500 mt-0.5">{batches}</p>}
+        {s.location?.name && <p className="text-xs text-gray-400 mt-0.5">📍 {s.location.name}</p>}
+        {s.topics && <p className="text-xs text-indigo-600 mt-0.5 italic truncate">Topic: {s.topics}</p>}
+      </div>
+    </div>
+  );
+}
+
+function FacultyScheduleWidget({ employeeId }: { employeeId: string }) {
+  const [pickedDate, setPickedDate] = useState("");  // "" = default (today + tomorrow)
+
+  const todayDate    = new Date(); todayDate.setHours(0, 0, 0, 0);
+  const tomorrowDate = new Date(todayDate); tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const todayStr     = toLocalDateStr(todayDate);
+  const tomorrowStr  = toLocalDateStr(tomorrowDate);
+
+  const isDefault = !pickedDate;
+  const dateFrom  = isDefault ? todayStr    : pickedDate;
+  const dateTo    = isDefault ? tomorrowStr : pickedDate;
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["faculty-schedule", employeeId, dateFrom, dateTo],
+    queryFn: () =>
+      api.get("/api/v1/academics/schedules", { params: { employeeId, dateFrom, dateTo, limit: 50 } })
+        .then((r) => r.data.data as any[]),
+    staleTime: 2 * 60 * 1000,
+    enabled: !!employeeId,
+  });
+
+  const schedules = data ?? [];
+  const grouped: Record<string, any[]> = {};
+  for (const s of schedules) {
+    const key = s.date?.split("T")[0] ?? "";
+    if (key) (grouped[key] ??= []).push(s);
+  }
+
+  const displayDates = isDefault ? [todayStr, tomorrowStr] : [pickedDate];
+
+  return (
+    <div className="lg:col-span-2 rounded-xl border border-gray-200 bg-white overflow-hidden">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-5 py-4 border-b border-gray-100">
+        <div>
+          <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+            <CalendarDays className="h-4 w-4 text-indigo-600" /> My Schedule
+          </h2>
+          <p className="text-xs text-gray-400 mt-0.5">
+            {isDefault
+              ? "Today & tomorrow"
+              : new Date(`${pickedDate}T00:00:00`).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {!isDefault && (
+            <button onClick={() => setPickedDate("")} className="text-xs text-indigo-600 hover:underline">
+              ← Today
+            </button>
+          )}
+          <input
+            type="date"
+            value={pickedDate}
+            onChange={(e) => setPickedDate(e.target.value)}
+            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+          />
+        </div>
+      </div>
+
+      {/* Body */}
+      <div className="p-4 space-y-5">
+        {isLoading ? (
+          <div className="space-y-3">
+            {[1, 2, 3].map((i) => <div key={i} className="h-14 rounded-lg bg-gray-100 animate-pulse" />)}
+          </div>
+        ) : (
+          displayDates.map((dateStr) => {
+            const daySlots = (grouped[dateStr] ?? [])
+              .slice()
+              .sort((a: any, b: any) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+
+            const dateObj  = new Date(`${dateStr}T00:00:00`);
+            const dayTag   = dateStr === todayStr ? "Today" : dateStr === tomorrowStr ? "Tomorrow" : "";
+            const fullDate = dateObj.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
+
+            return (
+              <div key={dateStr}>
+                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-2">
+                  {dayTag ? `${dayTag} · ` : ""}{fullDate}
+                </p>
+                {daySlots.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-gray-200 py-6 text-center">
+                    <CalendarDays className="h-6 w-6 text-gray-300 mx-auto mb-1.5" />
+                    <p className="text-sm text-gray-400">No classes scheduled</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {daySlots.map((s: any) => <ScheduleSlotCard key={s.id} s={s} />)}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function HomeDashboardPage() {
   const { user } = useAuthStore();
 
@@ -318,6 +464,17 @@ export default function HomeDashboardPage() {
     queryKey: ["policies"],
     queryFn: () => api.get("/api/v1/policies").then((r) => r.data.data),
   });
+
+  // Detect faculty: employee has any schedule entries (as assigned faculty)
+  const { data: facultyCheck, isLoading: facultyCheckLoading } = useQuery({
+    queryKey: ["faculty-check", user?.id],
+    queryFn: () =>
+      api.get("/api/v1/academics/schedules", { params: { employeeId: user?.id, limit: 1 } })
+        .then((r) => r.data),
+    enabled: !!user?.id && user?.role !== "SUPER_ADMIN",
+    staleTime: 10 * 60 * 1000,
+  });
+  const isFaculty = (facultyCheck?.meta?.total ?? 0) > 0;
 
   const { data: _annResult } = useQuery({
     queryKey: ["announcements"],
@@ -476,72 +633,82 @@ export default function HomeDashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        {/* Leave Balances */}
-        <div className="lg:col-span-2 rounded-xl border border-gray-200 bg-white overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-            <div>
-              <h2 className="font-semibold text-gray-900 flex items-center gap-2">
-                <CalendarOff className="h-4 w-4 text-blue-600" /> Leave Balance Summary
-              </h2>
-              {leaveBalances?.length > 0 && (
-                <p className="text-xs text-gray-400 mt-0.5">
-                  FY {new Date().getMonth() >= 3 ? new Date().getFullYear() : new Date().getFullYear() - 1}–{new Date().getMonth() >= 3 ? new Date().getFullYear() + 1 : new Date().getFullYear()} · accrued monthly
-                </p>
-              )}
-            </div>
-            <Link href="/dashboard/leaves" className="text-xs text-blue-600 hover:underline">Apply Leave →</Link>
+        {/* Schedule (faculty) or Leave Balance (non-faculty) */}
+        {facultyCheckLoading ? (
+          <div className="lg:col-span-2 rounded-xl border border-gray-200 bg-white p-5 space-y-3">
+            <div className="h-4 bg-gray-100 rounded w-1/3 animate-pulse" />
+            {[1, 2, 3].map((i) => <div key={i} className="h-14 bg-gray-100 rounded-lg animate-pulse" />)}
           </div>
-          {!leaveBalances?.length ? (
-            <p className="px-5 py-8 text-sm text-gray-400 text-center">No leave policy assigned yet.</p>
-          ) : (
-            <div className="p-4 grid grid-cols-2 gap-3">
-              {leaveBalances.map((lb: any) => {
-                const LEAVE_COLORS: Record<string, { bg: string; accent: string }> = {
-                  CASUAL:       { bg: "bg-blue-50",   accent: "text-blue-600" },
-                  SICK:         { bg: "bg-red-50",    accent: "text-red-600" },
-                  EARNED:       { bg: "bg-green-50",  accent: "text-green-600" },
-                  MATERNITY:    { bg: "bg-pink-50",   accent: "text-pink-600" },
-                  PATERNITY:    { bg: "bg-indigo-50", accent: "text-indigo-600" },
-                  COMPENSATORY: { bg: "bg-orange-50", accent: "text-orange-600" },
-                  UNPAID:       { bg: "bg-gray-50",   accent: "text-gray-600" },
-                  SPECIAL:      { bg: "bg-purple-50", accent: "text-purple-600" },
-                };
-                const colors = LEAVE_COLORS[lb.leaveType] ?? { bg: "bg-gray-50", accent: "text-gray-600" };
-                const pct = lb.accrued > 0 ? Math.min(100, (lb.availed / lb.accrued) * 100) : 0;
-                return (
-                  <div key={lb.id} className={`rounded-xl p-3 ${colors.bg}`}>
-                    <p className={`text-xs font-semibold uppercase tracking-wide mb-2 ${colors.accent}`}>
-                      {lb.leaveType.replace(/_/g, " ")}
-                    </p>
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs">
-                        <span className="text-gray-500">Accrued</span>
-                        <span className="font-semibold text-gray-800">{lb.accrued}</span>
-                      </div>
-                      <div className="flex justify-between text-xs">
-                        <span className="text-gray-500">Availed</span>
-                        <span className="font-semibold text-gray-800">{lb.availed}</span>
-                      </div>
-                      <div className="flex justify-between text-xs border-t border-black/5 pt-1">
-                        <span className="text-gray-500">Balance</span>
-                        <span className={`font-bold ${lb.balance <= 0 ? "text-red-600" : colors.accent}`}>
-                          {lb.balance}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="mt-2 h-1.5 rounded-full bg-black/10 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${pct >= 100 ? "bg-red-500" : "bg-current opacity-60"} ${colors.accent}`}
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    <p className="mt-1 text-right text-[10px] text-gray-400">{lb.used} used · {lb.pending} pending</p>
-                  </div>
-                );
-              })}
+        ) : isFaculty ? (
+          <FacultyScheduleWidget employeeId={user!.id} />
+        ) : (
+          /* Leave Balances */
+          <div className="lg:col-span-2 rounded-xl border border-gray-200 bg-white overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <div>
+                <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+                  <CalendarOff className="h-4 w-4 text-blue-600" /> Leave Balance Summary
+                </h2>
+                {leaveBalances?.length > 0 && (
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    FY {new Date().getMonth() >= 3 ? new Date().getFullYear() : new Date().getFullYear() - 1}–{new Date().getMonth() >= 3 ? new Date().getFullYear() + 1 : new Date().getFullYear()} · accrued monthly
+                  </p>
+                )}
+              </div>
+              <Link href="/dashboard/leaves" className="text-xs text-blue-600 hover:underline">Apply Leave →</Link>
             </div>
-          )}
-        </div>
+            {!leaveBalances?.length ? (
+              <p className="px-5 py-8 text-sm text-gray-400 text-center">No leave policy assigned yet.</p>
+            ) : (
+              <div className="p-4 grid grid-cols-2 gap-3">
+                {leaveBalances.map((lb: any) => {
+                  const LEAVE_COLORS: Record<string, { bg: string; accent: string }> = {
+                    CASUAL:       { bg: "bg-blue-50",   accent: "text-blue-600" },
+                    SICK:         { bg: "bg-red-50",    accent: "text-red-600" },
+                    EARNED:       { bg: "bg-green-50",  accent: "text-green-600" },
+                    MATERNITY:    { bg: "bg-pink-50",   accent: "text-pink-600" },
+                    PATERNITY:    { bg: "bg-indigo-50", accent: "text-indigo-600" },
+                    COMPENSATORY: { bg: "bg-orange-50", accent: "text-orange-600" },
+                    UNPAID:       { bg: "bg-gray-50",   accent: "text-gray-600" },
+                    SPECIAL:      { bg: "bg-purple-50", accent: "text-purple-600" },
+                  };
+                  const colors = LEAVE_COLORS[lb.leaveType] ?? { bg: "bg-gray-50", accent: "text-gray-600" };
+                  const pct = lb.accrued > 0 ? Math.min(100, (lb.availed / lb.accrued) * 100) : 0;
+                  return (
+                    <div key={lb.id} className={`rounded-xl p-3 ${colors.bg}`}>
+                      <p className={`text-xs font-semibold uppercase tracking-wide mb-2 ${colors.accent}`}>
+                        {lb.leaveType.replace(/_/g, " ")}
+                      </p>
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-500">Accrued</span>
+                          <span className="font-semibold text-gray-800">{lb.accrued}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-500">Availed</span>
+                          <span className="font-semibold text-gray-800">{lb.availed}</span>
+                        </div>
+                        <div className="flex justify-between text-xs border-t border-black/5 pt-1">
+                          <span className="text-gray-500">Balance</span>
+                          <span className={`font-bold ${lb.balance <= 0 ? "text-red-600" : colors.accent}`}>
+                            {lb.balance}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="mt-2 h-1.5 rounded-full bg-black/10 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${pct >= 100 ? "bg-red-500" : "bg-current opacity-60"} ${colors.accent}`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <p className="mt-1 text-right text-[10px] text-gray-400">{lb.used} used · {lb.pending} pending</p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Quick Actions */}
         <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">

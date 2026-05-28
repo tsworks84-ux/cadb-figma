@@ -480,12 +480,12 @@ export default function AcademicReportsPage() {
 
   const { data: yearsData }    = useQuery({ queryKey: ["academic-years"],   queryFn: () => api.get("/api/v1/academics/academic-years").then((r) => r.data.data) });
   const { data: gradesData }   = useQuery({ queryKey: ["grades"],           queryFn: () => api.get("/api/v1/academics/grades").then((r) => r.data) });
-  const { data: subjectsData } = useQuery({ queryKey: ["subjects"],         queryFn: () => api.get("/api/v1/academics/subjects").then((r) => r.data) });
+  const { data: subjectsData } = useQuery({ queryKey: ["subjects"],         queryFn: () => api.get("/api/v1/academics/subjects").then((r) => r.data.data) });
   const { data: batchesData }  = useQuery({ queryKey: ["batches-all"],      queryFn: () => api.get("/api/v1/academics/batches").then((r) => r.data) });
 
   const years    = (yearsData    ?? []) as any[];
   const grades   = (gradesData?.data   ?? []) as any[];
-  const subjects = (subjectsData?.data ?? []) as any[];
+  const subjects = (subjectsData ?? []) as any[];
   const batches  = (batchesData?.data  ?? []) as any[];
 
   const defaultYear = years.find((y) => y.isActive && !y.isArchived)?.name ?? years.find((y) => !y.isArchived)?.name ?? "";
