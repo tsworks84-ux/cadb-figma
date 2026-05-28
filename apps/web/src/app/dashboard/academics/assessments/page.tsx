@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
   Plus, Minus, X, Calendar, ChevronDown, Loader2,
-  Trash2, Clock, BookOpen, FileCheck2,
+  Trash2, Clock, BookOpen, FileCheck2, Pencil, Archive, ArchiveRestore,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useRouter } from "next/navigation";
@@ -470,13 +470,12 @@ function ExamCard({ exam, canEdit, onEdit, onDelete, onStatus }: {
       }).filter(Boolean).join(" · ")
     : uniqueNames.join(", ");
 
-  const menuItems = [
-    { label: "Edit",           show: true,                         color: "#374151", action: () => { onEdit(exam); setMenuOpen(false); } },
+  // Status-only menu items (edit/archive/delete are separate visible buttons)
+  const statusItems = [
     { label: "Mark as Marked", show: exam.status !== "MARKED",     color: "#4338ca", action: () => { onStatus(exam.id, "MARKED");    setMenuOpen(false); } },
     { label: "Mark Completed", show: exam.status !== "COMPLETED",  color: "#16a34a", action: () => { onStatus(exam.id, "COMPLETED"); setMenuOpen(false); } },
     { label: "Mark Due",       show: exam.status !== "DUE",        color: "#b45309", action: () => { onStatus(exam.id, "DUE");       setMenuOpen(false); } },
     { label: "Cancel",         show: exam.status !== "CANCELLED",  color: "#dc2626", action: () => { onStatus(exam.id, "CANCELLED"); setMenuOpen(false); } },
-    { label: "Archive",        show: exam.status !== "ARCHIVED",   color: "#64748b", action: () => { onStatus(exam.id, "ARCHIVED");  setMenuOpen(false); } },
   ].filter((m) => m.show);
 
   return (
@@ -523,26 +522,45 @@ function ExamCard({ exam, canEdit, onEdit, onDelete, onStatus }: {
       </div>
 
       {canEdit && (
-        <div style={{ position: "relative", flexShrink: 0 }} ref={menuRef}>
-          <button onClick={() => setMenuOpen((v) => !v)} className="opacity-0 group-hover:opacity-100"
-            style={{ padding: 6, borderRadius: 8, border: `1px solid ${D.line}`, background: "white", cursor: "pointer", color: D.muted, display: "flex", transition: "opacity .15s" }}>
-            <svg style={{ width: 16, height: 16 }} fill="currentColor" viewBox="0 0 20 20">
-              <circle cx="10" cy="4" r="1.5" /><circle cx="10" cy="10" r="1.5" /><circle cx="10" cy="16" r="1.5" />
-            </svg>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }} ref={menuRef}>
+          {/* Edit */}
+          <button onClick={() => onEdit(exam)} title="Edit"
+            style={{ padding: 6, borderRadius: 8, border: `1px solid ${D.line}`, background: "white", cursor: "pointer", color: D.muted, display: "flex" }}>
+            <Pencil style={{ width: 13, height: 13 }} />
           </button>
-          {menuOpen && (
-            <div style={{ position: "absolute", right: 0, top: 36, zIndex: 30, width: 192, background: "white", border: `1px solid ${D.line}`, borderRadius: 14, boxShadow: "0 8px 24px rgba(0,0,0,.12)", padding: "4px 0" }}>
-              {menuItems.map((m) => (
-                <button key={m.label} onClick={m.action}
-                  style={{ display: "flex", width: "100%", alignItems: "center", gap: 8, padding: "8px 14px", border: "none", background: "none", cursor: "pointer", fontSize: 13, color: m.color, textAlign: "left" }}>
-                  {m.label}
-                </button>
-              ))}
-              <div style={{ borderTop: `1px solid ${D.line}`, margin: "4px 0" }} />
-              <button onClick={() => { onDelete(exam.id); setMenuOpen(false); }}
-                style={{ display: "flex", width: "100%", alignItems: "center", gap: 8, padding: "8px 14px", border: "none", background: "none", cursor: "pointer", fontSize: 13, color: "#dc2626", textAlign: "left" }}>
-                <Trash2 style={{ width: 13, height: 13 }} /> Delete
+          {/* Archive / Unarchive */}
+          <button
+            onClick={() => onStatus(exam.id, exam.status === "ARCHIVED" ? "DUE" : "ARCHIVED")}
+            title={exam.status === "ARCHIVED" ? "Unarchive" : "Archive"}
+            style={{ padding: 6, borderRadius: 8, border: `1px solid ${D.line}`, background: "white", cursor: "pointer", color: exam.status === "ARCHIVED" ? "#4338ca" : D.muted, display: "flex" }}>
+            {exam.status === "ARCHIVED"
+              ? <ArchiveRestore style={{ width: 13, height: 13 }} />
+              : <Archive style={{ width: 13, height: 13 }} />}
+          </button>
+          {/* Delete */}
+          <button onClick={() => onDelete(exam.id)} title="Delete"
+            style={{ padding: 6, borderRadius: 8, border: `1px solid ${D.line}`, background: "white", cursor: "pointer", color: "#ef4444", display: "flex" }}>
+            <Trash2 style={{ width: 13, height: 13 }} />
+          </button>
+          {/* 3-dot status menu */}
+          {statusItems.length > 0 && (
+            <div style={{ position: "relative" }}>
+              <button onClick={() => setMenuOpen((v) => !v)} title="Change status"
+                style={{ padding: 6, borderRadius: 8, border: `1px solid ${D.line}`, background: "white", cursor: "pointer", color: D.muted, display: "flex" }}>
+                <svg style={{ width: 14, height: 14 }} fill="currentColor" viewBox="0 0 20 20">
+                  <circle cx="10" cy="4" r="1.5" /><circle cx="10" cy="10" r="1.5" /><circle cx="10" cy="16" r="1.5" />
+                </svg>
               </button>
+              {menuOpen && (
+                <div style={{ position: "absolute", right: 0, top: 36, zIndex: 30, width: 180, background: "white", border: `1px solid ${D.line}`, borderRadius: 14, boxShadow: "0 8px 24px rgba(0,0,0,.12)", padding: "4px 0" }}>
+                  {statusItems.map((m) => (
+                    <button key={m.label} onClick={m.action}
+                      style={{ display: "flex", width: "100%", alignItems: "center", gap: 8, padding: "8px 14px", border: "none", background: "none", cursor: "pointer", fontSize: 13, color: m.color }}>
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -633,10 +633,6 @@ function AssignmentCard({
             <Calendar className="h-3 w-3" />
             Given: {fmtDate(a.assignmentDate)}
           </span>
-          <span className="flex items-center gap-1">
-            <Clock className="h-3 w-3" />
-            Due: {fmtDate(a.submissionDate)}
-          </span>
         </div>
         {a.topics && (
           <div className="flex flex-wrap gap-1 mt-1.5">
@@ -1533,18 +1529,62 @@ export default function AssignmentsPage() {
                     </div>
                   </div>
                 ) : (
-                  <div style={{
-                    background: "white", borderRadius: 18, border: `1px solid ${D.line}`,
-                    boxShadow: "0 8px 22px rgba(20,23,53,.05)", overflow: "hidden",
-                  }}>
-                    {displayedAssignments.map((a) => (
-                      <AssignmentCard
-                        key={a.id} a={a} canEdit={canEdit}
-                        onEdit={openEdit}
-                        onDelete={(id) => { if (confirm("Delete this assignment?")) deleteMut.mutate(id); }}
-                        onStatus={(id, status) => statusMut.mutate({ id, status })}
-                      />
-                    ))}
+                  <div className="space-y-5">
+                    {(() => {
+                      // Group by submission date (due date)
+                      const grouped: Record<string, any[]> = {};
+                      for (const a of displayedAssignments) {
+                        const key = (a.submissionDate as string).split("T")[0];
+                        if (!grouped[key]) grouped[key] = [];
+                        grouped[key].push(a);
+                      }
+                      const todayKey = new Date().toISOString().split("T")[0];
+                      return Object.keys(grouped).sort().reverse().map((key) => {
+                        const items = grouped[key];
+                        const dayLabel = (() => {
+                          try { return format(parseISO(key), "EEEE, d MMMM yyyy"); } catch { return key; }
+                        })();
+                        const isPastDue = key < todayKey;
+                        const isToday   = key === todayKey;
+                        return (
+                          <div key={key}>
+                            {/* Date header */}
+                            <div className="flex items-center gap-2 mb-2 px-1">
+                              <Calendar style={{ width: 15, height: 15, color: "#6366f1", flexShrink: 0 }} />
+                              <span style={{ fontSize: 14, fontWeight: 700, color: D.ink }}>{dayLabel}</span>
+                              <span style={{ color: D.muted, fontSize: 12 }}>·</span>
+                              <span style={{ color: D.muted, fontSize: 12 }}>
+                                {items.length} assignment{items.length !== 1 ? "s" : ""}
+                              </span>
+                              {isToday && (
+                                <span className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-600">
+                                  Today
+                                </span>
+                              )}
+                              {isPastDue && !isToday && (
+                                <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-600 border border-amber-100">
+                                  Past Due
+                                </span>
+                              )}
+                            </div>
+                            {/* Cards for this date */}
+                            <div style={{
+                              background: "white", borderRadius: 14, border: `1px solid ${D.line}`,
+                              boxShadow: "0 4px 12px rgba(20,23,53,.05)", overflow: "hidden",
+                            }}>
+                              {items.map((a) => (
+                                <AssignmentCard
+                                  key={a.id} a={a} canEdit={canEdit}
+                                  onEdit={openEdit}
+                                  onDelete={(id) => { if (confirm("Delete this assignment?")) deleteMut.mutate(id); }}
+                                  onStatus={(id, status) => statusMut.mutate({ id, status })}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
                   </div>
                 )}
               </>
