@@ -473,8 +473,8 @@ function AdmissionTab({ student, canEdit, onRefetch }: { student: any; canEdit: 
     });
   }, [student]);
 
-  const { data: grades = [] } = useQuery({ queryKey: ["grades"], queryFn: () => api.get("/api/v1/academics/settings/grades").then((r) => r.data.data), staleTime: 5 * 60 * 1000 });
-  const { data: courses = [] } = useQuery({ queryKey: ["courses"], queryFn: () => api.get("/api/v1/academics/settings/courses").then((r) => r.data.data), staleTime: 5 * 60 * 1000 });
+  const { data: grades = [] } = useQuery({ queryKey: ["grades"], queryFn: () => api.get("/api/v1/academics/grades").then((r) => r.data.data), staleTime: 5 * 60 * 1000 });
+  const { data: courses = [] } = useQuery({ queryKey: ["courses"], queryFn: () => api.get("/api/v1/academics/courses").then((r) => r.data.data), staleTime: 5 * 60 * 1000 });
   const { data: academicYears = [] } = useQuery({ queryKey: ["academic-years"], queryFn: () => api.get("/api/v1/academics/academic-years").then((r) => r.data.data), staleTime: 10 * 60 * 1000 });
 
   const refetchStudent = () => { qc.invalidateQueries({ queryKey: ["student", student.id] }); onRefetch(); };

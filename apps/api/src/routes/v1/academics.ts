@@ -84,7 +84,7 @@ export async function academicsRoutes(fastify: FastifyInstance) {
       }),
       prisma.school.findMany({ select: { id: true, name: true, city: true } }),
       prisma.grade.findMany({ select: { id: true, name: true } }),
-      prisma.course.findMany({ select: { id: true, name: true } }),
+      prisma.course.findMany({ select: { id: true, name: true, isActive: true } }),
     ]);
 
     // Build lookup maps

@@ -224,7 +224,7 @@ export default function BatchesPage() {
   });
   const { data: courses = [] } = useQuery({
     queryKey: ["courses"],
-    queryFn: () => api.get("/api/v1/academics/settings/courses").then((r) => r.data.data),
+    queryFn: () => api.get("/api/v1/academics/courses").then((r) => r.data.data),
     staleTime: 10 * 60 * 1000,
   });
   const { data: subjects = [] } = useQuery({

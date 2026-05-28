@@ -212,8 +212,8 @@ export default function StudentsPage() {
   // ── Reference data ────────────────────────────────────────────────────────────
   const { data: batches = [] }       = useQuery({ queryKey: ["batches", false],   queryFn: () => api.get("/api/v1/academics/batches?archived=false").then((r) => r.data.data), staleTime: 5 * 60 * 1000 });
   const { data: academicYears = [] } = useQuery({ queryKey: ["academic-years"],   queryFn: () => api.get("/api/v1/academics/academic-years").then((r) => r.data.data), staleTime: 10 * 60 * 1000 });
-  const { data: grades = [] }        = useQuery({ queryKey: ["grades"],           queryFn: () => api.get("/api/v1/academics/settings/grades").then((r) => r.data.data), staleTime: 10 * 60 * 1000 });
-  const { data: schools = [] }       = useQuery({ queryKey: ["schools"],          queryFn: () => api.get("/api/v1/academics/settings/schools").then((r) => r.data.data), staleTime: 10 * 60 * 1000 });
+  const { data: grades = [] }        = useQuery({ queryKey: ["grades"],           queryFn: () => api.get("/api/v1/academics/grades").then((r) => r.data.data), staleTime: 10 * 60 * 1000 });
+  const { data: schools = [] }       = useQuery({ queryKey: ["schools"],          queryFn: () => api.get("/api/v1/academics/schools").then((r) => r.data.data), staleTime: 10 * 60 * 1000 });
 
   // ── Mutations ─────────────────────────────────────────────────────────────────
   const archiveMut = useMutation({
