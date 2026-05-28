@@ -1,10 +1,11 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { useStudentAuthStore } from "@/store/studentAuth";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { studentApi } from "@/lib/studentApi";
-import { User, MapPin, Users2, GraduationCap } from "lucide-react";
-import Image from "next/image";
+import { User, MapPin, Users2, GraduationCap, Camera, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -37,7 +38,6 @@ function fmt(v?: string | null) {
 function Skeleton() {
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-5">
-      {/* Header skeleton */}
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         <div className="h-20 bg-gray-100 animate-pulse" />
         <div className="px-5 pb-5 pt-3 space-y-2">
@@ -63,7 +63,12 @@ function Skeleton() {
 }
 
 export default function StudentProfilePage() {
-  const { accessToken, student: authStudent } = useStudentAuthStore();
+  const { accessToken, student: authStudent, updateStudent } = useStudentAuthStore();
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  // local preview so the new photo shows instantly without waiting for re-fetch
+  const [localPhotoUrl, setLocalPhotoUrl] = useState<string | null>(null);
 
   const { data: profile, isLoading, isError } = useQuery({
     queryKey: ["student-portal-profile"],
@@ -72,15 +77,54 @@ export default function StudentProfilePage() {
     enabled: !!accessToken,
   });
 
-  // Always show skeleton until we have the full profile from API
-  if (isLoading || (!profile && !isError)) {
-    return <Skeleton />;
+  async function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Client-side size guard (5 MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image must be under 5 MB");
+      return;
+    }
+
+    // Show instant preview
+    const objectUrl = URL.createObjectURL(file);
+    setLocalPhotoUrl(objectUrl);
+
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await studentApi.patch("/api/v1/student/portal/photo", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      const newUrl: string = res.data.data.photoUrl;
+      // Update React Query cache (Profile + Admission pages)
+      queryClient.setQueryData(["student-portal-profile"], (old: any) =>
+        old ? { ...old, photoUrl: newUrl } : old
+      );
+      // Update Zustand store so the sidebar avatar also refreshes instantly
+      updateStudent({ photoUrl: newUrl });
+      toast.success("Profile photo updated!");
+    } catch (err: any) {
+      setLocalPhotoUrl(null); // revert preview on failure
+      toast.error(err.response?.data?.error ?? "Upload failed");
+    } finally {
+      setUploading(false);
+      // Reset input so the same file can be re-selected if needed
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   }
 
-  // If API failed, still show what we have from auth store (name/code only)
+  if (isLoading || (!profile && !isError)) return <Skeleton />;
+
   const s: any = profile ?? authStudent;
   const addr = s?.address ?? {};
   const batches: any[] = profile?.studentBatches ?? [];
+
+  // Determine the photo URL: local preview > API value > nothing
+  const displayPhoto = localPhotoUrl ?? (s?.photoUrl ? `${API_BASE}${s.photoUrl}` : null);
+  const initials = `${s?.firstName?.[0] ?? ""}${s?.lastName?.[0] ?? ""}`;
 
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-5">
@@ -89,22 +133,47 @@ export default function StudentProfilePage() {
         <div className="h-20 bg-gradient-to-r from-emerald-600 to-teal-600" />
         <div className="px-5 pb-5">
           <div className="flex items-end gap-4 -mt-10 mb-4">
-            <div className="h-20 w-20 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-2xl font-bold border-4 border-white shadow overflow-hidden shrink-0">
-              {s?.photoUrl
-                ? (
+
+            {/* Avatar with upload button */}
+            <div className="relative shrink-0">
+              <div className="h-20 w-20 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-2xl font-bold border-4 border-white shadow overflow-hidden">
+                {displayPhoto ? (
                   <img
-                    src={`${API_BASE}${s.photoUrl}`}
-                    alt="Student photo"
+                    src={displayPhoto}
+                    alt="Profile photo"
                     className="h-full w-full object-cover"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = "none";
+                    }}
                   />
-                )
-                : null}
-              {/* Always render initials as fallback (hidden by image above) */}
-              <span className={s?.photoUrl ? "hidden" : ""}>
-                {s?.firstName?.[0] ?? ""}{s?.lastName?.[0] ?? ""}
-              </span>
+                ) : (
+                  <span>{initials}</span>
+                )}
+              </div>
+
+              {/* Camera button overlay */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="absolute -bottom-0.5 -right-0.5 h-7 w-7 rounded-full bg-emerald-600 hover:bg-emerald-700 border-2 border-white flex items-center justify-center shadow transition-colors disabled:opacity-60"
+                title="Change profile photo"
+              >
+                {uploading
+                  ? <Loader2 className="h-3.5 w-3.5 text-white animate-spin" />
+                  : <Camera className="h-3.5 w-3.5 text-white" />
+                }
+              </button>
+
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={handlePhotoChange}
+              />
             </div>
+
             <div className="pb-1">
               <h1 className="text-xl font-bold text-gray-900">
                 {s?.firstName} {s?.middleName ? `${s.middleName} ` : ""}{s?.lastName}
@@ -112,6 +181,7 @@ export default function StudentProfilePage() {
               <p className="text-sm text-gray-400 font-mono">{s?.studentCode}</p>
             </div>
           </div>
+
           {batches.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {batches.map((sb: any) => (

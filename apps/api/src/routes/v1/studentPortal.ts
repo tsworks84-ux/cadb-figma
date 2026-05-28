@@ -1,6 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "@cadb/db";
 import type { StudentJwtPayload } from "@cadb/types";
+import { uploadFile } from "../../utils/s3.js";
+import { randomUUID } from "crypto";
+import path from "path";
 
 async function authenticateStudent(fastify: FastifyInstance, request: any, reply: any) {
   const auth = request.headers.authorization;
@@ -62,6 +65,33 @@ export async function studentPortalRoutes(fastify: FastifyInstance) {
     });
     if (!student) return reply.status(404).send({ success: false, error: "Not found" });
     return reply.send({ success: true, data: student });
+  });
+
+  // ── PHOTO UPLOAD ───────────────────────────────────────────────────────────
+  fastify.patch("/photo", async (request, reply) => {
+    const studentId = (request as any).student.sub as string;
+
+    const file = await (request as any).file();
+    if (!file) return reply.status(400).send({ success: false, error: "No file uploaded" });
+
+    const ext = path.extname(file.filename).slice(1).toLowerCase() || "jpg";
+    if (!["jpg", "jpeg", "png", "webp"].includes(ext)) {
+      return reply.status(400).send({ success: false, error: "Only JPG, PNG or WebP allowed" });
+    }
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of file.file) chunks.push(chunk);
+    const buffer = Buffer.concat(chunks);
+
+    if (buffer.length > 5 * 1024 * 1024) {
+      return reply.status(400).send({ success: false, error: "File too large (max 5 MB)" });
+    }
+
+    const fileName = `student_photo_${studentId}_${randomUUID()}.${ext}`;
+    const photoUrl = await uploadFile(buffer, `uploads/${fileName}`, file.mimetype, fileName);
+
+    await prisma.student.update({ where: { id: studentId }, data: { photoUrl } });
+    return reply.send({ success: true, data: { photoUrl } });
   });
 
   // ── ASSIGNMENTS ────────────────────────────────────────────────────────────

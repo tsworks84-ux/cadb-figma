@@ -72,11 +72,17 @@ export function StudentSidebar() {
       <div className="border-t border-slate-700 px-4 py-3">
         <div className="flex items-center gap-3">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold overflow-hidden">
-            {student?.photoUrl
-              ? <Image src={`${API_BASE}${student.photoUrl}`} alt="photo" width={32} height={32} className="h-full w-full object-cover" />
-              : student
-                ? `${student.firstName[0]}${student.lastName[0]}`
-                : "?"}
+            {student?.photoUrl && (
+              <img
+                src={student.photoUrl.startsWith("http") ? student.photoUrl : `${API_BASE}${student.photoUrl}`}
+                alt=""
+                className="h-full w-full object-cover"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+              />
+            )}
+            <span className={student?.photoUrl ? "hidden" : ""}>
+              {student ? `${student.firstName[0]}${student.lastName[0]}` : "?"}
+            </span>
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium truncate">{student ? `${student.firstName} ${student.lastName}` : "Loading..."}</p>
