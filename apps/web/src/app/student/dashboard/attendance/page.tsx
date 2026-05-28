@@ -96,12 +96,12 @@ export default function StudentAttendancePage() {
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1.5">
               <label className="text-xs text-gray-400 font-medium whitespace-nowrap">From</label>
-              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+              <input type="date" max="2099-12-31" min="1900-01-01" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
                 className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-emerald-400" />
             </div>
             <div className="flex items-center gap-1.5">
               <label className="text-xs text-gray-400 font-medium whitespace-nowrap">To</label>
-              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+              <input type="date" max="2099-12-31" min="1900-01-01" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
                 className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-emerald-400" />
             </div>
           </div>

@@ -379,7 +379,7 @@ function FacultyScheduleWidget({ employeeId }: { employeeId: string }) {
             </button>
           )}
           <input
-            type="date"
+            type="date" max="2099-12-31" min="1900-01-01"
             value={pickedDate}
             onChange={(e) => setPickedDate(e.target.value)}
             className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"

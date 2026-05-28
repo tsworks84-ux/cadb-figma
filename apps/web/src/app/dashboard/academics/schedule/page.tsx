@@ -797,7 +797,7 @@ function ScheduleModal({
               <h3 style={sectionHeadStyle}>Timing &amp; Location</h3>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-[14px]">
                 <DField label="Date" required>
-                  <DInput type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+                  <DInput type="date" max="2099-12-31" min="1900-01-01" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
                 </DField>
                 <DField label="Start Time" required>
                   <DInput type="time" value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} />
@@ -1248,10 +1248,10 @@ function AssignmentTab({
         </DField>
         <div className="grid grid-cols-2 gap-3">
           <DField label="Assignment Date" required>
-            <DInput type="date" value={assForm.assignmentDate} onChange={(e) => setAssForm({ ...assForm, assignmentDate: e.target.value })} />
+            <DInput type="date" max="2099-12-31" min="1900-01-01" value={assForm.assignmentDate} onChange={(e) => setAssForm({ ...assForm, assignmentDate: e.target.value })} />
           </DField>
           <DField label="Submission Date" required>
-            <DInput type="date" error={submissionError} value={assForm.submissionDate} onChange={(e) => setAssForm({ ...assForm, submissionDate: e.target.value })} />
+            <DInput type="date" max="2099-12-31" min="1900-01-01" error={submissionError} value={assForm.submissionDate} onChange={(e) => setAssForm({ ...assForm, submissionDate: e.target.value })} />
             {submissionError && <p style={{ fontSize: 11, color: "#ef4444", margin: 0 }}>Can't be before assignment date</p>}
           </DField>
         </div>
@@ -1720,8 +1720,8 @@ export default function SchedulePage() {
 
       <div>
         <label style={filterLabelStyle}>Date Range</label>
-        <DInput type="date" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} />
-        <DInput type="date" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} style={{ marginTop: 8 }} />
+        <DInput type="date" max="2099-12-31" min="1900-01-01" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} />
+        <DInput type="date" max="2099-12-31" min="1900-01-01" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} style={{ marginTop: 8 }} />
       </div>
 
       <div>

@@ -20,9 +20,10 @@ import { formatDate } from "@/lib/utils";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function FInput({ label, value, onChange, type = "text", disabled = false, className = "" }: {
+function FInput({ label, value, onChange, type = "text", disabled = false, className = "", ...rest }: {
   label: string; value: string; onChange?: (v: string) => void;
   type?: string; disabled?: boolean; className?: string;
+  [key: string]: any;
 }) {
   return (
     <div className={`space-y-1 ${className}`}>
@@ -37,6 +38,7 @@ function FInput({ label, value, onChange, type = "text", disabled = false, class
           value={value}
           onChange={(e) => onChange?.(e.target.value)}
           className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none bg-white text-gray-700"
+          {...rest}
         />
       )}
     </div>
@@ -345,7 +347,7 @@ function ProfileTab({ student, canEdit, onRefetch }: { student: any; canEdit: bo
               <option value="FEMALE">Female</option>
               <option value="OTHER">Other</option>
             </FSelect>
-            <FInput label="Date of Birth" value={personal.dateOfBirth} onChange={(v) => setPersonal((p) => ({ ...p, dateOfBirth: v }))} type="date" disabled={!editingPersonal} />
+            <FInput label="Date of Birth" value={personal.dateOfBirth} onChange={(v) => setPersonal((p) => ({ ...p, dateOfBirth: v }))} type="date" max="2099-12-31" min="1900-01-01" disabled={!editingPersonal} />
             <FInput label="Phone"         value={personal.phone}       onChange={(v) => setPersonal((p) => ({ ...p, phone: v }))}       disabled={!editingPersonal} />
             <FInput label="Email"         value={personal.email}       onChange={(v) => setPersonal((p) => ({ ...p, email: v }))}       type="email" disabled={!editingPersonal} />
             <FInput label="Roll Number"   value={personal.rollNumber}  onChange={(v) => setPersonal((p) => ({ ...p, rollNumber: v }))}  disabled={!editingPersonal} />
@@ -613,7 +615,7 @@ function AdmissionTab({ student, canEdit, onRefetch }: { student: any; canEdit: 
       }>
         <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 md:grid-cols-3">
           <FInput label="Admission Number" value={form.admissionNumber} onChange={(v) => set("admissionNumber", v)} disabled={!editing} />
-          <FInput label="Admission Date"   value={form.admissionDate}   onChange={(v) => set("admissionDate", v)}   type="date" disabled={!editing} />
+          <FInput label="Admission Date"   value={form.admissionDate}   onChange={(v) => set("admissionDate", v)}   type="date" max="2099-12-31" min="1900-01-01" disabled={!editing} />
           {editing ? (
             <FSelect label="Academic Year" value={form.academicYear} onChange={(v) => set("academicYear", v)}>
               <option value="">Select academic year</option>
@@ -737,7 +739,7 @@ function AdmissionTab({ student, canEdit, onRefetch }: { student: any; canEdit: 
                         onChange={(e) => setInstalEdits((p) => ({ ...p, [ins.id]: { ...p[ins.id], label: e.target.value } }))}
                       />
                       <input
-                        type="date"
+                        type="date" max="2099-12-31" min="1900-01-01"
                         className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
                         value={ed.dueDate}
                         onChange={(e) => setInstalEdits((p) => ({ ...p, [ins.id]: { ...p[ins.id], dueDate: e.target.value } }))}
@@ -806,7 +808,7 @@ function AdmissionTab({ student, canEdit, onRefetch }: { student: any; canEdit: 
                   onChange={(e) => setNewInstalRows((p) => p.map((r, i) => i === idx ? { ...r, label: e.target.value } : r))}
                 />
                 <input
-                  type="date"
+                  type="date" max="2099-12-31" min="1900-01-01"
                   className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
                   value={row.dueDate}
                   onChange={(e) => setNewInstalRows((p) => p.map((r, i) => i === idx ? { ...r, dueDate: e.target.value } : r))}
@@ -873,7 +875,7 @@ function AdmissionTab({ student, canEdit, onRefetch }: { student: any; canEdit: 
                     <label className="block text-xs font-medium text-gray-500 mb-1">
                       Payment Date {req && <span className="text-amber-500">*</span>}
                     </label>
-                    <input type="date" value={payForm.paymentDate} onChange={(e) => setPay("paymentDate", e.target.value)}
+                    <input type="date" max="2099-12-31" min="1900-01-01" value={payForm.paymentDate} onChange={(e) => setPay("paymentDate", e.target.value)}
                       className={`${inputCls}${req && !payForm.paymentDate ? " border-amber-300" : ""}`} />
                     {req && !payForm.paymentDate && <p className="text-xs text-amber-600 mt-1">Required</p>}
                   </div>
@@ -1357,12 +1359,12 @@ function AssignmentsTab({ student }: { student: any }) {
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1.5">
               <label className="text-xs text-gray-400 font-medium whitespace-nowrap">From</label>
-              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+              <input type="date" max="2099-12-31" min="1900-01-01" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
                 className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-indigo-400" />
             </div>
             <div className="flex items-center gap-1.5">
               <label className="text-xs text-gray-400 font-medium whitespace-nowrap">To</label>
-              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+              <input type="date" max="2099-12-31" min="1900-01-01" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
                 className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-indigo-400" />
             </div>
           </div>
@@ -1611,12 +1613,12 @@ function AttendanceTab({ student }: { student: any }) {
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1.5">
               <label className="text-xs text-gray-400 font-medium whitespace-nowrap">From</label>
-              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+              <input type="date" max="2099-12-31" min="1900-01-01" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
                 className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-indigo-400" />
             </div>
             <div className="flex items-center gap-1.5">
               <label className="text-xs text-gray-400 font-medium whitespace-nowrap">To</label>
-              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+              <input type="date" max="2099-12-31" min="1900-01-01" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
                 className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-indigo-400" />
             </div>
           </div>

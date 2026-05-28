@@ -174,7 +174,7 @@ function TodoModal({
                 <Calendar size={15} /> Due Date
               </label>
               <input
-                type="date"
+                type="date" max="2099-12-31" min="1900-01-01"
                 className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2"
                 value={form.dueDate}
                 onChange={(e) => set("dueDate", e.target.value)}
@@ -525,7 +525,7 @@ function LogTimeModal({ onClose }: { onClose: () => void }) {
               <Calendar size={15} /> Date
             </label>
             <input
-              type="date"
+              type="date" max="2099-12-31" min="1900-01-01"
               value={timeData.date}
               onChange={(e) => setTimeData({ ...timeData, date: e.target.value })}
               className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2"

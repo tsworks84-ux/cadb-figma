@@ -442,14 +442,14 @@ function AssignmentModal({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-[14px]" style={{ marginTop: 14 }}>
                 <DField label="Assignment Date" required>
                   <DInput
-                    type="date"
+                    type="date" max="2099-12-31" min="1900-01-01"
                     value={form.assignmentDate}
                     onChange={(e) => setForm({ ...form, assignmentDate: e.target.value })}
                   />
                 </DField>
                 <DField label="Submission Date" required>
                   <DInput
-                    type="date"
+                    type="date" max="2099-12-31" min="1900-01-01"
                     error={submissionError}
                     value={form.submissionDate}
                     onChange={(e) => setForm({ ...form, submissionDate: e.target.value })}
@@ -1263,8 +1263,8 @@ export default function AssignmentsPage() {
       {/* Due date range */}
       <div>
         <label style={filterLabelStyle}>Due Date Range</label>
-        <DInput type="date" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} />
-        <DInput type="date" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} style={{ marginTop: 8 }} />
+        <DInput type="date" max="2099-12-31" min="1900-01-01" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} />
+        <DInput type="date" max="2099-12-31" min="1900-01-01" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} style={{ marginTop: 8 }} />
       </div>
 
       {/* Academic Year */}

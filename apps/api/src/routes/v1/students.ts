@@ -222,7 +222,7 @@ export async function studentRoutes(fastify: FastifyInstance) {
     const parsed = createSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
-    const { email, dateOfBirth, admissionDate, paymentDate, initialPassword, instalments, ...rest } = parsed.data;
+    const { email, dateOfBirth, admissionDate, paymentDate, initialPassword, instalments, batchId, ...rest } = parsed.data as any;
 
     const emailExists = await prisma.student.findUnique({ where: { email } });
     if (emailExists) return reply.status(400).send({ success: false, error: `Email "${email}" is already registered` });
@@ -258,10 +258,17 @@ export async function studentRoutes(fastify: FastifyInstance) {
       },
     });
 
+    // Link to batch via StudentBatch junction table
+    if (batchId) {
+      await prisma.studentBatch.create({
+        data: { studentId: student.id, batchId, joinedAt: new Date() },
+      });
+    }
+
     // Create instalment plan if provided
     if (instalments?.length) {
       await prisma.studentInstalment.createMany({
-        data: instalments.map((ins) => ({
+        data: instalments.map((ins: any) => ({
           studentId:    student.id,
           instalmentNo: ins.instalmentNo,
           label:        ins.label,

@@ -926,7 +926,7 @@ export default function NewEmployeePage() {
                       </div>
                       <div>
                         <Label>Date of birth</Label>
-                        <Input {...register("dateOfBirth")} type="date" />
+                        <Input {...register("dateOfBirth")} type="date" max="2099-12-31" min="1900-01-01" />
                       </div>
                       <div>
                         <Label>Employee code</Label>
@@ -1041,7 +1041,7 @@ export default function NewEmployeePage() {
                       </div>
                       <div>
                         <Label required>Joining date</Label>
-                        <Input {...register("joiningDate")} type="date" />
+                        <Input {...register("joiningDate")} type="date" max="2099-12-31" min="1900-01-01" />
                         <FieldError message={errors.joiningDate?.message} />
                       </div>
                     </div>

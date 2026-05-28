@@ -669,7 +669,7 @@ export default function BatchesPage() {
                     </DSelect>
                   </DField>
                   <DField label="Start Date">
-                    <DInput type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />
+                    <DInput type="date" max="2099-12-31" min="1900-01-01" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />
                   </DField>
                   <DField label="Target Strength">
                     <DInput type="number" placeholder="e.g. 35" value={form.targetStrength} onChange={(e) => setForm({ ...form, targetStrength: e.target.value })} />

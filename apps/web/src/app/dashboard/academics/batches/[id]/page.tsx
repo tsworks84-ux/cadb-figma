@@ -607,7 +607,7 @@ export default function BatchDetailPage() {
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <p className="font-semibold text-gray-800 text-sm">Class-wise Attendance</p>
-              <input type="date" value={attendanceDate} onChange={(e) => setAttendanceDate(e.target.value)}
+              <input type="date" max="2099-12-31" min="1900-01-01" value={attendanceDate} onChange={(e) => setAttendanceDate(e.target.value)}
                 className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none" />
             </div>
 

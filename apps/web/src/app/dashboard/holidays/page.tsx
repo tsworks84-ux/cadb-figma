@@ -58,7 +58,7 @@ function EditRow({
       </td>
       <td className="px-4 py-2">
         <input
-          type="date"
+          type="date" max="2099-12-31" min="1900-01-01"
           value={form.fromDate}
           onChange={(e) => onChange({ ...form, fromDate: e.target.value, toDate: e.target.value || form.toDate })}
           className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm focus:border-blue-400 focus:outline-none"
@@ -69,7 +69,7 @@ function EditRow({
       </td>
       <td className="px-4 py-2">
         <input
-          type="date"
+          type="date" max="2099-12-31"
           value={form.toDate}
           min={form.fromDate}
           onChange={(e) => onChange({ ...form, toDate: e.target.value })}

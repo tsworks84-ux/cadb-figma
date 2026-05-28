@@ -392,7 +392,7 @@ function ExamModal({ open, onClose, initial, examId, batches, subjects, academic
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mt-4">
               <DField label="Date" req>
-                <DInput type="date" value={form.examDate} onChange={(e) => setForm({ ...form, examDate: e.target.value })} />
+                <DInput type="date" max="2099-12-31" min="1900-01-01" value={form.examDate} onChange={(e) => setForm({ ...form, examDate: e.target.value })} />
               </DField>
               <DField label="Start Time">
                 <DSelect value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })}>
@@ -743,8 +743,8 @@ export default function AssessmentsPage() {
 
       <div style={{ marginBottom: 20 }}>
         <label style={{ display: "block", marginBottom: 8, color: "#4b5563", fontSize: 13, fontWeight: 850 }}>Exam Date Range</label>
-        <DInput type="date" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} style={{ marginBottom: 8 }} />
-        <DInput type="date" value={filterDateTo}   onChange={(e) => setFilterDateTo(e.target.value)} />
+        <DInput type="date" max="2099-12-31" min="1900-01-01" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} style={{ marginBottom: 8 }} />
+        <DInput type="date" max="2099-12-31" min="1900-01-01" value={filterDateTo}   onChange={(e) => setFilterDateTo(e.target.value)} />
       </div>
 
       {[

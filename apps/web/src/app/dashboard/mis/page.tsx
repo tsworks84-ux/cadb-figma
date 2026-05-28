@@ -1209,7 +1209,7 @@ function ClaimsReport() {
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-500">From date</label>
               <input
-                type="date"
+                type="date" min="1900-01-01"
                 value={from}
                 max={to || todayStr()}
                 onChange={(e) => { setFrom(e.target.value); setPreview(false); }}

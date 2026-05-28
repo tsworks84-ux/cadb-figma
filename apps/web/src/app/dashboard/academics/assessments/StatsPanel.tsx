@@ -387,10 +387,10 @@ export function AssessmentStatsPanel({
           </div>
           {timeWindow === "custom" && (
             <div className="flex items-center gap-1.5 ml-1">
-              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+              <input type="date" max="2099-12-31" min="1900-01-01" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
                 className="text-xs rounded-lg border border-gray-200 px-2 py-1 focus:outline-none focus:border-indigo-400" />
               <span className="text-gray-400 text-xs">→</span>
-              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+              <input type="date" max="2099-12-31" min="1900-01-01" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
                 className="text-xs rounded-lg border border-gray-200 px-2 py-1 focus:outline-none focus:border-indigo-400" />
             </div>
           )}

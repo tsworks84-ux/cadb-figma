@@ -276,8 +276,8 @@ function GenerateModal({ report, onClose, academicYears, batches, grades, subjec
           )}
           <div><Label>Date Range</Label>
             <div className="grid grid-cols-2 gap-3">
-              <Inp type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-              <Inp type="date" value={dateTo}   onChange={(e) => setDateTo(e.target.value)} />
+              <Inp type="date" max="2099-12-31" min="1900-01-01" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+              <Inp type="date" max="2099-12-31" min="1900-01-01" value={dateTo}   onChange={(e) => setDateTo(e.target.value)} />
             </div>
           </div>
           <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">

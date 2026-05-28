@@ -766,7 +766,7 @@ function PlanItemsEditor({ items, setItems }: { items: PlanItem[]; setItems: (it
                 {item.dueDateMode === "date" ? "📅 Date" : "⏱ Days"}
               </button>
               {item.dueDateMode === "date"
-                ? <Input type="date" value={item.dueDate} onChange={e => update(item._id, "dueDate", e.target.value)} className="flex-1" />
+                ? <Input type="date" max="2099-12-31" min="1900-01-01" value={item.dueDate} onChange={e => update(item._id, "dueDate", e.target.value)} className="flex-1" />
                 : <Input type="number" min="0" placeholder="e.g. 30" value={item.daysFromAdmission} onChange={e => update(item._id, "daysFromAdmission", e.target.value)} className="flex-1" />}
             </div>
             <button type="button" onClick={() => remove(item._id)} style={{ flexShrink: 0, width: 28, height: 28, borderRadius: 8, border: `1px solid ${D.line}`, background: "#fff", color: D.muted, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><Trash2 size={13} /></button>

@@ -592,7 +592,7 @@ function NewTaskModal({ assigneeId, assigneeName, onClose, onCreated }: NewTaskM
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1.5">Assigned Date</label>
               <input
-                type="date"
+                type="date" max="2099-12-31" min="1900-01-01"
                 value={form.assignedDate}
                 onChange={(e) => setForm({ ...form, assignedDate: e.target.value })}
                 className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -601,7 +601,7 @@ function NewTaskModal({ assigneeId, assigneeName, onClose, onCreated }: NewTaskM
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1.5">Due Date <span className="text-red-500">*</span></label>
               <input
-                type="date"
+                type="date" max="2099-12-31"
                 value={form.dueDate}
                 min={form.assignedDate}
                 onChange={(e) => setForm({ ...form, dueDate: e.target.value })}

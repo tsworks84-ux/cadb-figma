@@ -538,7 +538,7 @@ function AdmissionSection({ form, set, courses, academicYears, instalmentPlans }
           </div>
           <div>
             <Label>Admission Date</Label>
-            <FInput type="date" value={form.admissionDate} onChange={(e) => set("admissionDate", e.target.value)} />
+            <FInput type="date" max="2099-12-31" min="1900-01-01" value={form.admissionDate} onChange={(e) => set("admissionDate", e.target.value)} />
           </div>
           <div>
             <Label>Academic Year</Label>
@@ -585,7 +585,7 @@ function AdmissionSection({ form, set, courses, academicYears, instalmentPlans }
             </div>
             <div>
               <Label>Payment Date</Label>
-              <FInput type="date" value={form.paymentDate} onChange={(e) => set("paymentDate", e.target.value)} />
+              <FInput type="date" max="2099-12-31" min="1900-01-01" value={form.paymentDate} onChange={(e) => set("paymentDate", e.target.value)} />
             </div>
             <div>
               <Label>Mode of Payment</Label>
@@ -679,7 +679,7 @@ function AdmissionSection({ form, set, courses, academicYears, instalmentPlans }
                     <span className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-[10px] font-black shrink-0">
                       {idx + 1}
                     </span>
-                    <FInput type="date" value={item.dueDate} onChange={(e) => {
+                    <FInput type="date" max="2099-12-31" min="1900-01-01" value={item.dueDate} onChange={(e) => {
                       const updated = [...form.customItems];
                       updated[idx] = { ...updated[idx], dueDate: e.target.value };
                       set("customItems", updated);

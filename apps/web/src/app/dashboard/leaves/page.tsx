@@ -234,7 +234,7 @@ function HolidayCalendarModal({ onClose }: { onClose: () => void }) {
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">From Date</label>
                   <input
-                    type="date"
+                    type="date" max="2099-12-31" min="1900-01-01"
                     value={addForm.fromDate}
                     onChange={(e) => setAddForm({ ...addForm, fromDate: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 bg-white"
@@ -243,7 +243,7 @@ function HolidayCalendarModal({ onClose }: { onClose: () => void }) {
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">To Date</label>
                   <input
-                    type="date"
+                    type="date" max="2099-12-31"
                     value={addForm.toDate}
                     min={addForm.fromDate}
                     onChange={(e) => setAddForm({ ...addForm, toDate: e.target.value })}
@@ -1004,7 +1004,7 @@ function ApplyForm({
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1.5">From</label>
             <input
-              type="date"
+              type="date" max="2099-12-31" min="1900-01-01"
               value={form.fromDate}
               onChange={(e) => {
                 set("fromDate", e.target.value);
@@ -1016,7 +1016,7 @@ function ApplyForm({
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1.5">To</label>
             <input
-              type="date"
+              type="date" max="2099-12-31"
               value={effectiveTo}
               onChange={(e) => !isHalfDay && set("toDate", e.target.value)}
               disabled={isHalfDay}
