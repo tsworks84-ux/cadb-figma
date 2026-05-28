@@ -877,7 +877,7 @@ function BatchRow({
 
       {/* Students */}
       <td style={{ padding: "14px 16px" }}>
-        <span style={{ fontSize: 14, fontWeight: 700, color: D.ink }}>{b._count.studentBatches}</span>
+        <span style={{ fontSize: 14, fontWeight: 700, color: D.ink }}>{b._count?.studentBatches ?? 0}</span>
       </td>
 
       {/* Status */}
@@ -904,7 +904,7 @@ function BatchRow({
               <ActionBtn onClick={onArchive} title={b.isArchived ? "Unarchive" : "Archive"}>
                 {b.isArchived ? <ArchiveRestore style={{ width: 14, height: 14 }} /> : <Archive style={{ width: 14, height: 14 }} />}
               </ActionBtn>
-              {b._count.studentBatches > 0 ? (
+              {(b._count?.studentBatches ?? 0) > 0 ? (
                 <ActionBtn disabled title={`Cannot delete — ${b._count.studentBatches} student(s) assigned`}>
                   <Trash2 style={{ width: 14, height: 14 }} />
                 </ActionBtn>

@@ -91,7 +91,7 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
       prisma.assignment.findMany({
         where,
         include: assignmentInclude,
-        orderBy: [{ submissionDate: "asc" }, { createdAt: "desc" }],
+        orderBy: [{ submissionDate: "desc" }, { createdAt: "desc" }],
         skip,
         take: parseInt(limit),
       }),

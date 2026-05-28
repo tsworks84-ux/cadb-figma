@@ -1634,7 +1634,7 @@ export default function SchedulePage() {
     acc[k].push(s);
     return acc;
   }, {});
-  const dateKeys = Object.keys(grouped).sort();
+  const dateKeys = Object.keys(grouped).sort().reverse();
 
   const statusMut = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
