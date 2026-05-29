@@ -1392,8 +1392,8 @@ function AssessmentsTab({ student }: { student: any }) {
                   },
                   {
                     label: "Percentile",
-                    value: selectedRow.stats.percentile != null ? `${selectedRow.stats.percentile}th` : "—",
-                    sub: "Percentile rank",
+                    value: selectedRow.stats.percentile != null ? `${selectedRow.stats.percentile.toFixed(2)}` : "—",
+                    sub: "NTA-style percentile score",
                     color: scoreColor(selectedRow.stats.percentile),
                     bg: scoreBg(selectedRow.stats.percentile),
                   },
@@ -1516,7 +1516,7 @@ function AssessmentsTab({ student }: { student: any }) {
                       </p>
                       {rank !== null && (
                         <p className={`text-[11px] font-bold mt-0.5 ${scoreColor(pct)}`}>
-                          Rank #{rank} · {pct}th%ile
+                          Rank #{rank} · {pct != null ? pct.toFixed(2) : "—"}%ile
                         </p>
                       )}
                     </>

@@ -710,9 +710,14 @@ export async function studentRoutes(fastify: FastifyInstance) {
       let rank: number | null = null;
       let percentile: number | null = null;
       if (myTotal !== null && allTotals.length > 0) {
+        // Rank: 1-based; first index where another score ≤ mine
         rank = allTotals.findIndex((t) => t <= myTotal) + 1;
-        const below = allTotals.filter((t) => t < myTotal).length;
-        percentile  = Math.round((below / allTotals.length) * 100 * 10) / 10;
+
+        // JEE Main NTA percentile formula:
+        //   Percentile = (# students who scored ≤ my score / total students) × 100
+        // This gives topper 100.00, not "strictly below" which would give topper 80th if 5 students.
+        const atOrBelow = allTotals.filter((t) => t <= myTotal).length;
+        percentile = Math.round((atOrBelow / allTotals.length) * 100 * 100) / 100; // 2 d.p.
       }
 
       const classMax = allTotals[0] ?? null;
