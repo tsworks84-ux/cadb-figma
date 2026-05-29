@@ -21,43 +21,48 @@ export default function StudentHomePage() {
   const hour = now.getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
-  // Announcements
+  // Announcements — staleTime:0 so new notices appear immediately on tab focus;
+  // also poll every 60s so they appear even if the tab stays open
   const { data: announcements = [] } = useQuery({
     queryKey: ["student-announcements"],
     queryFn: () => studentApi.get("/api/v1/student/announcements").then((r) => r.data.data ?? []),
     enabled: !!accessToken,
-    staleTime: 60 * 1000,
+    staleTime: 0,
     refetchOnWindowFocus: true,
+    refetchInterval: 60 * 1000,
   });
 
-  // Attendance this month
+  // Attendance this month — staleTime:0; admin can mark attendance anytime
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
   const today = now.toISOString().split("T")[0];
   const { data: attData } = useQuery({
     queryKey: ["student-home-attendance", monthStart, today],
     queryFn: () => studentApi.get(`/api/v1/student/portal/attendance?dateFrom=${monthStart}&dateTo=${today}`).then((r) => r.data),
     enabled: !!accessToken,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
   const attPct = attData?.stats?.percentage ?? null;
 
-  // Assignments
+  // Assignments — staleTime:0; admin adds/updates assignments frequently
   const assignFrom = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split("T")[0];
   const assignTo   = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split("T")[0];
   const { data: assignData } = useQuery({
     queryKey: ["student-home-assignments", assignFrom, assignTo],
     queryFn: () => studentApi.get(`/api/v1/student/portal/assignments?dateFrom=${assignFrom}&dateTo=${assignTo}`).then((r) => r.data),
     enabled: !!accessToken,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
   const pendingCount = assignData ? (assignData.stats?.notSubmitted ?? 0) + (assignData.stats?.overdue ?? 0) : null;
 
-  // Today's schedule
+  // Today's schedule — staleTime:0; admin can add/change schedule
   const { data: scheduleData } = useQuery({
     queryKey: ["student-home-schedule", today],
     queryFn: () => studentApi.get(`/api/v1/student/portal/schedule?dateFrom=${today}&dateTo=${today}`).then((r) => r.data),
     enabled: !!accessToken,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
   const todayClasses: any[] = scheduleData?.data ?? [];
 

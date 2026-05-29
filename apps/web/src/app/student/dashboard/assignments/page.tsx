@@ -47,7 +47,8 @@ export default function StudentAssignmentsPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["student-portal-assignments", dateFrom, dateTo, subjectFilter],
     queryFn: () => studentApi.get(`/api/v1/student/portal/assignments?${params}`).then((r) => r.data),
-    staleTime: 2 * 60 * 1000,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
     enabled: !!accessToken,
   });
 

@@ -20,8 +20,9 @@ export default function StudentNoticesPage() {
     queryKey: ["student-announcements-full"],
     queryFn: () => studentApi.get("/api/v1/student/announcements").then((r) => r.data.data ?? []),
     enabled: !!accessToken,
-    staleTime: 60 * 1000,
+    staleTime: 0,
     refetchOnWindowFocus: true,
+    refetchInterval: 60 * 1000,
   });
 
   const pinned = (announcements as any[]).filter((a: any) => a.pinned);

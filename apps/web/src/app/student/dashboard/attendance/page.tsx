@@ -30,7 +30,8 @@ export default function StudentAttendancePage() {
   const { data, isLoading } = useQuery({
     queryKey: ["student-portal-attendance", dateFrom, dateTo, subjectFilter],
     queryFn: () => studentApi.get(`/api/v1/student/portal/attendance?${params}`).then((r) => r.data),
-    staleTime: 2 * 60 * 1000,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
     enabled: !!accessToken,
   });
 

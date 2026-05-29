@@ -45,7 +45,8 @@ export default function StudentSchedulePage() {
     queryKey: ["student-portal-schedule", isoDate(weekStart), isoDate(weekEnd)],
     queryFn: () =>
       studentApi.get(`/api/v1/student/portal/schedule?dateFrom=${isoDate(weekStart)}&dateTo=${isoDate(weekEnd)}`).then((r) => r.data),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
     enabled: !!accessToken,
   });
 
