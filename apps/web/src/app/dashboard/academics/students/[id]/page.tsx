@@ -1264,6 +1264,280 @@ const ASSIGN_STYLE: Record<string, { bar: string; bg: string; text: string; bord
   ARCHIVED:      { bar: "bg-gray-300",   bg: "bg-gray-50",   text: "text-gray-500",   border: "border-gray-200",   label: "Archived"     },
 };
 
+// ── AssessmentsTab ─────────────────────────────────────────────────────────────
+
+function AssessmentsTab({ student }: { student: any }) {
+  const [selected, setSelected] = useState<string | null>(null);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["student-assessments", student.id],
+    queryFn: () => api.get(`/api/v1/academics/students/${student.id}/assessments`).then((r) => r.data.data),
+    enabled: !!student.id,
+    staleTime: 0,
+  });
+
+  const rows: any[] = data ?? [];
+
+  // Group by month for the trend chart
+  const trend = useMemo(() => {
+    return [...rows]
+      .filter((r) => r.result?.attended && r.stats.percentile !== null)
+      .reverse()
+      .slice(-12); // last 12 exams
+  }, [rows]);
+
+  const selectedRow = rows.find((r) => r.exam.id === selected);
+
+  const scoreColor = (pct: number | null) => {
+    if (pct === null) return "text-gray-400";
+    if (pct >= 75) return "text-green-600";
+    if (pct >= 50) return "text-amber-600";
+    return "text-red-600";
+  };
+  const scoreBg = (pct: number | null) => {
+    if (pct === null) return "bg-gray-50 border-gray-200";
+    if (pct >= 75) return "bg-green-50 border-green-200";
+    if (pct >= 50) return "bg-amber-50 border-amber-200";
+    return "bg-red-50 border-red-200";
+  };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-3 p-1">
+        {[1, 2, 3].map((i) => <div key={i} className="h-16 rounded-xl bg-gray-100 animate-pulse" />)}
+      </div>
+    );
+  }
+
+  if (rows.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+        <BarChart2 className="h-12 w-12 mb-3 text-gray-200" />
+        <p className="text-sm font-semibold">No assessments yet</p>
+        <p className="text-xs mt-1">This student hasn&apos;t appeared in any exams.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+
+      {/* ── Trend sparkline ───────────────────────────────────────────────── */}
+      {trend.length > 1 && (
+        <div className="bg-white rounded-xl border border-gray-100 p-5">
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Performance Trend — Percentile</p>
+          <div className="flex items-end gap-1.5 h-20">
+            {trend.map((r: any, i: number) => {
+              const pct = r.stats.percentile ?? 0;
+              const height = Math.max(6, Math.round((pct / 100) * 80));
+              return (
+                <div key={r.exam.id} className="flex-1 flex flex-col items-center gap-1 group cursor-pointer"
+                  onClick={() => setSelected(r.exam.id === selected ? null : r.exam.id)}>
+                  <div className="relative w-full">
+                    <div
+                      className={`w-full rounded-t-sm transition-all ${pct >= 75 ? "bg-green-400" : pct >= 50 ? "bg-amber-400" : "bg-red-400"} ${r.exam.id === selected ? "opacity-100 ring-2 ring-offset-1 ring-indigo-400" : "opacity-70 group-hover:opacity-100"}`}
+                      style={{ height }} />
+                  </div>
+                  <span className="text-[9px] text-gray-400 font-bold truncate max-w-full px-0.5 text-center hidden sm:block">
+                    {new Date(r.exam.examDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex justify-between mt-1 text-[10px] text-gray-400">
+            <span>0th</span><span>50th</span><span>100th percentile</span>
+          </div>
+        </div>
+      )}
+
+      {/* ── Exam detail panel ─────────────────────────────────────────────── */}
+      {selectedRow && (
+        <div className="bg-white rounded-xl border border-indigo-100 overflow-hidden shadow-sm">
+          {/* Header */}
+          <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-100 bg-indigo-50/40">
+            <div>
+              <p className="text-xs text-indigo-500 font-bold uppercase tracking-wider">
+                {new Date(selectedRow.exam.examDate).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+              </p>
+              <h3 className="text-base font-bold text-gray-900 mt-0.5">{selectedRow.exam.name}</h3>
+              <p className="text-xs text-gray-400 mt-0.5">{selectedRow.exam.startTime} – {selectedRow.exam.endTime} · {selectedRow.exam.batches.join(", ")}</p>
+            </div>
+            <button onClick={() => setSelected(null)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 shrink-0">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          {/* Stats row */}
+          {selectedRow.result ? (
+            <div className="px-5 py-4 space-y-5">
+              {/* 4 KPI cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  {
+                    label: "Score",
+                    value: selectedRow.result.total != null
+                      ? `${selectedRow.result.total}${selectedRow.exam.totalMarks ? `/${selectedRow.exam.totalMarks}` : ""}`
+                      : "—",
+                    sub: selectedRow.exam.totalMarks && selectedRow.result.total != null
+                      ? `${Math.round((selectedRow.result.total / selectedRow.exam.totalMarks) * 100)}%`
+                      : "",
+                    color: "text-indigo-700", bg: "bg-indigo-50 border-indigo-100",
+                  },
+                  {
+                    label: "Rank",
+                    value: selectedRow.stats.rank != null ? `#${selectedRow.stats.rank}` : "—",
+                    sub: selectedRow.stats.totalStudents ? `of ${selectedRow.stats.totalStudents}` : "",
+                    color: "text-amber-700", bg: "bg-amber-50 border-amber-100",
+                  },
+                  {
+                    label: "Percentile",
+                    value: selectedRow.stats.percentile != null ? `${selectedRow.stats.percentile}th` : "—",
+                    sub: "Percentile rank",
+                    color: scoreColor(selectedRow.stats.percentile),
+                    bg: scoreBg(selectedRow.stats.percentile),
+                  },
+                  {
+                    label: "Class Avg",
+                    value: selectedRow.stats.classAvg != null ? String(selectedRow.stats.classAvg) : "—",
+                    sub: selectedRow.stats.classMax != null ? `Highest: ${selectedRow.stats.classMax}` : "",
+                    color: "text-gray-700", bg: "bg-gray-50 border-gray-100",
+                  },
+                ].map(({ label, value, sub, color, bg }) => (
+                  <div key={label} className={`rounded-xl border p-3 ${bg}`}>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{label}</p>
+                    <p className={`text-2xl font-black mt-1 leading-none ${color}`}>{value}</p>
+                    {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
+                  </div>
+                ))}
+              </div>
+
+              {/* Subject-wise marks */}
+              {selectedRow.result.marks.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">
+                    {selectedRow.exam.numPapers > 1 ? "Paper-wise & Subject-wise Marks" : "Subject-wise Marks"}
+                  </p>
+                  {/* Group by paper */}
+                  {Array.from({ length: selectedRow.exam.numPapers }, (_, pi) => {
+                    const paperMarks = selectedRow.result!.marks.filter((m: any) => m.paperNum === pi + 1);
+                    if (paperMarks.length === 0) return null;
+                    return (
+                      <div key={pi} className={`${selectedRow.exam.numPapers > 1 ? "mb-4" : ""}`}>
+                        {selectedRow.exam.numPapers > 1 && (
+                          <p className="text-[11px] font-bold text-indigo-500 uppercase tracking-wider mb-2">Paper {pi + 1}</p>
+                        )}
+                        <div className="space-y-2">
+                          {paperMarks.map((m: any, mi: number) => {
+                            const pct = m.maxMarks && m.marks != null ? Math.round((m.marks / m.maxMarks) * 100) : null;
+                            const barW = pct !== null ? pct : 0;
+                            return (
+                              <div key={mi} className="flex items-center gap-3">
+                                <div className="w-28 shrink-0">
+                                  <p className="text-xs font-semibold text-gray-700 truncate">{m.subjectName ?? `Subject ${m.subjectSlot}`}</p>
+                                </div>
+                                <div className="flex-1 h-3 rounded-full bg-gray-100 overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full transition-all ${pct !== null && pct >= 75 ? "bg-green-400" : pct !== null && pct >= 50 ? "bg-amber-400" : "bg-red-400"}`}
+                                    style={{ width: `${barW}%` }}
+                                  />
+                                </div>
+                                <div className="w-20 shrink-0 text-right">
+                                  <span className="text-sm font-bold text-gray-800">
+                                    {m.marks ?? "—"}{m.maxMarks ? `/${m.maxMarks}` : ""}
+                                  </span>
+                                  {pct !== null && (
+                                    <span className={`ml-1.5 text-xs font-semibold ${scoreColor(pct)}`}>({pct}%)</span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="px-5 py-8 text-center text-sm text-gray-400">
+              {selectedRow.result === null ? "Student did not appear in this exam." : "No marks recorded yet."}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Exam list ─────────────────────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+        <div className="px-5 py-3 border-b border-gray-50">
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">{rows.length} Assessment{rows.length !== 1 ? "s" : ""}</p>
+        </div>
+        <div className="divide-y divide-gray-50">
+          {rows.map((r: any) => {
+            const isOpen   = selected === r.exam.id;
+            const attended = r.result?.attended !== false;
+            const pct      = r.stats.percentile;
+            const rank     = r.stats.rank;
+            const total    = r.result?.total;
+            return (
+              <button
+                key={r.exam.id}
+                onClick={() => setSelected(isOpen ? null : r.exam.id)}
+                className="w-full text-left flex items-center gap-4 px-5 py-3.5 hover:bg-gray-50 transition-colors"
+                style={{ background: isOpen ? "#f8faff" : undefined }}
+              >
+                {/* Date pill */}
+                <div className="shrink-0 w-14 text-center">
+                  <p className="text-lg font-black text-gray-800 leading-none">
+                    {new Date(r.exam.examDate).getDate()}
+                  </p>
+                  <p className="text-[10px] font-bold text-gray-400 uppercase mt-0.5">
+                    {new Date(r.exam.examDate).toLocaleDateString("en-IN", { month: "short" })}
+                  </p>
+                </div>
+
+                {/* Name + meta */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-gray-900 truncate">{r.exam.name}</p>
+                  <p className="text-xs text-gray-400 mt-0.5 truncate">
+                    {r.exam.batches.join(", ")} · {r.exam.startTime} – {r.exam.endTime}
+                  </p>
+                </div>
+
+                {/* Score */}
+                <div className="shrink-0 text-right">
+                  {!attended ? (
+                    <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-bold text-gray-500">Absent</span>
+                  ) : total != null ? (
+                    <>
+                      <p className="text-sm font-black text-gray-900">
+                        {total}{r.exam.totalMarks ? `/${r.exam.totalMarks}` : ""}
+                      </p>
+                      {rank !== null && (
+                        <p className={`text-[11px] font-bold mt-0.5 ${scoreColor(pct)}`}>
+                          Rank #{rank} · {pct}th%ile
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-xs text-gray-400">Not marked</span>
+                  )}
+                </div>
+
+                {/* Chevron */}
+                <div className="shrink-0 ml-1 text-gray-300">
+                  {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AssignmentsTab({ student }: { student: any }) {
   const today = new Date();
   const defaultFrom = new Date(today.getFullYear(), today.getMonth() - 2, 1);
@@ -2038,7 +2312,7 @@ export default function StudentDetailPage() {
           {tab === "batch"       && <BatchTab     student={student} canEdit={canEdit} onRefetch={refetch} />}
           {tab === "attendance"  && <AttendanceTab student={student} />}
           {tab === "assignments" && <AssignmentsTab student={student} />}
-          {tab === "assessments" && <ComingSoon label="Assessments"  icon={BarChart2}      />}
+          {tab === "assessments" && <AssessmentsTab student={student} />}
           {tab === "ptms"        && <ComingSoon label="PTMs"         icon={MessageSquare}  />}
           {tab === "noticeboard" && <NoticeBoardTab />}
           {tab === "documents"   && <ComingSoon label="Documents"    icon={FolderOpen}     />}

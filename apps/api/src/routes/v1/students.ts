@@ -652,6 +652,122 @@ export async function studentRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true, data, stats: { total, present, absent, unrecorded, percentage, bySubject } });
   });
 
+  // ── STUDENT ASSESSMENTS (exam results with rank + percentile) ──────────────
+
+  fastify.get("/:id/assessments", async (request, reply) => {
+    const { id } = request.params as any;
+    const { academicYear, dateFrom, dateTo } = request.query as any;
+
+    // 1. Verify student exists
+    const student = await prisma.student.findUnique({ where: { id }, select: { id: true } });
+    if (!student) return reply.status(404).send({ success: false, error: "Student not found" });
+
+    // 2. Build exam filter: exams where this student has an ExamResult
+    const examWhere: any = {
+      results: { some: { studentId: id } },
+      status:  { not: "ARCHIVED" },
+    };
+    if (academicYear) examWhere.academicYear = academicYear;
+    if (dateFrom || dateTo) {
+      examWhere.examDate = {};
+      if (dateFrom) examWhere.examDate.gte = new Date(dateFrom);
+      if (dateTo)   examWhere.examDate.lte = new Date(dateTo);
+    }
+
+    // 3. Fetch exams with ALL results (to compute rank/avg/max)
+    const exams = await prisma.exam.findMany({
+      where: examWhere,
+      orderBy: { examDate: "desc" },
+      include: {
+        subjects: {
+          include: { subject: { select: { id: true, name: true } } },
+          orderBy: [{ paperNum: "asc" }, { subjectSlot: "asc" }],
+        },
+        batches: {
+          include: { batch: { select: { id: true, name: true } } },
+        },
+        results: {
+          where:   { isExcluded: false },
+          include: { marks: true },
+        },
+      },
+    });
+
+    // 4. For each exam compute per-student totals then rank/percentile
+    const rows = exams.map((exam) => {
+      // Sum marks for every result
+      const totalsMap = new Map<string, number>();
+      for (const r of exam.results) {
+        const total = r.marks.reduce((s, m) => s + (m.marks ?? 0), 0);
+        totalsMap.set(r.studentId, total);
+      }
+
+      const allTotals = [...totalsMap.values()].filter((t) => t > 0).sort((a, b) => b - a);
+      const myResult  = exam.results.find((r) => r.studentId === id) ?? null;
+      const myTotal   = myResult ? (totalsMap.get(id) ?? 0) : null;
+
+      // Rank: 1-based position (students with same score share rank)
+      let rank: number | null = null;
+      let percentile: number | null = null;
+      if (myTotal !== null && allTotals.length > 0) {
+        rank = allTotals.findIndex((t) => t <= myTotal) + 1;
+        const below = allTotals.filter((t) => t < myTotal).length;
+        percentile  = Math.round((below / allTotals.length) * 100 * 10) / 10;
+      }
+
+      const classMax = allTotals[0] ?? null;
+      const classAvg = allTotals.length > 0
+        ? Math.round((allTotals.reduce((s, t) => s + t, 0) / allTotals.length) * 10) / 10
+        : null;
+
+      // Subject-wise marks for THIS student
+      const myMarks = myResult?.marks.map((m) => {
+        const subjectEntry = exam.subjects.find(
+          (es) => es.paperNum === m.paperNum && es.subjectSlot === m.subjectSlot,
+        );
+        return {
+          paperNum:    m.paperNum,
+          subjectSlot: m.subjectSlot,
+          marks:       m.marks,
+          maxMarks:    subjectEntry?.maxMarks ?? null,
+          subjectName: subjectEntry?.subject?.name ?? null,
+        };
+      }) ?? [];
+
+      return {
+        exam: {
+          id:          exam.id,
+          name:        exam.name,
+          examDate:    exam.examDate,
+          startTime:   exam.startTime,
+          endTime:     exam.endTime,
+          totalMarks:  exam.totalMarks,
+          numPapers:   exam.numPapers,
+          numSubjects: exam.numSubjects,
+          status:      exam.status,
+          academicYear: exam.academicYear,
+          batches:     exam.batches.map((eb) => eb.batch.name),
+          subjects:    exam.subjects,
+        },
+        result: myResult ? {
+          id:       myResult.id,
+          attended: myResult.attended,
+          total:    myTotal,
+          marks:    myMarks,
+        } : null,
+        stats: {
+          rank,
+          percentile,
+          classMax,
+          classAvg,
+          totalStudents: allTotals.length,
+        },
+      };
+    });
+
+    return reply.send({ success: true, data: rows });
+  });
+
   // ── INSTALMENT PAY ─────────────────────────────────────────────────────────
 
   fastify.patch("/:id/instalments/:instalmentId", async (request, reply) => {
