@@ -4,6 +4,7 @@ import { prisma } from "@cadb/db";
 import { authenticate } from "../../middleware/authenticate.js";
 import { hashPassword } from "../../utils/password.js";
 import { uploadFile } from "../../utils/s3.js";
+import { sendMail } from "../../utils/mailer.js";
 import { randomUUID } from "crypto";
 import path from "path";
 
@@ -800,6 +801,163 @@ export async function studentRoutes(fastify: FastifyInstance) {
 
     await prisma.studentInstalment.update({ where: { id: instalmentId }, data });
 
+    return reply.send({ success: true });
+  });
+
+  // ── PTM routes ─────────────────────────────────────────────────────────────
+
+  const ptmInclude = {
+    attendees: {
+      include: { employee: { select: { id: true, firstName: true, lastName: true, email: true, photoUrl: true } } },
+    },
+    createdBy: { select: { id: true, firstName: true, lastName: true } },
+  } as const;
+
+  // GET /students/:id/ptms
+  fastify.get("/:id/ptms", async (request, reply) => {
+    const { id } = request.params as any;
+    const ptms = await prisma.pTM.findMany({
+      where: { studentId: id },
+      include: ptmInclude,
+      orderBy: [{ date: "desc" }, { startTime: "desc" }],
+    });
+    return reply.send({ success: true, data: ptms });
+  });
+
+  // POST /students/:id/ptms — schedule a new PTM and send emails
+  fastify.post("/:id/ptms", async (request, reply) => {
+    requireAdmin(request, reply);
+    const { id } = request.params as any;
+    const body = request.body as any;
+
+    const student = await prisma.student.findUnique({
+      where: { id },
+      select: {
+        id: true, firstName: true, lastName: true,
+        email: true, parentEmail: true, motherEmail: true,
+        communicationContact: true,
+      },
+    });
+    if (!student) return reply.status(404).send({ success: false, error: "Student not found" });
+
+    const { date, startTime, endTime, venue, agenda, attendeeIds = [] } = body;
+    if (!date || !startTime) return reply.status(400).send({ success: false, error: "date and startTime are required" });
+
+    const ptm = await prisma.pTM.create({
+      data: {
+        studentId:  id,
+        date:       new Date(date),
+        startTime,
+        endTime:    endTime  || null,
+        venue:      venue    || null,
+        agenda:     agenda   || null,
+        createdById: (request as any).user?.id ?? null,
+        attendees: {
+          create: (attendeeIds as string[]).map((empId) => ({ employeeId: empId })),
+        },
+      },
+      include: ptmInclude,
+    });
+
+    // ── Collect email addresses ──────────────────────────────────────────────
+    const recipientSet = new Set<string>();
+
+    // Teachers/attendees
+    for (const a of ptm.attendees) {
+      if (a.employee.email) recipientSet.add(a.employee.email);
+    }
+
+    // Parents — send based on communicationContact preference
+    const cc = student.communicationContact ?? "BOTH";
+    if ((cc === "FATHER" || cc === "BOTH" || cc === "OTHER") && student.parentEmail)
+      recipientSet.add(student.parentEmail);
+    if ((cc === "MOTHER" || cc === "BOTH") && student.motherEmail)
+      recipientSet.add(student.motherEmail);
+    // Always CC student email itself (as fallback if no parent email)
+    if (recipientSet.size === 0 && student.email)
+      recipientSet.add(student.email);
+
+    // ── Send email ────────────────────────────────────────────────────────────
+    const appUrl  = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3001";
+    const dateStr = new Date(date).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+    const timeStr = endTime ? `${startTime} – ${endTime}` : startTime;
+    const attendeeNames = ptm.attendees.map((a) => `${a.employee.firstName} ${a.employee.lastName}`).join(", ");
+    const studentName   = `${student.firstName} ${student.lastName}`;
+
+    const html = `
+      <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1f2937">
+        <div style="background:linear-gradient(135deg,#1e3a8a,#4f46e5);border-radius:12px;padding:28px;text-align:center;margin-bottom:24px">
+          <h1 style="color:white;margin:0;font-size:22px">📅 PTM Scheduled</h1>
+          <p style="color:#bfdbfe;margin:8px 0 0;font-size:14px">Parent–Teacher Meeting</p>
+        </div>
+
+        <p style="margin:0 0 16px">Dear Parent / Faculty,</p>
+        <p style="margin:0 0 20px">
+          A Parent–Teacher Meeting has been scheduled for
+          <strong>${studentName}</strong>. Please find the details below.
+        </p>
+
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:20px;margin-bottom:20px">
+          <table style="width:100%;border-collapse:collapse;font-size:14px">
+            <tr><td style="padding:6px 0;color:#6b7280;width:120px">📅 Date</td>
+                <td style="padding:6px 0;font-weight:600">${dateStr}</td></tr>
+            <tr><td style="padding:6px 0;color:#6b7280">⏰ Time</td>
+                <td style="padding:6px 0;font-weight:600">${timeStr}</td></tr>
+            ${venue ? `<tr><td style="padding:6px 0;color:#6b7280">📍 Venue</td>
+                <td style="padding:6px 0;font-weight:600">${venue}</td></tr>` : ""}
+            <tr><td style="padding:6px 0;color:#6b7280">👤 Student</td>
+                <td style="padding:6px 0;font-weight:600">${studentName}</td></tr>
+            ${attendeeNames ? `<tr><td style="padding:6px 0;color:#6b7280">👩‍🏫 Teachers</td>
+                <td style="padding:6px 0;font-weight:600">${attendeeNames}</td></tr>` : ""}
+            ${agenda ? `<tr><td style="padding:6px 0;color:#6b7280;vertical-align:top">📝 Agenda</td>
+                <td style="padding:6px 0">${agenda}</td></tr>` : ""}
+          </table>
+        </div>
+
+        <p style="font-size:13px;color:#6b7280">
+          Please contact the school office if you have any questions or need to reschedule.
+        </p>
+        <p style="font-size:12px;color:#9ca3af;margin-top:24px;border-top:1px solid #f3f4f6;padding-top:16px">
+          This is an automated notification from Centum Academy. Please do not reply to this email.
+        </p>
+      </div>
+    `;
+
+    // Fire-and-forget; don't block the response on email delivery
+    const toList = [...recipientSet];
+    if (toList.length > 0) {
+      sendMail({
+        to:      toList[0],
+        cc:      toList.slice(1).join(",") || undefined,
+        subject: `PTM Scheduled — ${studentName} · ${dateStr}`,
+        html,
+      }).catch((err) => console.error("[PTM email]", err));
+    }
+
+    return reply.status(201).send({ success: true, data: ptm });
+  });
+
+  // PATCH /students/:id/ptms/:ptmId — update status or notes
+  fastify.patch("/:id/ptms/:ptmId", async (request, reply) => {
+    requireAdmin(request, reply);
+    const { ptmId } = request.params as any;
+    const { status, notes, venue, agenda, startTime, endTime } = request.body as any;
+    const data: any = {};
+    if (status    !== undefined) data.status    = status;
+    if (notes     !== undefined) data.notes     = notes;
+    if (venue     !== undefined) data.venue     = venue;
+    if (agenda    !== undefined) data.agenda    = agenda;
+    if (startTime !== undefined) data.startTime = startTime;
+    if (endTime   !== undefined) data.endTime   = endTime;
+    const ptm = await prisma.pTM.update({ where: { id: ptmId }, data, include: ptmInclude });
+    return reply.send({ success: true, data: ptm });
+  });
+
+  // DELETE /students/:id/ptms/:ptmId
+  fastify.delete("/:id/ptms/:ptmId", async (request, reply) => {
+    requireAdmin(request, reply);
+    const { ptmId } = request.params as any;
+    await prisma.pTM.delete({ where: { id: ptmId } });
     return reply.send({ success: true });
   });
 }

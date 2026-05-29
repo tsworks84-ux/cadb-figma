@@ -414,6 +414,8 @@ model Employee {
   schedulesTaught      Schedule[]          @relation("FacultySchedules")
   assignmentsTaught    Assignment[]        @relation("FacultyAssignments")
   mentorBatches        Batch[]             @relation("BatchFacultyMentor")
+  ptmsCreated          PTM[]               @relation("PTMCreatedBy")
+  ptmAttendances       PTMAttendee[]
 
   @@index([departmentId])
   @@index([designationId])
@@ -1198,6 +1200,7 @@ model Student {
   submissions         AssignmentSubmission[]
   examResults         ExamResult[]
   scheduleAttendances ScheduleAttendance[]
+  ptms                PTM[]
 
   @@index([schoolId])
   @@index([status])
@@ -1715,4 +1718,47 @@ model ExamMark {
 
   @@unique([examResultId, paperNum, subjectSlot])
   @@index([examResultId])
+}
+
+// ─── PTM (Parent–Teacher Meeting) ────────────────────────────────────────────
+
+model PTM {
+  id          String        @id @default(cuid())
+  studentId   String
+  date        DateTime      @db.Date
+  startTime   String        // "HH:MM" 24-hr
+  endTime     String?       // optional
+  venue       String?
+  agenda      String?
+  status      PTMStatus     @default(SCHEDULED)
+  notes       String?       // post-meeting notes
+  createdById String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  student     Student       @relation(fields: [studentId],   references: [id], onDelete: Cascade)
+  createdBy   Employee?     @relation("PTMCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  attendees   PTMAttendee[]
+
+  @@index([studentId])
+  @@index([date])
+}
+
+model PTMAttendee {
+  id         String   @id @default(cuid())
+  ptmId      String
+  employeeId String
+  createdAt  DateTime @default(now())
+
+  ptm      PTM      @relation(fields: [ptmId],      references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([ptmId, employeeId])
+  @@index([ptmId])
+}
+
+enum PTMStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
 }

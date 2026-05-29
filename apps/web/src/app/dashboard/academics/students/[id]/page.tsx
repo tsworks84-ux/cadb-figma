@@ -14,7 +14,7 @@ import {
   BadgeCheck, Shield, RotateCcw, Archive, ArchiveRestore,
   BookOpen, Calendar, CreditCard, Building2, MapPin, Hash,
   ChevronDown, ChevronUp, CheckCircle2, Clock, AlertCircle, Plus,
-  Users2, Banknote, Trash2, IndianRupee, Info, AlertTriangle, Pin,
+  Users2, Banknote, Trash2, IndianRupee, Info, AlertTriangle, Pin, Loader2,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 
@@ -1264,6 +1264,344 @@ const ASSIGN_STYLE: Record<string, { bar: string; bg: string; text: string; bord
   ARCHIVED:      { bar: "bg-gray-300",   bg: "bg-gray-50",   text: "text-gray-500",   border: "border-gray-200",   label: "Archived"     },
 };
 
+// ── PTMTab ────────────────────────────────────────────────────────────────────
+
+const PTM_STATUS: Record<string, { label: string; bg: string; text: string; border: string }> = {
+  SCHEDULED: { label: "Scheduled", bg: "bg-blue-50",   text: "text-blue-700",  border: "border-blue-200"  },
+  COMPLETED: { label: "Completed", bg: "bg-green-50",  text: "text-green-700", border: "border-green-200" },
+  CANCELLED: { label: "Cancelled", bg: "bg-red-50",    text: "text-red-700",   border: "border-red-200"   },
+};
+
+function PTMScheduleModal({ student, onClose, onSaved }: {
+  student: any; onClose: () => void; onSaved: () => void;
+}) {
+  const qc = useQueryClient();
+  const today = new Date().toISOString().split("T")[0];
+
+  const [form, setForm] = useState({
+    date: today, startTime: "09:00", endTime: "09:30",
+    venue: "", agenda: "",
+  });
+  const [search, setSearch]     = useState("");
+  const [selected, setSelected] = useState<any[]>([]);
+  const [sending, setSending]   = useState(false);
+
+  // Debounced employee search
+  const { data: empResults = [] } = useQuery({
+    queryKey: ["emp-search-ptm", search],
+    queryFn: () => search.length >= 2
+      ? api.get(`/api/v1/employees?search=${encodeURIComponent(search)}&limit=8`).then((r) => r.data.data)
+      : Promise.resolve([]),
+    staleTime: 10 * 1000,
+    enabled: search.length >= 2,
+  });
+
+  const addAttendee = (emp: any) => {
+    if (!selected.find((s) => s.id === emp.id)) setSelected((p) => [...p, emp]);
+    setSearch("");
+  };
+  const removeAttendee = (id: string) => setSelected((p) => p.filter((e) => e.id !== id));
+
+  const save = async () => {
+    if (!form.date || !form.startTime) { toast.error("Date and start time are required"); return; }
+    setSending(true);
+    try {
+      await api.post(`/api/v1/academics/students/${student.id}/ptms`, {
+        ...form, attendeeIds: selected.map((e) => e.id),
+      });
+      toast.success("PTM scheduled — emails sent to attendees & parents");
+      qc.invalidateQueries({ queryKey: ["student-ptms", student.id] });
+      onSaved();
+      onClose();
+    } catch (e: any) {
+      toast.error(e.response?.data?.error ?? "Failed to schedule PTM");
+    } finally { setSending(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto flex flex-col"
+        onClick={(e) => e.stopPropagation()}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
+          <div>
+            <h2 className="font-black text-gray-900">Schedule a PTM</h2>
+            <p className="text-xs text-gray-400 mt-0.5">{student.firstName} {student.lastName}</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"><X className="h-4 w-4" /></button>
+        </div>
+
+        <div className="px-6 py-5 space-y-5">
+
+          {/* Date + Time */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-3 sm:col-span-1">
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5">Date *</label>
+              <input type="date" value={form.date} min={today} max="2099-12-31"
+                onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
+                className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-indigo-400 focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5">Start Time *</label>
+              <input type="time" value={form.startTime}
+                onChange={(e) => setForm((f) => ({ ...f, startTime: e.target.value }))}
+                className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-indigo-400 focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5">End Time</label>
+              <input type="time" value={form.endTime}
+                onChange={(e) => setForm((f) => ({ ...f, endTime: e.target.value }))}
+                className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-indigo-400 focus:outline-none" />
+            </div>
+          </div>
+
+          {/* Venue */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Venue</label>
+            <input type="text" placeholder="e.g. Conference Room B, Office" value={form.venue}
+              onChange={(e) => setForm((f) => ({ ...f, venue: e.target.value }))}
+              className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-indigo-400 focus:outline-none" />
+          </div>
+
+          {/* Agenda */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Agenda</label>
+            <textarea rows={3} placeholder="Topics to discuss during the meeting…" value={form.agenda}
+              onChange={(e) => setForm((f) => ({ ...f, agenda: e.target.value }))}
+              className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-indigo-400 focus:outline-none resize-none" />
+          </div>
+
+          {/* Teacher search */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">
+              Attendees (Teachers / Faculty)
+            </label>
+
+            {/* Selected chips */}
+            {selected.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {selected.map((emp) => (
+                  <span key={emp.id}
+                    className="inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-semibold rounded-full px-3 py-1">
+                    {emp.firstName} {emp.lastName}
+                    <button type="button" onClick={() => removeAttendee(emp.id)}
+                      className="hover:text-red-500 transition-colors"><X className="h-3 w-3" /></button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Search input */}
+            <div className="relative">
+              <input type="text" placeholder="Type name to search…" value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-indigo-400 focus:outline-none" />
+              {empResults.length > 0 && search.length >= 2 && (
+                <div className="absolute left-0 right-0 top-full mt-1 z-20 bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden">
+                  {(empResults as any[]).map((emp) => {
+                    const already = !!selected.find((s) => s.id === emp.id);
+                    return (
+                      <button key={emp.id} type="button"
+                        onClick={() => !already && addAttendee(emp)}
+                        disabled={already}
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors ${already ? "opacity-40 cursor-default" : "hover:bg-indigo-50"}`}>
+                        <div className="h-7 w-7 rounded-full bg-indigo-100 flex items-center justify-center text-xs font-bold text-indigo-700 shrink-0">
+                          {(emp.firstName[0] ?? "") + (emp.lastName[0] ?? "")}
+                        </div>
+                        <div>
+                          <p className="font-semibold text-gray-800">{emp.firstName} {emp.lastName}</p>
+                          <p className="text-xs text-gray-400">{emp.designation?.title ?? ""}{emp.department ? ` · ${emp.department.name}` : ""}</p>
+                        </div>
+                        {already && <span className="ml-auto text-xs text-green-600 font-semibold">Added</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <p className="text-[11px] text-gray-400 mt-1.5">
+              Emails will be sent to all added teachers and to the student&apos;s parents.
+            </p>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3 sticky bottom-0 bg-white">
+          <button onClick={onClose} className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50">
+            Cancel
+          </button>
+          <button onClick={save} disabled={sending || !form.date || !form.startTime}
+            className="inline-flex items-center gap-2 rounded-xl px-5 py-2 text-sm font-extrabold text-white disabled:opacity-50"
+            style={{ background: "linear-gradient(135deg,#28245f,#4f46e5)", boxShadow: "0 8px 20px rgba(79,70,229,.3)" }}>
+            {sending ? <><Loader2 className="h-4 w-4 animate-spin" /> Scheduling…</> : <>Schedule & Send Invite</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PTMTab({ student, canEdit }: { student: any; canEdit: boolean }) {
+  const qc = useQueryClient();
+  const [modalOpen, setModalOpen] = useState(false);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["student-ptms", student.id],
+    queryFn: () => api.get(`/api/v1/academics/students/${student.id}/ptms`).then((r) => r.data.data),
+    enabled: !!student.id,
+    staleTime: 0,
+  });
+
+  const statusMut = useMutation({
+    mutationFn: ({ ptmId, status }: { ptmId: string; status: string }) =>
+      api.patch(`/api/v1/academics/students/${student.id}/ptms/${ptmId}`, { status }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["student-ptms", student.id] }),
+    onError:   (e: any) => toast.error(e.response?.data?.error ?? "Failed to update"),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (ptmId: string) =>
+      api.delete(`/api/v1/academics/students/${student.id}/ptms/${ptmId}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["student-ptms", student.id] }); toast.success("PTM deleted"); },
+    onError:   (e: any) => toast.error(e.response?.data?.error ?? "Failed to delete"),
+  });
+
+  const ptms: any[] = data ?? [];
+
+  // Group by month-year
+  const grouped = useMemo(() => {
+    const m = new Map<string, { label: string; items: any[] }>();
+    for (const p of ptms) {
+      const d = new Date(p.date);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const label = d.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+      if (!m.has(key)) m.set(key, { label, items: [] });
+      m.get(key)!.items.push(p);
+    }
+    return Array.from(m.entries()).sort((a, b) => b[0].localeCompare(a[0])).map(([, v]) => v);
+  }, [ptms]);
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-semibold text-gray-700">Parent–Teacher Meetings</p>
+          <p className="text-xs text-gray-400 mt-0.5">{ptms.length} meeting{ptms.length !== 1 ? "s" : ""} on record</p>
+        </div>
+        {canEdit && (
+          <button onClick={() => setModalOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-bold text-white"
+            style={{ background: "linear-gradient(135deg,#28245f,#4f46e5)" }}>
+            <Plus className="h-3.5 w-3.5" /> Schedule a PTM
+          </button>
+        )}
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">{[1,2,3].map((i) => <div key={i} className="h-16 rounded-xl bg-gray-100 animate-pulse" />)}</div>
+      ) : ptms.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-gray-400 bg-white rounded-xl border border-gray-100">
+          <MessageSquare className="h-10 w-10 mb-3 text-gray-200" />
+          <p className="text-sm font-semibold">No PTMs scheduled yet</p>
+          {canEdit && (
+            <button onClick={() => setModalOpen(true)}
+              className="mt-4 inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-bold text-white"
+              style={{ background: "linear-gradient(135deg,#28245f,#4f46e5)" }}>
+              <Plus className="h-3.5 w-3.5" /> Schedule first PTM
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {grouped.map((group) => (
+            <div key={group.label}>
+              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-2 px-1">{group.label}</p>
+              <div className="bg-white rounded-xl border border-gray-100 divide-y divide-gray-50 overflow-hidden">
+                {group.items.map((ptm: any) => {
+                  const st = PTM_STATUS[ptm.status] ?? PTM_STATUS.SCHEDULED;
+                  const d  = new Date(ptm.date);
+                  const isPast = d < new Date(new Date().toDateString());
+                  return (
+                    <div key={ptm.id} className="flex items-start gap-4 px-5 py-4 hover:bg-gray-50 transition-colors">
+                      {/* Date badge */}
+                      <div className="shrink-0 w-12 text-center pt-0.5">
+                        <p className="text-xl font-black text-gray-800 leading-none">{d.getDate()}</p>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase">
+                          {d.toLocaleDateString("en-IN", { month: "short" })}
+                        </p>
+                      </div>
+
+                      {/* Body */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-bold text-gray-900">
+                            {ptm.startTime}{ptm.endTime ? ` – ${ptm.endTime}` : ""}
+                          </span>
+                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${st.bg} ${st.text} ${st.border}`}>
+                            {st.label}
+                          </span>
+                          {isPast && ptm.status === "SCHEDULED" && (
+                            <span className="text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">Past</span>
+                          )}
+                        </div>
+                        {ptm.venue && <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1"><MapPin className="h-3 w-3 shrink-0" />{ptm.venue}</p>}
+                        {ptm.agenda && <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{ptm.agenda}</p>}
+                        {ptm.attendees?.length > 0 && (
+                          <p className="text-xs text-gray-400 mt-1">
+                            👩‍🏫 {ptm.attendees.map((a: any) => `${a.employee.firstName} ${a.employee.lastName}`).join(", ")}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Actions */}
+                      {canEdit && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          {ptm.status === "SCHEDULED" && (
+                            <button
+                              onClick={() => statusMut.mutate({ ptmId: ptm.id, status: "COMPLETED" })}
+                              title="Mark Completed"
+                              className="p-1.5 rounded-lg border border-gray-200 hover:bg-green-50 hover:border-green-200 hover:text-green-600 text-gray-400 transition-colors">
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                          {ptm.status !== "CANCELLED" && (
+                            <button
+                              onClick={() => statusMut.mutate({ ptmId: ptm.id, status: "CANCELLED" })}
+                              title="Cancel"
+                              className="p-1.5 rounded-lg border border-gray-200 hover:bg-red-50 hover:border-red-200 hover:text-red-500 text-gray-400 transition-colors">
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => { if (confirm("Delete this PTM?")) deleteMut.mutate(ptm.id); }}
+                            title="Delete"
+                            className="p-1.5 rounded-lg border border-gray-200 hover:bg-red-50 hover:border-red-200 hover:text-red-500 text-gray-400 transition-colors">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {modalOpen && (
+        <PTMScheduleModal
+          student={student}
+          onClose={() => setModalOpen(false)}
+          onSaved={() => qc.invalidateQueries({ queryKey: ["student-ptms", student.id] })}
+        />
+      )}
+    </div>
+  );
+}
+
 // ── AssessmentsTab ─────────────────────────────────────────────────────────────
 
 function AssessmentsTab({ student }: { student: any }) {
@@ -2313,7 +2651,7 @@ export default function StudentDetailPage() {
           {tab === "attendance"  && <AttendanceTab student={student} />}
           {tab === "assignments" && <AssignmentsTab student={student} />}
           {tab === "assessments" && <AssessmentsTab student={student} />}
-          {tab === "ptms"        && <ComingSoon label="PTMs"         icon={MessageSquare}  />}
+          {tab === "ptms"        && <PTMTab      student={student}  canEdit={canEdit} />}
           {tab === "noticeboard" && <NoticeBoardTab />}
           {tab === "documents"   && <ComingSoon label="Documents"    icon={FolderOpen}     />}
           {tab === "assistance"  && <ComingSoon label="Assistance"   icon={LifeBuoy}       />}
