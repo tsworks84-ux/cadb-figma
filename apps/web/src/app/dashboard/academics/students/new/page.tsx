@@ -789,7 +789,7 @@ function BatchSection({ form, set, batches }: { form: FormState; set: (k: keyof 
       {selectedBatch && (
         <Card title="Batch Preview" mark="PV">
           <div className="grid grid-cols-4 gap-[14px]">
-            <StatCard label="Strength" value={String(selectedBatch._count?.students ?? 0)} />
+            <StatCard label="Strength" value={String(selectedBatch._count?.studentBatches ?? 0)} />
             <StatCard label="Schedule" value={selectedBatch.academicYear ?? "—"} />
             <StatCard label="Start Date" value={selectedBatch.startDate ? new Date(selectedBatch.startDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"} />
             <StatCard label="Subjects" value={String(selectedBatch._count?.batchSubjects ?? "—")} />

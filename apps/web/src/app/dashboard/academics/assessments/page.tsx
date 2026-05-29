@@ -480,45 +480,57 @@ function ExamCard({ exam, canEdit, onEdit, onDelete, onStatus }: {
 
   return (
     <div className="group"
-      style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "14px 18px", borderBottom: `1px solid ${D.line}`, transition: "background .15s" }}
+      style={{ display: "flex", alignItems: "flex-start", gap: 14, padding: "16px 20px", borderBottom: `1px solid ${D.line}`, transition: "background .15s" }}
       onMouseEnter={(e) => (e.currentTarget.style.background = "#f8faff")}
       onMouseLeave={(e) => (e.currentTarget.style.background = "white")}
     >
-      <div style={{ flexShrink: 0, marginTop: 2 }}><StatusBadge status={exam.status} /></div>
+      <div style={{ flexShrink: 0, marginTop: 3 }}><StatusBadge status={exam.status} /></div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
+        {/* Title row */}
         <button onClick={() => router.push(`/dashboard/academics/assessments/${exam.id}`)}
-          style={{ border: "none", background: "none", cursor: "pointer", padding: 0, fontSize: 14, fontWeight: 700, color: D.nav2, textAlign: "left" }}>
+          style={{ border: "none", background: "none", cursor: "pointer", padding: 0, fontSize: 16, fontWeight: 800, color: D.nav2, textAlign: "left", lineHeight: 1.3 }}>
           {exam.name}
         </button>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 12px", marginTop: 4, fontSize: 12, color: D.muted }}>
-          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <Calendar style={{ width: 11, height: 11 }} />{fmtDate(exam.examDate)}
+
+        {/* Meta row — date / time / batches / subjects */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 16px", marginTop: 6, fontSize: 13, color: D.muted, fontWeight: 600 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <Calendar style={{ width: 13, height: 13, flexShrink: 0 }} />
+            <strong style={{ color: D.ink, fontWeight: 700 }}>{fmtDate(exam.examDate)}</strong>
           </span>
-          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <Clock style={{ width: 11, height: 11 }} />{exam.startTime} – {exam.endTime}
+          <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <Clock style={{ width: 13, height: 13, flexShrink: 0 }} />{exam.startTime} – {exam.endTime}
           </span>
-          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <BookOpen style={{ width: 11, height: 11 }} />{batchNames}
-            {city && <span style={{ color: "#9ca3af" }}>({city})</span>}
+          <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <BookOpen style={{ width: 13, height: 13, flexShrink: 0 }} />
+            <span style={{ color: "#374151", fontWeight: 700 }}>{batchNames}</span>
+            {city && <span style={{ color: "#9ca3af", fontWeight: 500 }}>({city})</span>}
           </span>
           {subjectDisplay && (
-            <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <FileCheck2 style={{ width: 11, height: 11 }} />{subjectDisplay}
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <FileCheck2 style={{ width: 13, height: 13, flexShrink: 0 }} />
+              <span style={{ color: "#374151", fontWeight: 600 }}>{subjectDisplay}</span>
             </span>
           )}
-          {(exam.totalMarks || exam.passingMarks) && <span>Marks: {exam.passingMarks ?? "—"}/{exam.totalMarks ?? "—"}</span>}
+          {(exam.totalMarks || exam.passingMarks) && (
+            <span style={{ fontWeight: 700, color: "#374151" }}>
+              Marks: <strong style={{ color: D.nav2 }}>{exam.passingMarks ?? "—"}/{exam.totalMarks ?? "—"}</strong>
+            </span>
+          )}
         </div>
+
+        {/* Topic chips */}
         {examSubjects.some((es: any) => es.topics) && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 7 }}>
             {examSubjects.flatMap((es: any) =>
               es.topics ? es.topics.split(",").map((t: string) => t.trim()).filter(Boolean) : []
             ).filter((t: string, i: number, arr: string[]) => arr.indexOf(t) === i).map((t: string) => (
-              <span key={t} style={{ borderRadius: 6, background: "#f1f5f9", padding: "2px 8px", fontSize: 11, color: "#64748b" }}>{t}</span>
+              <span key={t} style={{ borderRadius: 6, background: "#f1f5f9", border: "1px solid #e2e8f0", padding: "3px 10px", fontSize: 12, fontWeight: 700, color: "#475569" }}>{t}</span>
             ))}
           </div>
         )}
-        <p style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>created on {format(new Date(exam.createdAt), "d MMM yyyy")}</p>
+        <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 5, fontWeight: 500 }}>created on {format(new Date(exam.createdAt), "d MMM yyyy")}</p>
       </div>
 
       {canEdit && (

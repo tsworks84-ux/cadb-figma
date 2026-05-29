@@ -94,17 +94,26 @@ export async function academicsRoutes(fastify: FastifyInstance) {
     const courseMap = Object.fromEntries(courses.map((c) => [c.id, c]));
 
     // Student + revenue grouping helper
+    // Students with null keys (no grade/school/etc. assigned) are placed under "Not Assigned" — always last in list
     function groupStudents(keyFn: (s: typeof students[0]) => string | null, labelFn: (k: string) => string) {
+      const NA = "__na__";
       const m: Record<string, { label: string; count: number; revenue: number; collected: number }> = {};
       for (const st of students) {
-        const key = keyFn(st);
-        if (!key) continue;
-        if (!m[key]) m[key] = { label: labelFn(key), count: 0, revenue: 0, collected: 0 };
+        const rawKey = keyFn(st);
+        const key    = rawKey ?? NA;
+        const label  = key === NA ? "Not Assigned" : (labelFn(key) || "Unknown");
+        if (!m[key]) m[key] = { label, count: 0, revenue: 0, collected: 0 };
         m[key].count++;
         m[key].revenue   += st.totalFee ?? 0;
         m[key].collected += st.paidFee  ?? 0;
       }
-      return Object.values(m).filter((g) => g.label).sort((a, b) => b.count - a.count);
+      return Object.values(m)
+        .filter((g) => g.label)
+        .sort((a, b) => {
+          if (a.label === "Not Assigned") return 1;
+          if (b.label === "Not Assigned") return -1;
+          return b.count - a.count;
+        });
     }
 
     const byGrade   = groupStudents((s) => s.gradeId,      (k) => gradeMap[k]?.name  ?? "");
