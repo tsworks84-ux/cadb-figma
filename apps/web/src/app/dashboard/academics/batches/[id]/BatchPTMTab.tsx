@@ -483,6 +483,228 @@ function StudentPTMPanel({ student, canEdit }: { student: any; canEdit: boolean 
   );
 }
 
+// ── Schedule Batch PTM ────────────────────────────────────────────────────────
+
+type ScheduleResult = { studentId: string; name: string; ok: boolean; error?: string };
+
+function ScheduleBatchPTM({ students, canEdit }: { students: any[]; canEdit: boolean }) {
+  const qc = useQueryClient();
+  const today = new Date().toISOString().split("T")[0];
+
+  const [form, setForm]           = useState({ date: today, startTime: "09:00", endTime: "09:30", venue: "", agenda: "" });
+  const [empSearch, setEmpSearch] = useState("");
+  const [attendees, setAttendees] = useState<any[]>([]);
+  const [checked, setChecked]     = useState<Set<string>>(() => new Set(students.map((s) => s.id)));
+  const [sending, setSending]     = useState(false);
+  const [results, setResults]     = useState<ScheduleResult[] | null>(null);
+
+  const { data: empResults = [] } = useQuery({
+    queryKey: ["emp-search-ptm-batch", empSearch],
+    queryFn: () => empSearch.length >= 2
+      ? api.get(`/api/v1/employees?search=${encodeURIComponent(empSearch)}&limit=8`).then((r) => r.data.data)
+      : Promise.resolve([]),
+    staleTime: 10_000,
+    enabled: empSearch.length >= 2,
+  });
+
+  const toggleStudent = (id: string) =>
+    setChecked((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const toggleAll = () =>
+    setChecked(checked.size === students.length ? new Set() : new Set(students.map((s) => s.id)));
+
+  const addAttendee    = (emp: any) => { if (!attendees.find((a) => a.id === emp.id)) setAttendees((p) => [...p, emp]); setEmpSearch(""); };
+  const removeAttendee = (id: string) => setAttendees((p) => p.filter((a) => a.id !== id));
+
+  const schedule = async () => {
+    if (!form.date || !form.startTime) { toast.error("Date and start time are required"); return; }
+    if (checked.size === 0) { toast.error("Select at least one student"); return; }
+    setSending(true);
+    setResults(null);
+    const payload = { ...form, attendeeIds: attendees.map((a) => a.id) };
+    const targets = students.filter((s) => checked.has(s.id));
+    const out: ScheduleResult[] = await Promise.all(
+      targets.map(async (s) => {
+        try {
+          await api.post(`/api/v1/academics/students/${s.id}/ptms`, payload);
+          qc.invalidateQueries({ queryKey: ["student-ptms", s.id] });
+          return { studentId: s.id, name: `${s.firstName} ${s.lastName}`, ok: true };
+        } catch (e: any) {
+          return { studentId: s.id, name: `${s.firstName} ${s.lastName}`, ok: false, error: e.response?.data?.error ?? "Failed" };
+        }
+      })
+    );
+    setSending(false);
+    setResults(out);
+    const failed = out.filter((r) => !r.ok).length;
+    if (failed === 0) toast.success(`PTM scheduled for ${out.length} student${out.length !== 1 ? "s" : ""}`);
+    else toast.error(`${failed} failed, ${out.length - failed} succeeded`);
+  };
+
+  if (!canEdit) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 bg-white rounded-xl border border-gray-100 text-gray-400">
+        <Users className="h-10 w-10 mb-3 text-gray-200" />
+        <p className="text-sm">You don't have permission to schedule PTMs.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col lg:flex-row gap-4 items-start">
+      {/* ── Form ── */}
+      <div className="flex-1 min-w-0 bg-white rounded-xl border border-gray-100 overflow-hidden">
+        <div className="px-5 py-4 border-b border-gray-50">
+          <p className="font-semibold text-gray-800 text-sm">Meeting Details</p>
+          <p className="text-xs text-gray-400 mt-0.5">Same details will be used for all selected students</p>
+        </div>
+        <div className="px-5 py-5 space-y-5">
+          {/* Date + Time */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-3 sm:col-span-1">
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5">Date *</label>
+              <input type="date" value={form.date} min={today} max="2099-12-31"
+                onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
+                className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-indigo-400 focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5">Start Time *</label>
+              <input type="time" value={form.startTime}
+                onChange={(e) => setForm((f) => ({ ...f, startTime: e.target.value }))}
+                className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-indigo-400 focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5">End Time</label>
+              <input type="time" value={form.endTime}
+                onChange={(e) => setForm((f) => ({ ...f, endTime: e.target.value }))}
+                className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-indigo-400 focus:outline-none" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Venue</label>
+            <input type="text" placeholder="e.g. Conference Room B" value={form.venue}
+              onChange={(e) => setForm((f) => ({ ...f, venue: e.target.value }))}
+              className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-indigo-400 focus:outline-none" />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Agenda</label>
+            <textarea rows={3} placeholder="Topics to discuss…" value={form.agenda}
+              onChange={(e) => setForm((f) => ({ ...f, agenda: e.target.value }))}
+              className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-indigo-400 focus:outline-none resize-none" />
+          </div>
+
+          {/* Attendees */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Attendees (Teachers / Faculty)</label>
+            {attendees.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {attendees.map((emp) => (
+                  <span key={emp.id} className="inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-semibold rounded-full px-3 py-1">
+                    {emp.firstName} {emp.lastName}
+                    <button type="button" onClick={() => removeAttendee(emp.id)} className="hover:text-red-500"><X className="h-3 w-3" /></button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="relative">
+              <input type="text" placeholder="Type name to search…" value={empSearch}
+                onChange={(e) => setEmpSearch(e.target.value)}
+                className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-indigo-400 focus:outline-none" />
+              {(empResults as any[]).length > 0 && empSearch.length >= 2 && (
+                <div className="absolute left-0 right-0 top-full mt-1 z-20 bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden">
+                  {(empResults as any[]).map((emp) => {
+                    const already = !!attendees.find((a) => a.id === emp.id);
+                    return (
+                      <button key={emp.id} type="button" onClick={() => !already && addAttendee(emp)} disabled={already}
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm ${already ? "opacity-40 cursor-default" : "hover:bg-indigo-50"}`}>
+                        <div className="h-7 w-7 rounded-full bg-indigo-100 flex items-center justify-center text-xs font-bold text-indigo-700 shrink-0">
+                          {emp.firstName[0]}{emp.lastName[0]}
+                        </div>
+                        <div>
+                          <p className="font-semibold text-gray-800">{emp.firstName} {emp.lastName}</p>
+                          <p className="text-xs text-gray-400">{emp.designation?.title ?? ""}{emp.department ? ` · ${emp.department.name}` : ""}</p>
+                        </div>
+                        {already && <span className="ml-auto text-xs text-green-600 font-semibold">Added</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <p className="text-[11px] text-gray-400 mt-1.5">Emails will be sent to all teachers and each student&apos;s parents.</p>
+          </div>
+
+          <button onClick={schedule} disabled={sending || checked.size === 0}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-extrabold text-white disabled:opacity-50"
+            style={{ background: "linear-gradient(135deg,#28245f,#4f46e5)", boxShadow: "0 8px 20px rgba(79,70,229,.3)" }}>
+            {sending
+              ? <><Loader2 className="h-4 w-4 animate-spin" /> Scheduling…</>
+              : <><Plus className="h-4 w-4" /> Schedule PTM for {checked.size} Student{checked.size !== 1 ? "s" : ""}</>}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Student checklist / Results ── */}
+      <div className="w-full lg:w-72 shrink-0 bg-white rounded-xl border border-gray-100 overflow-hidden">
+        {results ? (
+          <>
+            <div className="px-4 py-3 border-b border-gray-50 flex items-center justify-between">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Results</p>
+              <button onClick={() => setResults(null)} className="text-xs text-indigo-600 hover:underline">Schedule again</button>
+            </div>
+            <div className="divide-y divide-gray-50 max-h-[60vh] overflow-y-auto">
+              {results.map((r) => (
+                <div key={r.studentId} className="flex items-center gap-3 px-4 py-3">
+                  <div className={`h-6 w-6 rounded-full flex items-center justify-center shrink-0 ${r.ok ? "bg-green-100" : "bg-red-100"}`}>
+                    {r.ok
+                      ? <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                      : <X className="h-3.5 w-3.5 text-red-500" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-gray-800 truncate">{r.name}</p>
+                    {!r.ok && <p className="text-xs text-red-500 truncate">{r.error}</p>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="px-4 py-3 border-b border-gray-50 flex items-center justify-between">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                Students ({checked.size}/{students.length})
+              </p>
+              <button onClick={toggleAll} className="text-xs text-indigo-600 hover:underline">
+                {checked.size === students.length ? "Deselect all" : "Select all"}
+              </button>
+            </div>
+            <div className="divide-y divide-gray-50 max-h-[60vh] overflow-y-auto">
+              {students.map((s) => {
+                const on = checked.has(s.id);
+                return (
+                  <label key={s.id} className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors">
+                    <input type="checkbox" checked={on} onChange={() => toggleStudent(s.id)}
+                      className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
+                    <div className={`h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${on ? "bg-indigo-100 text-indigo-600" : "bg-gray-100 text-gray-400"}`}>
+                      {s.firstName[0]}{s.lastName[0]}
+                    </div>
+                    <div className="min-w-0">
+                      <p className={`text-sm font-medium truncate ${on ? "text-gray-800" : "text-gray-400"}`}>{s.firstName} {s.lastName}</p>
+                      <p className="text-xs text-gray-400 truncate">{s.studentCode}</p>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Batch PTM Tab (exported) ──────────────────────────────────────────────────
 
 export function BatchPTMTab({ students, studentsLoading, canEdit }: {
@@ -490,6 +712,7 @@ export function BatchPTMTab({ students, studentsLoading, canEdit }: {
   studentsLoading: boolean;
   canEdit: boolean;
 }) {
+  const [view, setView]       = useState<"individual" | "batch">("individual");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = students.find((s) => s.id === selectedId) ?? null;
 
@@ -507,52 +730,73 @@ export function BatchPTMTab({ students, studentsLoading, canEdit }: {
   }
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 items-start">
-      {/* ── Student list ── */}
-      <div className="w-full lg:w-64 shrink-0 bg-white rounded-xl border border-gray-100 overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-50">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Students</p>
-        </div>
-        <div className="divide-y divide-gray-50 max-h-[70vh] overflow-y-auto">
-          {students.map((s) => {
-            const isActive = s.id === selectedId;
-            return (
-              <button
-                key={s.id}
-                onClick={() => setSelectedId(isActive ? null : s.id)}
-                className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
-                  isActive ? "bg-indigo-50 border-l-2 border-indigo-500" : "hover:bg-gray-50 border-l-2 border-transparent"
-                }`}
-              >
-                <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-                  isActive ? "bg-indigo-500 text-white" : "bg-indigo-100 text-indigo-600"
-                }`}>
-                  {s.firstName[0]}{s.lastName[0]}
-                </div>
-                <div className="min-w-0">
-                  <p className={`text-sm font-medium truncate ${isActive ? "text-indigo-700" : "text-gray-800"}`}>
-                    {s.firstName} {s.lastName}
-                  </p>
-                  <p className="text-xs text-gray-400 truncate">{s.studentCode}</p>
-                </div>
-                <MessageSquare className={`h-3.5 w-3.5 shrink-0 ml-auto ${isActive ? "text-indigo-400" : "text-gray-300"}`} />
-              </button>
-            );
-          })}
-        </div>
+    <div className="space-y-4">
+      {/* ── Inner tab bar ── */}
+      <div className="flex gap-1 bg-white rounded-xl border border-gray-100 p-1 w-fit">
+        <button
+          onClick={() => setView("individual")}
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+            view === "individual" ? "bg-indigo-600 text-white shadow-sm" : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+          }`}
+        >
+          <MessageSquare className="h-3.5 w-3.5" /> Student PTMs
+        </button>
+        <button
+          onClick={() => setView("batch")}
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+            view === "batch" ? "bg-indigo-600 text-white shadow-sm" : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+          }`}
+        >
+          <Users className="h-3.5 w-3.5" /> Schedule Batch PTM
+        </button>
       </div>
 
-      {/* ── PTM panel ── */}
-      <div className="flex-1 min-w-0">
-        {selected ? (
-          <StudentPTMPanel student={selected} canEdit={canEdit} />
-        ) : (
-          <div className="flex flex-col items-center justify-center py-20 text-gray-400 bg-white rounded-xl border border-gray-100">
-            <MessageSquare className="h-10 w-10 mb-3 text-gray-200" />
-            <p className="text-sm font-semibold">Select a student to view their PTMs</p>
+      {/* ── Individual view ── */}
+      {view === "individual" && (
+        <div className="flex flex-col lg:flex-row gap-4 items-start">
+          <div className="w-full lg:w-64 shrink-0 bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-50">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Students</p>
+            </div>
+            <div className="divide-y divide-gray-50 max-h-[70vh] overflow-y-auto">
+              {students.map((s) => {
+                const isActive = s.id === selectedId;
+                return (
+                  <button key={s.id} onClick={() => setSelectedId(isActive ? null : s.id)}
+                    className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+                      isActive ? "bg-indigo-50 border-l-2 border-indigo-500" : "hover:bg-gray-50 border-l-2 border-transparent"
+                    }`}>
+                    <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                      isActive ? "bg-indigo-500 text-white" : "bg-indigo-100 text-indigo-600"
+                    }`}>
+                      {s.firstName[0]}{s.lastName[0]}
+                    </div>
+                    <div className="min-w-0">
+                      <p className={`text-sm font-medium truncate ${isActive ? "text-indigo-700" : "text-gray-800"}`}>{s.firstName} {s.lastName}</p>
+                      <p className="text-xs text-gray-400 truncate">{s.studentCode}</p>
+                    </div>
+                    <MessageSquare className={`h-3.5 w-3.5 shrink-0 ml-auto ${isActive ? "text-indigo-400" : "text-gray-300"}`} />
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        )}
-      </div>
+
+          <div className="flex-1 min-w-0">
+            {selected ? (
+              <StudentPTMPanel student={selected} canEdit={canEdit} />
+            ) : (
+              <div className="flex flex-col items-center justify-center py-20 text-gray-400 bg-white rounded-xl border border-gray-100">
+                <MessageSquare className="h-10 w-10 mb-3 text-gray-200" />
+                <p className="text-sm font-semibold">Select a student to view their PTMs</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Batch schedule view ── */}
+      {view === "batch" && <ScheduleBatchPTM students={students} canEdit={canEdit} />}
     </div>
   );
 }
