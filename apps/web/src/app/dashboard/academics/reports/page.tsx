@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
@@ -473,15 +474,21 @@ async function generatePDF(report: ReportDef, data: any, filters: Record<string,
 }
 
 // ── Main page ──────────────────────────────────────────────────────────────────
-export default function AcademicReportsPage() {
+function AcademicReportsPage() {
+  const searchParams = useSearchParams();
+  const teacherId    = searchParams.get("teacherId");
+
   const [activeReport, setActiveReport] = useState<ReportDef | null>(null);
   const [search,       setSearch]       = useState("");
   const [typeFilter,   setTypeFilter]   = useState("");
 
+  const batchesUrl = teacherId
+    ? `/api/v1/academics/batches?teacherId=${teacherId}`
+    : "/api/v1/academics/batches";
   const { data: yearsData }    = useQuery({ queryKey: ["academic-years"],   queryFn: () => api.get("/api/v1/academics/academic-years").then((r) => r.data.data) });
   const { data: gradesData }   = useQuery({ queryKey: ["grades"],           queryFn: () => api.get("/api/v1/academics/grades").then((r) => r.data) });
   const { data: subjectsData } = useQuery({ queryKey: ["subjects"],         queryFn: () => api.get("/api/v1/academics/subjects").then((r) => r.data.data) });
-  const { data: batchesData }  = useQuery({ queryKey: ["batches-all"],      queryFn: () => api.get("/api/v1/academics/batches").then((r) => r.data) });
+  const { data: batchesData }  = useQuery({ queryKey: ["batches-all", teacherId ?? "all"], queryFn: () => api.get(batchesUrl).then((r) => r.data) });
 
   const years    = (yearsData    ?? []) as any[];
   const grades   = (gradesData?.data   ?? []) as any[];
@@ -625,4 +632,8 @@ export default function AcademicReportsPage() {
       )}
     </div>
   );
+}
+
+export default function AcademicReportsPageWrapped() {
+  return <Suspense fallback={null}><AcademicReportsPage /></Suspense>;
 }

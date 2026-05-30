@@ -1201,6 +1201,7 @@ model Student {
   examResults         ExamResult[]
   scheduleAttendances ScheduleAttendance[]
   ptms                PTM[]
+  feedbacks           StudentFeedback[]
 
   @@index([schoolId])
   @@index([status])
@@ -1731,14 +1732,15 @@ model PTM {
   venue       String?
   agenda      String?
   status      PTMStatus     @default(SCHEDULED)
-  notes       String?       // post-meeting notes
+  notes       String?       // post-meeting general discussion notes
   createdById String?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
-  student     Student       @relation(fields: [studentId],   references: [id], onDelete: Cascade)
-  createdBy   Employee?     @relation("PTMCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  student     Student         @relation(fields: [studentId],   references: [id], onDelete: Cascade)
+  createdBy   Employee?       @relation("PTMCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   attendees   PTMAttendee[]
+  actionItems PTMActionItem[]
 
   @@index([studentId])
   @@index([date])
@@ -1757,8 +1759,80 @@ model PTMAttendee {
   @@index([ptmId])
 }
 
+model PTMActionItem {
+  id          String          @id @default(cuid())
+  ptmId       String
+  description String
+  status      PTMActionStatus @default(YET_TO_START)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  ptm PTM @relation(fields: [ptmId], references: [id], onDelete: Cascade)
+
+  @@index([ptmId])
+}
+
 enum PTMStatus {
   SCHEDULED
   COMPLETED
   CANCELLED
+}
+
+enum PTMActionStatus {
+  YET_TO_START
+  ONGOING
+  COMPLETED
+}
+
+// ─── STUDENT FEEDBACK ────────────────────────────────────────────────────────
+
+enum FeedbackType {
+  SUGGESTION
+  CONCERN
+}
+
+enum FeedbackStatus {
+  OPEN              // submitted, awaiting admin
+  RESPONDED         // admin replied, awaiting student
+  CLOSED            // closed by admin
+  CLOSED_BY_STUDENT // student closed it ("Closed by sender" from admin POV)
+}
+
+model StudentFeedback {
+  id           String         @id @default(cuid())
+  studentId    String
+  student      Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  type         FeedbackType
+  message      String         @db.Text   // the original submission message
+  status       FeedbackStatus @default(OPEN)
+
+  retractedAt  DateTime?      // soft-delete: student permanently removed it
+  adminNote    String?        // kept for migration compat (use messages instead)
+
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  messages     FeedbackMessage[]
+
+  @@index([studentId])
+  @@index([status])
+}
+
+model FeedbackMessage {
+  id             String          @id @default(cuid())
+  feedbackId     String
+  feedback       StudentFeedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+
+  senderType     String          // "STUDENT" | "ADMIN"
+  senderId       String          // studentId or employeeId
+  senderName     String          // denormalized full name
+
+  message        String          @db.Text
+  attachmentUrl  String?
+  attachmentName String?
+
+  createdAt      DateTime        @default(now())
+
+  @@index([feedbackId])
 }

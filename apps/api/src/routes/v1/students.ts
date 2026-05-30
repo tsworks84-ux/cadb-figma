@@ -7,6 +7,7 @@ import { uploadFile } from "../../utils/s3.js";
 import { sendMail } from "../../utils/mailer.js";
 import { randomUUID } from "crypto";
 import path from "path";
+import { getTeacherBatchIds } from "./teacherUtils.js";
 
 const DEFAULT_PASSWORD = "Welcome@123";
 
@@ -100,7 +101,7 @@ export async function studentRoutes(fastify: FastifyInstance) {
   fastify.get("/", async (request, reply) => {
     const q = request.query as any;
     const {
-      search, status, archived, batchId, academicYear, schoolId, gradeId,
+      search, status, archived, batchId, teacherId, academicYear, schoolId, gradeId,
       sortBy = "createdAt", sortOrder = "desc",
       page = "1", limit = "50",
     } = q;
@@ -112,7 +113,12 @@ export async function studentRoutes(fastify: FastifyInstance) {
 
     if (status && status !== "ALL") where.status = status;
 
-    if (batchId)      where.studentBatches = { some: { batchId } };
+    if (batchId) {
+      where.studentBatches = { some: { batchId } };
+    } else if (teacherId) {
+      const tBatchIds = await getTeacherBatchIds(teacherId);
+      where.studentBatches = { some: { batchId: { in: tBatchIds.length ? tBatchIds : ["__none__"] } } };
+    }
     if (academicYear) where.academicYear = academicYear;
     if (schoolId)     where.schoolId     = schoolId;
     if (gradeId)      where.gradeId      = gradeId;
@@ -659,13 +665,22 @@ export async function studentRoutes(fastify: FastifyInstance) {
     const { id } = request.params as any;
     const { academicYear, dateFrom, dateTo } = request.query as any;
 
-    // 1. Verify student exists
-    const student = await prisma.student.findUnique({ where: { id }, select: { id: true } });
+    // 1. Verify student exists and get their batch memberships
+    const student = await prisma.student.findUnique({
+      where: { id },
+      select: { id: true, studentBatches: { select: { batchId: true } } },
+    });
     if (!student) return reply.status(404).send({ success: false, error: "Student not found" });
 
-    // 2. Build exam filter: exams where this student has an ExamResult
+    const batchIds = student.studentBatches.map((sb) => sb.batchId);
+
+    // 2. Build exam filter: exams for the student's batches (batch-based, same as assignments)
+    //    Also include exams where student has a direct result (e.g. added to exam from another batch)
     const examWhere: any = {
-      results: { some: { studentId: id } },
+      OR: [
+        ...(batchIds.length > 0 ? [{ batches: { some: { batchId: { in: batchIds } } } }] : []),
+        { results: { some: { studentId: id } } },
+      ],
       status:  { not: "ARCHIVED" },
     };
     if (academicYear) examWhere.academicYear = academicYear;
@@ -675,7 +690,8 @@ export async function studentRoutes(fastify: FastifyInstance) {
       if (dateTo)   examWhere.examDate.lte = new Date(dateTo);
     }
 
-    // 3. Fetch exams with ALL results (to compute rank/avg/max)
+    // 3. Fetch exams with ALL non-excluded results (to compute rank/avg/max)
+    //    Also fetch this student's result separately (regardless of isExcluded) so we always show their marks
     const exams = await prisma.exam.findMany({
       where: examWhere,
       orderBy: { examDate: "desc" },
@@ -687,6 +703,7 @@ export async function studentRoutes(fastify: FastifyInstance) {
         batches: {
           include: { batch: { select: { id: true, name: true } } },
         },
+        // All non-excluded results for class stats
         results: {
           where:   { isExcluded: false },
           include: { marks: true },
@@ -694,9 +711,16 @@ export async function studentRoutes(fastify: FastifyInstance) {
       },
     });
 
+    // Fetch this student's own results separately (all exams, regardless of exclusion)
+    const myResultsRaw = await prisma.examResult.findMany({
+      where: { examId: { in: exams.map((e) => e.id) }, studentId: id },
+      include: { marks: true },
+    });
+    const myResultMap = new Map(myResultsRaw.map((r) => [r.examId, r]));
+
     // 4. For each exam compute per-student totals then rank/percentile
     const rows = exams.map((exam) => {
-      // Sum marks for every result
+      // Sum marks for every non-excluded result (for class stats)
       const totalsMap = new Map<string, number>();
       for (const r of exam.results) {
         const total = r.marks.reduce((s, m) => s + (m.marks ?? 0), 0);
@@ -704,8 +728,11 @@ export async function studentRoutes(fastify: FastifyInstance) {
       }
 
       const allTotals = [...totalsMap.values()].filter((t) => t > 0).sort((a, b) => b - a);
-      const myResult  = exam.results.find((r) => r.studentId === id) ?? null;
-      const myTotal   = myResult ? (totalsMap.get(id) ?? 0) : null;
+      // Use the separately-fetched result for this student (not filtered by isExcluded)
+      const myResult  = myResultMap.get(exam.id) ?? null;
+      const myTotal   = myResult
+        ? myResult.marks.reduce((s, m) => s + (m.marks ?? 0), 0)
+        : null;
 
       // Rank: 1-based position (students with same score share rank)
       let rank: number | null = null;
@@ -726,7 +753,7 @@ export async function studentRoutes(fastify: FastifyInstance) {
         ? Math.round((allTotals.reduce((s, t) => s + t, 0) / allTotals.length) * 10) / 10
         : null;
 
-      // Subject-wise marks for THIS student
+      // Subject-wise marks for THIS student (from separately-fetched result)
       const myMarks = myResult?.marks.map((m) => {
         const subjectEntry = exam.subjects.find(
           (es) => es.paperNum === m.paperNum && es.subjectSlot === m.subjectSlot,
@@ -756,11 +783,14 @@ export async function studentRoutes(fastify: FastifyInstance) {
           subjects:    exam.subjects,
         },
         result: myResult ? {
-          id:       myResult.id,
-          attended: myResult.attended,
-          total:    myTotal,
-          marks:    myMarks,
+          id:         myResult.id,
+          attended:   myResult.attended,
+          isExcluded: myResult.isExcluded,
+          total:      myTotal,
+          marks:      myMarks,
         } : null,
+        // marksRecorded: false means the exam exists for this student's batch but no ExamResult yet
+        marksRecorded: myResult !== null,
         stats: {
           rank,
           percentile,
@@ -811,6 +841,7 @@ export async function studentRoutes(fastify: FastifyInstance) {
       include: { employee: { select: { id: true, firstName: true, lastName: true, email: true, photoUrl: true } } },
     },
     createdBy: { select: { id: true, firstName: true, lastName: true } },
+    actionItems: { orderBy: { createdAt: "asc" as const } },
   } as const;
 
   // GET /students/:id/ptms
@@ -958,6 +989,59 @@ export async function studentRoutes(fastify: FastifyInstance) {
     requireAdmin(request, reply);
     const { ptmId } = request.params as any;
     await prisma.pTM.delete({ where: { id: ptmId } });
+    return reply.send({ success: true });
+  });
+
+  // ── PTM Action Items ────────────────────────────────────────────────────────
+
+  const ptmIncludeWithItems = {
+    ...ptmInclude,
+    actionItems: { orderBy: { createdAt: "asc" as const } },
+  } as const;
+
+  // GET /students/:id/ptms/:ptmId/action-items
+  fastify.get("/:id/ptms/:ptmId/action-items", async (request, reply) => {
+    const { ptmId } = request.params as any;
+    const items = await prisma.pTMActionItem.findMany({
+      where: { ptmId },
+      orderBy: { createdAt: "asc" },
+    });
+    return reply.send({ success: true, data: items });
+  });
+
+  // POST /students/:id/ptms/:ptmId/action-items
+  fastify.post("/:id/ptms/:ptmId/action-items", async (request, reply) => {
+    requireAdmin(request, reply);
+    const { ptmId } = request.params as any;
+    const { description, status } = request.body as any;
+    if (!description?.trim()) return reply.status(400).send({ success: false, error: "description is required" });
+    const item = await prisma.pTMActionItem.create({
+      data: {
+        ptmId,
+        description: description.trim(),
+        status: status ?? "YET_TO_START",
+      },
+    });
+    return reply.status(201).send({ success: true, data: item });
+  });
+
+  // PATCH /students/:id/ptms/:ptmId/action-items/:itemId
+  fastify.patch("/:id/ptms/:ptmId/action-items/:itemId", async (request, reply) => {
+    requireAdmin(request, reply);
+    const { itemId } = request.params as any;
+    const { description, status } = request.body as any;
+    const data: any = {};
+    if (description !== undefined) data.description = description.trim();
+    if (status      !== undefined) data.status      = status;
+    const item = await prisma.pTMActionItem.update({ where: { id: itemId }, data });
+    return reply.send({ success: true, data: item });
+  });
+
+  // DELETE /students/:id/ptms/:ptmId/action-items/:itemId
+  fastify.delete("/:id/ptms/:ptmId/action-items/:itemId", async (request, reply) => {
+    requireAdmin(request, reply);
+    const { itemId } = request.params as any;
+    await prisma.pTMActionItem.delete({ where: { id: itemId } });
     return reply.send({ success: true });
   });
 }

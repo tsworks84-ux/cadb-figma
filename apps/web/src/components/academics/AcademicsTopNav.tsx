@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { resolvePhotoUrl } from "@/lib/utils";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -24,14 +24,21 @@ const NAV_ITEMS = [
 ];
 
 export function AcademicsTopNav() {
-  const pathname    = usePathname();
+  const pathname     = usePathname();
+  const searchParams = useSearchParams();
+  const teacherId    = searchParams.get("teacherId");
   const { user }    = useAuthStore();
   const permissions = usePermissions();
   const isSuperAdmin = user?.role === "SUPER_ADMIN";
   const isHRAdmin    = user?.role === "HR_ADMIN";
   const isEmployee   = !isSuperAdmin && !isHRAdmin && user?.role === "EMPLOYEE";
 
+  // Build href preserving teacherId query param
+  const buildHref = (href: string) => teacherId ? `${href}?teacherId=${teacherId}` : href;
+
   const visibleItems = NAV_ITEMS.filter(({ permKey, name }) => {
+    // When viewing a teacher's scoped academics — show all except Settings
+    if (teacherId) return name !== "Settings";
     if (isEmployee) return name === "Batches";
     if (!permKey) return true;
     if (isSuperAdmin || isHRAdmin) return true;
@@ -77,7 +84,7 @@ export function AcademicsTopNav() {
           return (
             <Link
               key={item.href}
-              href={item.href}
+              href={buildHref(item.href)}
               className="flex items-center px-[14px] text-sm whitespace-nowrap border-b-[3px] transition-colors duration-150"
               style={{
                 fontWeight: 850,
@@ -137,14 +144,19 @@ export function AcademicsTopNav() {
 
 /** Scrollable tab strip shown on small screens below the main header. */
 export function AcademicsMobileTabStrip() {
-  const pathname    = usePathname();
+  const pathname     = usePathname();
+  const searchParams = useSearchParams();
+  const teacherId    = searchParams.get("teacherId");
   const { user }    = useAuthStore();
   const permissions = usePermissions();
   const isSuperAdmin = user?.role === "SUPER_ADMIN";
   const isHRAdmin    = user?.role === "HR_ADMIN";
   const isEmployee   = !isSuperAdmin && !isHRAdmin && user?.role === "EMPLOYEE";
 
+  const buildHref = (href: string) => teacherId ? `${href}?teacherId=${teacherId}` : href;
+
   const visibleItems = NAV_ITEMS.filter(({ permKey, name }) => {
+    if (teacherId) return name !== "Settings";
     if (isEmployee) return name === "Batches";
     if (!permKey) return true;
     if (isSuperAdmin || isHRAdmin) return true;
@@ -163,7 +175,7 @@ export function AcademicsMobileTabStrip() {
         return (
           <Link
             key={item.href}
-            href={item.href}
+            href={buildHref(item.href)}
             className="flex items-center px-4 py-3 text-[13px] whitespace-nowrap border-b-[3px] transition-colors duration-150"
             style={{
               fontWeight: 850,

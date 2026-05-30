@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { X, Archive, ArchiveRestore, Trash2, Pencil, Check, ChevronRight, ChevronDown } from "lucide-react";
@@ -159,11 +159,13 @@ const blankForm = (): BatchForm => ({
 });
 
 // ── Page ──────────────────────────────────────────────────────────────────────
-export default function BatchesPage() {
-  const { user } = useAuthStore();
-  const permissions = usePermissions();
-  const qc = useQueryClient();
-  const router = useRouter();
+function BatchesPage() {
+  const { user }     = useAuthStore();
+  const searchParams = useSearchParams();
+  const teacherId    = searchParams.get("teacherId");
+  const permissions  = usePermissions();
+  const qc           = useQueryClient();
+  const router       = useRouter();
 
   const [form, setForm] = useState<BatchForm>(blankForm());
   const [modalOpen, setModalOpen]       = useState(false);
@@ -183,6 +185,8 @@ export default function BatchesPage() {
     (permissions["ACA_BATCH"]?.canCreate ?? false);
 
   const isEmployeeRole = user?.role === "EMPLOYEE";
+  // teacherId in URL means "scoped teacher view" — treat like employee role for fetching
+  const scopedTeacherId = teacherId ?? (isEmployeeRole ? user?.id : null);
 
   // ── Queries ───────────────────────────────────────────────────────────────────
   const batchParams = new URLSearchParams({ archived: String(showArchived) });
@@ -192,13 +196,13 @@ export default function BatchesPage() {
   if (filterGrade)    batchParams.set("gradeId", filterGrade);
 
   const { data: batchRes, isLoading } = useQuery({
-    queryKey: isEmployeeRole
-      ? ["emp-batches", user?.id]
+    queryKey: scopedTeacherId
+      ? ["emp-batches", scopedTeacherId]
       : ["batches-filtered", batchParams.toString()],
-    queryFn: isEmployeeRole
-      ? () => api.get(`/api/v1/academics/employees/${user?.id}/batches`).then((r) => r.data)
+    queryFn: scopedTeacherId
+      ? () => api.get(`/api/v1/academics/employees/${scopedTeacherId}/batches`).then((r) => r.data)
       : () => api.get(`/api/v1/academics/batches?${batchParams}`).then((r) => r.data),
-    enabled: isEmployeeRole ? !!user?.id : true,
+    enabled: scopedTeacherId ? !!scopedTeacherId : true,
   });
   const allBatches: any[] = batchRes?.data ?? [];
 
@@ -374,7 +378,7 @@ export default function BatchesPage() {
         ))}
       </div>
 
-      {!isEmployeeRole && (
+      {!scopedTeacherId && (
         <>
           <p style={{ margin: "0 0 14px", color: "#9aa3b4", fontSize: 13, fontWeight: 900, letterSpacing: ".08em", textTransform: "uppercase" }}>
             Filters
@@ -449,7 +453,7 @@ export default function BatchesPage() {
         justifyContent: "space-between", gap: 24, flexWrap: "wrap",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          {!isEmployeeRole && (
+          {!scopedTeacherId && (
             <button
               className="lg:hidden"
               onClick={() => setMobileFilterOpen(true)}
@@ -469,8 +473,8 @@ export default function BatchesPage() {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          {!isEmployeeRole && <DBtn>Stats</DBtn>}
-          {!isEmployeeRole && <DBtn>Export</DBtn>}
+          {!scopedTeacherId && <DBtn>Stats</DBtn>}
+          {!scopedTeacherId && <DBtn>Export</DBtn>}
           {canEdit && <DBtn primary onClick={openCreate}>+ New Batch</DBtn>}
         </div>
       </div>
@@ -922,4 +926,8 @@ function BatchRow({
       </td>
     </tr>
   );
+}
+
+export default function BatchesPageWrapped() {
+  return <Suspense fallback={null}><BatchesPage /></Suspense>;
 }

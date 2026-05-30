@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "@cadb/db";
 import { authenticate } from "../../middleware/authenticate.js";
+import { getTeacherBatchIds } from "./teacherUtils.js";
 
 const batchSchema = z.object({
   name:            z.string().min(1),
@@ -41,18 +42,41 @@ export async function academicsRoutes(fastify: FastifyInstance) {
 
   // ── OVERVIEW DASHBOARD ─────────────────────────────────────────────────────
 
-  fastify.get("/overview", async (_request, reply) => {
+  fastify.get("/overview", async (request, reply) => {
+    const { teacherId } = request.query as any;
+
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const todayEnd = new Date(todayStart);
     todayEnd.setDate(todayEnd.getDate() + 1);
+
+    // If scoped to a teacher, resolve their batch IDs once
+    let teacherBatchIds: string[] | null = null;
+    if (teacherId) {
+      teacherBatchIds = await getTeacherBatchIds(teacherId);
+    }
+
+    const studentWhere: any = { isArchived: false };
+    if (teacherBatchIds) studentWhere.studentBatches = { some: { batchId: { in: teacherBatchIds } } };
+
+    const batchWhere: any = { isArchived: false };
+    if (teacherBatchIds) batchWhere.id = { in: teacherBatchIds };
+
+    const scheduleWhere: any = { date: { gte: todayStart, lt: todayEnd } };
+    if (teacherBatchIds) scheduleWhere.batches = { some: { batchId: { in: teacherBatchIds } } };
+
+    const markWhere: any = { marks: { not: null, gt: 0 } };
+    if (teacherBatchIds) markWhere.examResult = { exam: { batches: { some: { batchId: { in: teacherBatchIds } } } } };
+
+    const submissionWhere: any = {};
+    if (teacherBatchIds) submissionWhere.assignment = { batches: { some: { batchId: { in: teacherBatchIds } } } };
 
     const [
       students, batches, examMarkStats, submissionStats, todaySchedules,
       schools, grades, courses,
     ] = await Promise.all([
       prisma.student.findMany({
-        where: { isArchived: false },
+        where: studentWhere,
         select: {
           id: true, status: true,
           schoolId: true, gradeId: true, courseId: true, academicYear: true,
@@ -61,19 +85,20 @@ export async function academicsRoutes(fastify: FastifyInstance) {
         },
       }),
       prisma.batch.findMany({
-        where: { isArchived: false },
+        where: batchWhere,
         select: { id: true, name: true, academicYear: true, _count: { select: { studentBatches: true } } },
       }),
       prisma.examMark.aggregate({
         _avg: { marks: true },
-        where: { marks: { not: null, gt: 0 } },
+        where: markWhere,
       }),
       prisma.assignmentSubmission.groupBy({
         by: ["status"],
         _count: { _all: true },
+        where: Object.keys(submissionWhere).length ? submissionWhere : undefined,
       }),
       prisma.schedule.findMany({
-        where: { date: { gte: todayStart, lt: todayEnd } },
+        where: scheduleWhere,
         include: {
           subject:  { select: { id: true, name: true, code: true } },
           employee: { select: { id: true, firstName: true, lastName: true } },
@@ -192,13 +217,17 @@ export async function academicsRoutes(fastify: FastifyInstance) {
   // ── BATCHES ────────────────────────────────────────────────────────────────
 
   fastify.get("/batches", async (request, reply) => {
-    const { archived, academicYear, locationId, schoolId, gradeId } = request.query as any;
+    const { archived, academicYear, locationId, schoolId, gradeId, teacherId } = request.query as any;
 
     const where: any = { isArchived: archived === "true" ? true : false };
     if (academicYear) where.academicYear = academicYear;
     if (locationId)   where.locationId   = locationId;
     if (schoolId)     where.OR = [{ schoolId }, { schoolIds: { has: schoolId } }];
     if (gradeId)      where.gradeId      = gradeId;
+    if (teacherId) {
+      const tBatchIds = await getTeacherBatchIds(teacherId);
+      where.id = { in: tBatchIds.length ? tBatchIds : ["__none__"] };
+    }
 
     const batches = await prisma.batch.findMany({
       where,
@@ -633,18 +662,174 @@ export async function academicsRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true, data: { overall, exams: items } });
   });
 
+  // ── BATCH STATS (attendance + assignment + assessment with date filter) ─────
+
+  fastify.get("/batches/:id/stats", async (request, reply) => {
+    const { id } = request.params as any;
+    const { dateFrom, dateTo } = request.query as any;
+
+    const dateFilter: any = {};
+    if (dateFrom) dateFilter.gte = new Date(dateFrom);
+    if (dateTo)   dateFilter.lte = new Date(dateTo);
+    const hasDateFilter = Object.keys(dateFilter).length > 0;
+
+    const [schedules, totalStudents, assignments, exams] = await Promise.all([
+      prisma.schedule.findMany({
+        where: {
+          batches: { some: { batchId: id } },
+          ...(hasDateFilter ? { date: dateFilter } : {}),
+        },
+        select: {
+          id: true, date: true,
+          subject: { select: { name: true } },
+          attendances: { select: { isPresent: true } },
+        },
+        orderBy: { date: "asc" },
+      }),
+      prisma.studentBatch.count({
+        where: { batchId: id, student: { isArchived: false, status: "ACTIVE" } },
+      }),
+      prisma.assignment.findMany({
+        where: {
+          batches: { some: { batchId: id } },
+          ...(hasDateFilter ? { assignmentDate: dateFilter } : {}),
+        },
+        select: {
+          id: true, name: true, assignmentDate: true, status: true,
+          subject: { select: { name: true } },
+          submissions: { select: { status: true } },
+        },
+        orderBy: { assignmentDate: "asc" },
+      }),
+      prisma.exam.findMany({
+        where: {
+          batches: { some: { batchId: id } },
+          ...(hasDateFilter ? { examDate: dateFilter } : {}),
+        },
+        select: {
+          id: true, name: true, examDate: true, totalMarks: true,
+          subjects: {
+            select: {
+              paperNum: true, subjectSlot: true, maxMarks: true,
+              subject: { select: { id: true, name: true } },
+            },
+          },
+          results: {
+            where: { isExcluded: false },
+            select: {
+              attended: true,
+              marks: { select: { paperNum: true, subjectSlot: true, marks: true } },
+            },
+          },
+        },
+        orderBy: { examDate: "asc" },
+      }),
+    ]);
+
+    // ── Attendance ────────────────────────────────────────────────────────────
+    const attTrend = schedules.map((s) => {
+      const present  = s.attendances.filter((a) => a.isPresent).length;
+      const recorded = s.attendances.length;
+      const pct = recorded > 0 ? Math.round((present / recorded) * 100) : null;
+      return { date: s.date, subject: s.subject?.name ?? null, pct, present, recorded };
+    });
+
+    const attSubjMap: Record<string, { total: number; count: number; classes: number }> = {};
+    attTrend.forEach((c) => {
+      const key = c.subject ?? "Other";
+      if (!attSubjMap[key]) attSubjMap[key] = { total: 0, count: 0, classes: 0 };
+      attSubjMap[key].classes++;
+      if (c.pct != null) { attSubjMap[key].total += c.pct; attSubjMap[key].count++; }
+    });
+    const attSubjBreakdown = Object.entries(attSubjMap)
+      .map(([subject, v]) => ({ subject, avgPct: v.count > 0 ? Math.round(v.total / v.count) : null, classCount: v.classes }))
+      .sort((a, b) => (b.avgPct ?? 0) - (a.avgPct ?? 0));
+
+    const withAtt = attTrend.filter((c) => c.pct != null);
+    const avgAttPct = withAtt.length > 0 ? Math.round(withAtt.reduce((s, c) => s + (c.pct ?? 0), 0) / withAtt.length) : null;
+
+    // ── Assignments ───────────────────────────────────────────────────────────
+    const assignTrend = assignments.map((a) => {
+      const submitted = a.submissions.filter((s) => s.status !== "NOT_SUBMITTED").length;
+      const total     = a.submissions.length || totalStudents;
+      const pct       = total > 0 ? Math.round((submitted / total) * 100) : null;
+      return { date: a.assignmentDate, name: a.name, subject: a.subject?.name ?? null, submitted, total: a.submissions.length, pct };
+    });
+
+    const assignSubjMap: Record<string, { totalPct: number; count: number; given: number; submitted: number }> = {};
+    assignTrend.forEach((a) => {
+      const key = a.subject ?? "No Subject";
+      if (!assignSubjMap[key]) assignSubjMap[key] = { totalPct: 0, count: 0, given: 0, submitted: 0 };
+      assignSubjMap[key].given++;
+      assignSubjMap[key].submitted += a.submitted;
+      if (a.pct != null) { assignSubjMap[key].totalPct += a.pct; assignSubjMap[key].count++; }
+    });
+    const assignSubjBreakdown = Object.entries(assignSubjMap)
+      .map(([subject, v]) => ({ subject, given: v.given, submitted: v.submitted, avgCompletionPct: v.count > 0 ? Math.round(v.totalPct / v.count) : null }))
+      .sort((a, b) => b.given - a.given);
+
+    const withAssign = assignTrend.filter((a) => a.pct != null);
+    const avgCompPct = withAssign.length > 0 ? Math.round(withAssign.reduce((s, a) => s + (a.pct ?? 0), 0) / withAssign.length) : null;
+
+    // ── Assessments ───────────────────────────────────────────────────────────
+    const examTrend = exams.map((e) => {
+      const total    = e.results.length;
+      const attended = e.results.filter((r) => r.attended).length;
+      const attendPct = total > 0 ? Math.round((attended / total) * 100) : null;
+      const scores = e.results.filter((r) => r.attended).map((r) => r.marks.reduce((s, m) => s + (m.marks ?? 0), 0));
+      const avgScore = scores.length > 0 ? Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : null;
+      const avgPct   = avgScore != null && e.totalMarks ? Math.round((avgScore / e.totalMarks) * 100) : null;
+      return { date: e.examDate, name: e.name, totalMarks: e.totalMarks, avgPct, attendPct };
+    });
+
+    // Subject-wise breakdown across all exams using slot mapping
+    const subjScoreMap: Record<string, { name: string; totalPct: number; count: number; examIds: Set<string> }> = {};
+    exams.forEach((e) => {
+      const slotToSubj: Record<string, { id: string; name: string; maxMarks: number | null }> = {};
+      e.subjects.forEach((es) => {
+        if (es.subject) slotToSubj[`${es.paperNum}:${es.subjectSlot}`] = { id: es.subject.id, name: es.subject.name, maxMarks: es.maxMarks };
+      });
+      e.results.filter((r) => r.attended).forEach((r) => {
+        r.marks.forEach((m) => {
+          const subj = slotToSubj[`${m.paperNum}:${m.subjectSlot}`];
+          if (!subj || m.marks == null || !subj.maxMarks) return;
+          const pct = Math.round((m.marks / subj.maxMarks) * 100);
+          if (!subjScoreMap[subj.id]) subjScoreMap[subj.id] = { name: subj.name, totalPct: 0, count: 0, examIds: new Set() };
+          subjScoreMap[subj.id].totalPct += pct;
+          subjScoreMap[subj.id].count++;
+          subjScoreMap[subj.id].examIds.add(e.id);
+        });
+      });
+    });
+    const examSubjBreakdown = Object.entries(subjScoreMap)
+      .map(([, v]) => ({ subject: v.name, avgPct: Math.round(v.totalPct / v.count), examCount: v.examIds.size, dataPoints: v.count }))
+      .sort((a, b) => b.avgPct - a.avgPct);
+
+    const withExam = examTrend.filter((e) => e.avgPct != null);
+    const avgExamScorePct = withExam.length > 0 ? Math.round(withExam.reduce((s, e) => s + (e.avgPct ?? 0), 0) / withExam.length) : null;
+
+    return reply.send({
+      success: true,
+      data: {
+        attendance:  { totalClasses: schedules.length, avgPct: avgAttPct, trend: attTrend, subjectBreakdown: attSubjBreakdown },
+        assignments: { total: assignments.length, avgCompletionPct: avgCompPct, trend: assignTrend, subjectBreakdown: assignSubjBreakdown },
+        assessments: { total: exams.length, avgScorePct: avgExamScorePct, trend: examTrend, subjectBreakdown: examSubjBreakdown },
+      },
+    });
+  });
+
   // ── EMPLOYEE'S ASSOCIATED BATCHES ──────────────────────────────────────────
 
   fastify.get("/employees/:employeeId/batches", async (request, reply) => {
     const { employeeId } = request.params as any;
 
+    // Union of all 3 association types
+    const batchIds = await getTeacherBatchIds(employeeId);
+
     const batches = await prisma.batch.findMany({
       where: {
         isArchived: false,
-        OR: [
-          { facultyMentorId: employeeId },
-          { batchSubjects: { some: { employeeId } } },
-        ],
+        id: { in: batchIds.length ? batchIds : ["__none__"] },
       },
       include: {
         location:     { select: { id: true, name: true } },

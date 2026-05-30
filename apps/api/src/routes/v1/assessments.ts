@@ -2,6 +2,7 @@ import { type FastifyPluginAsync } from "fastify";
 import { prisma } from "@cadb/db";
 import { z } from "zod";
 import ExcelJS from "exceljs";
+import { getTeacherBatchIds } from "./teacherUtils.js";
 
 const examInclude = {
   subjects: {
@@ -305,7 +306,11 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
       if (q.dateFrom) where.examDate.gte = new Date(q.dateFrom);
       if (q.dateTo)   where.examDate.lte = new Date(q.dateTo);
     }
-    if (q.batchId)   where.batches  = { some: { batchId:          q.batchId   } };
+    if (q.batchId)        where.batches  = { some: { batchId:          q.batchId   } };
+    else if (q.teacherId) {
+      const tBatchIds = await getTeacherBatchIds(q.teacherId);
+      where.batches = { some: { batchId: { in: tBatchIds.length ? tBatchIds : ["__none__"] } } };
+    }
     if (q.gradeId)   where.batches  = { some: { batch: { gradeId: q.gradeId   } } };
     if (q.subjectId) where.subjects = { some: { subjectId:        q.subjectId } };
 

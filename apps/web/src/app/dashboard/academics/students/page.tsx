@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useRef, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -165,11 +165,13 @@ function FilterPill({ label, onRemove }: { label: string; onRemove: () => void }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export default function StudentsPage() {
-  const router  = useRouter();
-  const { user } = useAuthStore();
-  const permissions = usePermissions();
-  const qc = useQueryClient();
+function StudentsPage() {
+  const router       = useRouter();
+  const searchParams = useSearchParams();
+  const teacherId    = searchParams.get("teacherId");
+  const { user }     = useAuthStore();
+  const permissions  = usePermissions();
+  const qc           = useQueryClient();
 
   const canEdit =
     user?.role === "SUPER_ADMIN" ||
@@ -195,6 +197,8 @@ export default function StudentsPage() {
     ...(academicYear ? { academicYear } : {}),
     ...(gradeId      ? { gradeId }      : {}),
     ...(batchId      ? { batchId }      : {}),
+    // When viewing a teacher's scoped academics, filter to their batches
+    ...(teacherId && !batchId ? { teacherId } : {}),
     sortBy,
     sortOrder: sortBy === "name" ? "asc" : "desc",
     limit: "200",
@@ -210,7 +214,11 @@ export default function StudentsPage() {
   const stats            = data?.stats ?? { total: 0, byStatus: {}, batchCount: 0, avgBatchStrength: 0 };
 
   // ── Reference data ────────────────────────────────────────────────────────────
-  const { data: batches = [] }       = useQuery({ queryKey: ["batches", false],   queryFn: () => api.get("/api/v1/academics/batches?archived=false").then((r) => r.data.data), staleTime: 5 * 60 * 1000 });
+  // When scoped to a teacher, fetch only their batches for the filter dropdown
+  const batchesUrl = teacherId
+    ? `/api/v1/academics/batches?archived=false&teacherId=${teacherId}`
+    : "/api/v1/academics/batches?archived=false";
+  const { data: batches = [] }       = useQuery({ queryKey: ["batches", teacherId ?? false],   queryFn: () => api.get(batchesUrl).then((r) => r.data.data), staleTime: 5 * 60 * 1000 });
   const { data: academicYears = [] } = useQuery({ queryKey: ["academic-years"],   queryFn: () => api.get("/api/v1/academics/academic-years").then((r) => r.data.data), staleTime: 10 * 60 * 1000 });
   const { data: grades = [] }        = useQuery({ queryKey: ["grades"],           queryFn: () => api.get("/api/v1/academics/grades").then((r) => r.data.data), staleTime: 10 * 60 * 1000 });
   const { data: schools = [] }       = useQuery({ queryKey: ["schools"],          queryFn: () => api.get("/api/v1/academics/schools").then((r) => r.data.data), staleTime: 10 * 60 * 1000 });
@@ -515,4 +523,8 @@ export default function StudentsPage() {
       </div>
     </div>
   );
+}
+
+export default function StudentsPageWrapped() {
+  return <Suspense fallback={null}><StudentsPage /></Suspense>;
 }

@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
+import { BatchStatsPanel } from "./BatchStatsPanel";
 
 // ── Status config ─────────────────────────────────────────────────────────────
 
@@ -108,6 +109,7 @@ export default function BatchDetailPage() {
 
   // ── Tab state ─────────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<"students" | "attendance" | "assignments" | "assessments" | "ptm">("students");
+  const [statsOpen, setStatsOpen] = useState(false);
 
   // ── Add modal state ──────────────────────────────────────────────────────────
   const [addOpen,       setAddOpen]       = useState(false);
@@ -417,6 +419,20 @@ export default function BatchDetailPage() {
           )}
         </div>
       </div>}
+
+      {/* ── Stats toolbar (attendance / assignments / assessments) ────────── */}
+      {(activeTab === "attendance" || activeTab === "assignments" || activeTab === "assessments") && (
+        <div className="bg-white border-b border-gray-100 px-4 sm:px-6 py-2 print:hidden">
+          <div className="flex items-center justify-end">
+            <button
+              onClick={() => setStatsOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-indigo-50 border border-indigo-200 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors"
+            >
+              <TrendingUp className="h-3.5 w-3.5" /> Stats
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Tab content area ─────────────────────────────────────────────────── */}
       <div className="flex-1 p-4 sm:p-6">
@@ -878,6 +894,9 @@ export default function BatchDetailPage() {
           </div>
         </div>
       )}
+
+      {/* ── Batch Stats Panel ────────────────────────────────────────────────── */}
+      <BatchStatsPanel batchId={id} open={statsOpen} onClose={() => setStatsOpen(false)} />
 
       {/* ── Confirm action modal ─────────────────────────────────────────────── */}
       {confirmStudent && (

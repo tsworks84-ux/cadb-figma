@@ -14,7 +14,7 @@ import {
   BadgeCheck, Shield, RotateCcw, Archive, ArchiveRestore,
   BookOpen, Calendar, CreditCard, Building2, MapPin, Hash,
   ChevronDown, ChevronUp, CheckCircle2, Clock, AlertCircle, Plus,
-  Users2, Banknote, Trash2, IndianRupee, Info, AlertTriangle, Pin, Loader2,
+  Users2, Banknote, Trash2, IndianRupee, Info, AlertTriangle, Pin, Loader2, Pencil, Paperclip,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 
@@ -1442,9 +1442,210 @@ function PTMScheduleModal({ student, onClose, onSaved }: {
   );
 }
 
+const ACTION_STATUS: Record<string, { label: string; bg: string; text: string; border: string; dot: string }> = {
+  YET_TO_START: { label: "Yet to Start", bg: "bg-gray-50",   text: "text-gray-600",  border: "border-gray-200",  dot: "bg-gray-400"  },
+  ONGOING:      { label: "Ongoing",      bg: "bg-amber-50",  text: "text-amber-700", border: "border-amber-200", dot: "bg-amber-500" },
+  COMPLETED:    { label: "Completed",    bg: "bg-green-50",  text: "text-green-700", border: "border-green-200", dot: "bg-green-500" },
+};
+
+function PTMDiscussionPanel({ ptm, studentId, canEdit }: { ptm: any; studentId: string; canEdit: boolean }) {
+  const qc = useQueryClient();
+
+  // General discussion notes state
+  const [notes, setNotes]       = useState<string>(ptm.notes ?? "");
+  const [notesDirty, setNotesDirty] = useState(false);
+  const [savingNotes, setSavingNotes] = useState(false);
+
+  // Action items state
+  const [newItem, setNewItem]   = useState("");
+  const [addingItem, setAddingItem] = useState(false);
+  const [editItemId, setEditItemId] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
+
+  const items: any[] = ptm.actionItems ?? [];
+
+  const saveNotes = async () => {
+    setSavingNotes(true);
+    try {
+      await api.patch(`/api/v1/academics/students/${studentId}/ptms/${ptm.id}`, { notes });
+      qc.invalidateQueries({ queryKey: ["student-ptms", studentId] });
+      setNotesDirty(false);
+      toast.success("Discussion notes saved");
+    } catch { toast.error("Failed to save notes"); }
+    finally { setSavingNotes(false); }
+  };
+
+  const addActionItem = async () => {
+    if (!newItem.trim()) return;
+    setAddingItem(true);
+    try {
+      await api.post(`/api/v1/academics/students/${studentId}/ptms/${ptm.id}/action-items`, { description: newItem.trim() });
+      qc.invalidateQueries({ queryKey: ["student-ptms", studentId] });
+      setNewItem("");
+      toast.success("Action item added");
+    } catch { toast.error("Failed to add action item"); }
+    finally { setAddingItem(false); }
+  };
+
+  const updateItemStatus = async (itemId: string, status: string) => {
+    try {
+      await api.patch(`/api/v1/academics/students/${studentId}/ptms/${ptm.id}/action-items/${itemId}`, { status });
+      qc.invalidateQueries({ queryKey: ["student-ptms", studentId] });
+    } catch { toast.error("Failed to update status"); }
+  };
+
+  const saveItemEdit = async (itemId: string) => {
+    if (!editText.trim()) return;
+    try {
+      await api.patch(`/api/v1/academics/students/${studentId}/ptms/${ptm.id}/action-items/${itemId}`, { description: editText.trim() });
+      qc.invalidateQueries({ queryKey: ["student-ptms", studentId] });
+      setEditItemId(null);
+      toast.success("Updated");
+    } catch { toast.error("Failed to update"); }
+  };
+
+  const deleteItem = async (itemId: string) => {
+    try {
+      await api.delete(`/api/v1/academics/students/${studentId}/ptms/${ptm.id}/action-items/${itemId}`);
+      qc.invalidateQueries({ queryKey: ["student-ptms", studentId] });
+      toast.success("Deleted");
+    } catch { toast.error("Failed to delete"); }
+  };
+
+  return (
+    <div className="border-t border-gray-100 bg-gray-50/60 px-5 py-4 space-y-5">
+
+      {/* ── General Discussion ────────────────────────────────────────────── */}
+      <div>
+        <div className="flex items-center gap-2 mb-2">
+          <MessageSquare className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+          <p className="text-xs font-bold text-gray-700 uppercase tracking-wide">General Discussion</p>
+        </div>
+        {canEdit ? (
+          <div className="space-y-2">
+            <textarea
+              rows={3}
+              value={notes}
+              placeholder="Add discussion notes from this meeting…"
+              onChange={(e) => { setNotes(e.target.value); setNotesDirty(true); }}
+              className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 placeholder:text-gray-400 focus:border-indigo-400 focus:outline-none resize-none"
+            />
+            {notesDirty && (
+              <div className="flex justify-end">
+                <button onClick={saveNotes} disabled={savingNotes}
+                  className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                  {savingNotes ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
+                  Save Notes
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500 whitespace-pre-wrap leading-relaxed">
+            {notes || <span className="italic text-gray-400">No discussion notes added.</span>}
+          </p>
+        )}
+      </div>
+
+      {/* ── Action Items ──────────────────────────────────────────────────── */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+          <p className="text-xs font-bold text-gray-700 uppercase tracking-wide">Action Items</p>
+          {items.length > 0 && (
+            <span className="ml-auto text-[10px] font-bold text-gray-400">
+              {items.filter((i) => i.status === "COMPLETED").length}/{items.length} done
+            </span>
+          )}
+        </div>
+
+        {/* Items list */}
+        {items.length > 0 && (
+          <div className="space-y-2 mb-3">
+            {items.map((item: any) => {
+              const ast = ACTION_STATUS[item.status] ?? ACTION_STATUS.YET_TO_START;
+              return (
+                <div key={item.id} className={`rounded-xl border ${ast.border} ${ast.bg} flex items-start gap-3 px-3 py-2.5`}>
+                  <div className={`mt-1 h-2 w-2 rounded-full shrink-0 ${ast.dot}`} />
+                  <div className="flex-1 min-w-0">
+                    {editItemId === item.id ? (
+                      <div className="flex gap-2">
+                        <input autoFocus value={editText}
+                          onChange={(e) => setEditText(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") saveItemEdit(item.id); if (e.key === "Escape") setEditItemId(null); }}
+                          className="flex-1 rounded-lg border border-indigo-300 bg-white px-2 py-1 text-sm focus:outline-none focus:border-indigo-500" />
+                        <button onClick={() => saveItemEdit(item.id)}
+                          className="rounded-lg bg-indigo-600 text-white px-2.5 py-1 text-xs font-bold hover:bg-indigo-700">
+                          Save
+                        </button>
+                        <button onClick={() => setEditItemId(null)}
+                          className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-semibold text-gray-500 hover:bg-white">
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <p className={`text-sm font-medium leading-snug ${item.status === "COMPLETED" ? "line-through text-gray-400" : "text-gray-800"}`}>
+                        {item.description}
+                      </p>
+                    )}
+                  </div>
+                  {canEdit && editItemId !== item.id && (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {/* Status cycle dropdown */}
+                      <select
+                        value={item.status}
+                        onChange={(e) => updateItemStatus(item.id, e.target.value)}
+                        className={`rounded-lg border text-[11px] font-bold px-1.5 py-0.5 focus:outline-none cursor-pointer ${ast.bg} ${ast.text} ${ast.border}`}>
+                        <option value="YET_TO_START">Yet to Start</option>
+                        <option value="ONGOING">Ongoing</option>
+                        <option value="COMPLETED">Completed</option>
+                      </select>
+                      <button onClick={() => { setEditItemId(item.id); setEditText(item.description); }}
+                        className="p-1 rounded-lg border border-gray-200 hover:bg-white text-gray-400 hover:text-indigo-600 transition-colors">
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                      <button onClick={() => { if (confirm("Delete this action item?")) deleteItem(item.id); }}
+                        className="p-1 rounded-lg border border-gray-200 hover:bg-red-50 hover:border-red-200 text-gray-400 hover:text-red-500 transition-colors">
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Add new action item */}
+        {canEdit && (
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Add an action item…"
+              value={newItem}
+              onChange={(e) => setNewItem(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") addActionItem(); }}
+              className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm placeholder:text-gray-400 focus:border-indigo-400 focus:outline-none"
+            />
+            <button onClick={addActionItem} disabled={addingItem || !newItem.trim()}
+              className="rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white disabled:opacity-40 transition-colors px-3 py-2">
+              {addingItem ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            </button>
+          </div>
+        )}
+
+        {items.length === 0 && !canEdit && (
+          <p className="text-xs italic text-gray-400">No action items recorded.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PTMTab({ student, canEdit }: { student: any; canEdit: boolean }) {
   const qc = useQueryClient();
-  const [modalOpen, setModalOpen] = useState(false);
+  const [modalOpen, setModalOpen]   = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["student-ptms", student.id],
@@ -1522,43 +1723,55 @@ function PTMTab({ student, canEdit }: { student: any; canEdit: boolean }) {
                 {group.items.map((ptm: any) => {
                   const st = PTM_STATUS[ptm.status] ?? PTM_STATUS.SCHEDULED;
                   const d  = new Date(ptm.date);
-                  const isPast = d < new Date(new Date().toDateString());
+                  const isPast    = d < new Date(new Date().toDateString());
+                  const isExpanded = expandedId === ptm.id;
+                  const actionDone = (ptm.actionItems ?? []).filter((i: any) => i.status === "COMPLETED").length;
+                  const actionTotal = (ptm.actionItems ?? []).length;
                   return (
-                    <div key={ptm.id} className="flex items-start gap-4 px-5 py-4 hover:bg-gray-50 transition-colors">
-                      {/* Date badge */}
-                      <div className="shrink-0 w-12 text-center pt-0.5">
-                        <p className="text-xl font-black text-gray-800 leading-none">{d.getDate()}</p>
-                        <p className="text-[10px] font-bold text-gray-400 uppercase">
-                          {d.toLocaleDateString("en-IN", { month: "short" })}
-                        </p>
-                      </div>
+                    <div key={ptm.id} className="overflow-hidden">
+                      {/* ── PTM Row ─────────────────────────────────────────── */}
+                      <div
+                        className="flex items-start gap-4 px-5 py-4 hover:bg-gray-50/60 transition-colors cursor-pointer select-none"
+                        onClick={() => setExpandedId(isExpanded ? null : ptm.id)}>
 
-                      {/* Body */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-bold text-gray-900">
-                            {ptm.startTime}{ptm.endTime ? ` – ${ptm.endTime}` : ""}
-                          </span>
-                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${st.bg} ${st.text} ${st.border}`}>
-                            {st.label}
-                          </span>
-                          {isPast && ptm.status === "SCHEDULED" && (
-                            <span className="text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">Past</span>
+                        {/* Date badge */}
+                        <div className="shrink-0 w-12 text-center pt-0.5">
+                          <p className="text-xl font-black text-gray-800 leading-none">{d.getDate()}</p>
+                          <p className="text-[10px] font-bold text-gray-400 uppercase">
+                            {d.toLocaleDateString("en-IN", { month: "short" })}
+                          </p>
+                        </div>
+
+                        {/* Body */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-bold text-gray-900">
+                              {ptm.startTime}{ptm.endTime ? ` – ${ptm.endTime}` : ""}
+                            </span>
+                            <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${st.bg} ${st.text} ${st.border}`}>
+                              {st.label}
+                            </span>
+                            {isPast && ptm.status === "SCHEDULED" && (
+                              <span className="text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">Past</span>
+                            )}
+                            {actionTotal > 0 && (
+                              <span className={`text-[10px] font-bold rounded-full border px-2 py-0.5 ${actionDone === actionTotal ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-50 text-gray-500 border-gray-200"}`}>
+                                {actionDone}/{actionTotal} actions
+                              </span>
+                            )}
+                          </div>
+                          {ptm.venue && <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1"><MapPin className="h-3 w-3 shrink-0" />{ptm.venue}</p>}
+                          {ptm.agenda && <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{ptm.agenda}</p>}
+                          {ptm.attendees?.length > 0 && (
+                            <p className="text-xs text-gray-400 mt-1">
+                              👩‍🏫 {ptm.attendees.map((a: any) => `${a.employee.firstName} ${a.employee.lastName}`).join(", ")}
+                            </p>
                           )}
                         </div>
-                        {ptm.venue && <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1"><MapPin className="h-3 w-3 shrink-0" />{ptm.venue}</p>}
-                        {ptm.agenda && <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{ptm.agenda}</p>}
-                        {ptm.attendees?.length > 0 && (
-                          <p className="text-xs text-gray-400 mt-1">
-                            👩‍🏫 {ptm.attendees.map((a: any) => `${a.employee.firstName} ${a.employee.lastName}`).join(", ")}
-                          </p>
-                        )}
-                      </div>
 
-                      {/* Actions */}
-                      {canEdit && (
-                        <div className="flex items-center gap-1 shrink-0">
-                          {ptm.status === "SCHEDULED" && (
+                        {/* Right: Actions + chevron */}
+                        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          {canEdit && ptm.status === "SCHEDULED" && (
                             <button
                               onClick={() => statusMut.mutate({ ptmId: ptm.id, status: "COMPLETED" })}
                               title="Mark Completed"
@@ -1566,21 +1779,38 @@ function PTMTab({ student, canEdit }: { student: any; canEdit: boolean }) {
                               <CheckCircle2 className="h-3.5 w-3.5" />
                             </button>
                           )}
-                          {ptm.status !== "CANCELLED" && (
+                          {canEdit && ptm.status !== "CANCELLED" && (
                             <button
                               onClick={() => statusMut.mutate({ ptmId: ptm.id, status: "CANCELLED" })}
-                              title="Cancel"
+                              title="Cancel PTM"
                               className="p-1.5 rounded-lg border border-gray-200 hover:bg-red-50 hover:border-red-200 hover:text-red-500 text-gray-400 transition-colors">
                               <X className="h-3.5 w-3.5" />
                             </button>
                           )}
-                          <button
-                            onClick={() => { if (confirm("Delete this PTM?")) deleteMut.mutate(ptm.id); }}
-                            title="Delete"
-                            className="p-1.5 rounded-lg border border-gray-200 hover:bg-red-50 hover:border-red-200 hover:text-red-500 text-gray-400 transition-colors">
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                          {canEdit && (
+                            <button
+                              onClick={() => { if (confirm("Delete this PTM?")) deleteMut.mutate(ptm.id); }}
+                              title="Delete"
+                              className="p-1.5 rounded-lg border border-gray-200 hover:bg-red-50 hover:border-red-200 hover:text-red-500 text-gray-400 transition-colors">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                          {/* Expand chevron */}
+                          <div className="ml-1 p-1.5 rounded-lg text-gray-300">
+                            {isExpanded
+                              ? <ChevronUp className="h-4 w-4" />
+                              : <ChevronDown className="h-4 w-4" />}
+                          </div>
                         </div>
+                      </div>
+
+                      {/* ── Expanded Discussion Panel ──────────────────────── */}
+                      {isExpanded && (
+                        <PTMDiscussionPanel
+                          ptm={ptm}
+                          studentId={student.id}
+                          canEdit={canEdit}
+                        />
                       )}
                     </div>
                   );
@@ -1605,11 +1835,22 @@ function PTMTab({ student, canEdit }: { student: any; canEdit: boolean }) {
 // ── AssessmentsTab ─────────────────────────────────────────────────────────────
 
 function AssessmentsTab({ student }: { student: any }) {
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected,    setSelected]    = useState<string | null>(null);
+  const [filterYear,  setFilterYear]  = useState("");
+
+  const { data: yearsData } = useQuery({
+    queryKey: ["academic-years"],
+    queryFn: () => api.get("/api/v1/academics/academic-years").then((r) => r.data.data),
+    staleTime: 10 * 60 * 1000,
+  });
+  const years: any[] = yearsData ?? [];
+
+  const assessParams = new URLSearchParams();
+  if (filterYear) assessParams.set("academicYear", filterYear);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["student-assessments", student.id],
-    queryFn: () => api.get(`/api/v1/academics/students/${student.id}/assessments`).then((r) => r.data.data),
+    queryKey: ["student-assessments", student.id, filterYear],
+    queryFn: () => api.get(`/api/v1/academics/students/${student.id}/assessments?${assessParams}`).then((r) => r.data.data),
     enabled: !!student.id,
     staleTime: 0,
   });
@@ -1639,28 +1880,36 @@ function AssessmentsTab({ student }: { student: any }) {
     return "bg-red-50 border-red-200";
   };
 
-  if (isLoading) {
-    return (
-      <div className="space-y-3 p-1">
-        {[1, 2, 3].map((i) => <div key={i} className="h-16 rounded-xl bg-gray-100 animate-pulse" />)}
-      </div>
-    );
-  }
-
-  if (rows.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-        <BarChart2 className="h-12 w-12 mb-3 text-gray-200" />
-        <p className="text-sm font-semibold">No assessments yet</p>
-        <p className="text-xs mt-1">This student hasn&apos;t appeared in any exams.</p>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-5">
 
-      {/* ── Trend sparkline ───────────────────────────────────────────────── */}
+      {/* ── Filter row ────────────────────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-gray-100 p-3 flex items-center gap-3 flex-wrap">
+        <select
+          value={filterYear}
+          onChange={(e) => { setFilterYear(e.target.value); setSelected(null); }}
+          className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 bg-white focus:outline-none focus:border-indigo-400"
+        >
+          <option value="">All Academic Years</option>
+          {years.map((y: any) => <option key={y.id} value={y.name}>{y.name}</option>)}
+        </select>
+        <span className="text-xs text-gray-400 ml-auto">
+          {isLoading ? "…" : `${rows.length} assessment${rows.length !== 1 ? "s" : ""}`}
+        </span>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-3 p-1">
+          {[1, 2, 3].map((i) => <div key={i} className="h-16 rounded-xl bg-gray-100 animate-pulse" />)}
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+          <BarChart2 className="h-12 w-12 mb-3 text-gray-200" />
+          <p className="text-sm font-semibold">No assessments found</p>
+          <p className="text-xs mt-1">No exams scheduled for this student&apos;s batches yet.</p>
+        </div>
+      ) : (
+      <>{/* ── Trend sparkline ───────────────────────────────────────────────── */}
       {trend.length > 1 && (
         <div className="bg-white rounded-xl border border-gray-100 p-5">
           <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Performance Trend — Percentile</p>
@@ -1707,7 +1956,14 @@ function AssessmentsTab({ student }: { student: any }) {
           </div>
 
           {/* Stats row */}
-          {selectedRow.result ? (
+          {!selectedRow.marksRecorded ? (
+            <div className="px-5 py-8 text-center">
+              <div className="inline-flex items-center gap-2 rounded-full bg-amber-50 border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700">
+                <Clock className="h-4 w-4" /> Marks not entered yet in admin panel
+              </div>
+              <p className="text-xs text-gray-400 mt-3">This exam is scheduled for {student.firstName}&apos;s batch. Once the admin enters marks, scores will appear here.</p>
+            </div>
+          ) : selectedRow.result ? (
             <div className="px-5 py-4 space-y-5">
               {/* 4 KPI cards */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1800,7 +2056,7 @@ function AssessmentsTab({ student }: { student: any }) {
             </div>
           ) : (
             <div className="px-5 py-8 text-center text-sm text-gray-400">
-              {selectedRow.result === null ? "Student did not appear in this exam." : "No marks recorded yet."}
+              Student did not appear in this exam.
             </div>
           )}
         </div>
@@ -1814,7 +2070,8 @@ function AssessmentsTab({ student }: { student: any }) {
         <div className="divide-y divide-gray-50">
           {rows.map((r: any) => {
             const isOpen   = selected === r.exam.id;
-            const attended = r.result?.attended !== false;
+            // attended: true if result exists and attended is not explicitly false
+            const attended = r.result ? r.result.attended !== false : true;
             const pct      = r.stats.percentile;
             const rank     = r.stats.rank;
             const total    = r.result?.total;
@@ -1837,15 +2094,43 @@ function AssessmentsTab({ student }: { student: any }) {
 
                 {/* Name + meta */}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-gray-900 truncate">{r.exam.name}</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-bold text-gray-900 truncate">{r.exam.name}</p>
+                    {r.exam.status && r.exam.status !== "DUE" && (
+                      <span className={`shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold border ${
+                        r.exam.status === "MARKED"    ? "bg-indigo-50 text-indigo-700 border-indigo-200" :
+                        r.exam.status === "COMPLETED" ? "bg-green-50 text-green-700 border-green-200" :
+                        r.exam.status === "CANCELLED" ? "bg-red-50 text-red-700 border-red-200" :
+                        "bg-gray-50 text-gray-500 border-gray-200"
+                      }`}>{r.exam.status.charAt(0) + r.exam.status.slice(1).toLowerCase()}</span>
+                    )}
+                  </div>
                   <p className="text-xs text-gray-400 mt-0.5 truncate">
                     {r.exam.batches.join(", ")} · {r.exam.startTime} – {r.exam.endTime}
                   </p>
+                  {r.exam.subjects && r.exam.subjects.length > 0 && (
+                    <p className="text-xs text-indigo-500 font-medium mt-0.5 truncate">
+                      {[...new Set((r.exam.subjects as any[]).map((es: any) => es.subject?.name).filter(Boolean))].join(", ")}
+                    </p>
+                  )}
+                  {r.exam.subjects && (r.exam.subjects as any[]).some((es: any) => es.topics) && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {(r.exam.subjects as any[]).flatMap((es: any) =>
+                        es.topics ? es.topics.split(",").map((t: string) => t.trim()).filter(Boolean) : []
+                      ).filter((t: string, i: number, arr: string[]) => arr.indexOf(t) === i).slice(0, 4).map((t: string) => (
+                        <span key={t} className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">{t}</span>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Score */}
                 <div className="shrink-0 text-right">
-                  {!attended ? (
+                  {!r.marksRecorded ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2.5 py-1 text-[11px] font-bold text-amber-600">
+                      <Clock className="h-3 w-3" /> Pending
+                    </span>
+                  ) : !attended ? (
                     <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-bold text-gray-500">Absent</span>
                   ) : total != null ? (
                     <>
@@ -1872,6 +2157,7 @@ function AssessmentsTab({ student }: { student: any }) {
           })}
         </div>
       </div>
+      </>)}
     </div>
   );
 }
@@ -2024,43 +2310,83 @@ function AssignmentsTab({ student }: { student: any }) {
           <p className="text-xs text-gray-400 mt-1">Try adjusting the date range or filters.</p>
         </div>
       ) : view === "list" ? (
-        <div className="space-y-2">
-          {items.map((a: any) => {
-            const style   = ASSIGN_STYLE[a.displayStatus] ?? ASSIGN_STYLE.NOT_SUBMITTED;
-            const dueFmt  = new Date(a.submissionDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-            const asnFmt  = new Date(a.assignmentDate).toLocaleDateString("en-IN",  { day: "2-digit", month: "short" });
-            return (
-              <div key={a.id} className={`bg-white rounded-xl border ${style.border} flex overflow-hidden`}>
-                <div className={`w-1.5 shrink-0 ${style.bar}`} />
-                <div className="flex-1 px-4 py-3 flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4 min-w-0">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-gray-800 truncate">{a.name}</p>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
-                      {a.subject && (
-                        <span className="text-xs text-indigo-600 font-medium">{a.subject.name} ({a.subject.code})</span>
-                      )}
-                      {a.faculty && (
-                        <span className="text-xs text-gray-400">{a.faculty.firstName} {a.faculty.lastName}</span>
-                      )}
-                    </div>
-                    {a.topics && <p className="text-xs text-gray-400 truncate mt-0.5">{a.topics}</p>}
-                    {a.submission?.reviewNote && (
-                      <p className="text-xs text-orange-600 mt-0.5 italic">"{a.submission.reviewNote}"</p>
+        <div className="space-y-4">
+          {(() => {
+            const grouped: Record<string, any[]> = {};
+            for (const a of items) {
+              const key = (a.submissionDate as string).split("T")[0];
+              if (!grouped[key]) grouped[key] = [];
+              grouped[key].push(a);
+            }
+            const todayKey = new Date().toISOString().split("T")[0];
+            return Object.keys(grouped).sort().reverse().map((dateKey) => {
+              const dayItems = grouped[dateKey];
+              const d = new Date(dateKey + "T00:00:00");
+              const dayLabel = d.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+              const isPastDue = dateKey < todayKey;
+              const isToday   = dateKey === todayKey;
+              return (
+                <div key={dateKey}>
+                  {/* Date section header */}
+                  <div className="flex items-center gap-2 mb-2 px-1 flex-wrap">
+                    <Calendar className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+                    <span className="text-sm font-semibold text-gray-700">{dayLabel}</span>
+                    <span className="text-gray-300">·</span>
+                    <span className="text-xs text-gray-400">{dayItems.length} assignment{dayItems.length !== 1 ? "s" : ""}</span>
+                    {isToday && (
+                      <span className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-600">Today</span>
+                    )}
+                    {isPastDue && !isToday && (
+                      <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-600 border border-amber-100">Past Due</span>
                     )}
                   </div>
-                  <div className="flex items-center gap-3 sm:flex-col sm:items-end shrink-0">
-                    <div className="text-right">
-                      <p className="text-xs text-gray-400">Assigned {asnFmt}</p>
-                      <p className="text-xs font-medium text-gray-600">Due {dueFmt}</p>
-                    </div>
-                    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${style.bg} ${style.text}`}>
-                      {style.label}
-                    </span>
+                  {/* Assignment cards for this date */}
+                  <div className="space-y-2">
+                    {dayItems.map((a: any) => {
+                      const style  = ASSIGN_STYLE[a.displayStatus] ?? ASSIGN_STYLE.NOT_SUBMITTED;
+                      const asnFmt = new Date(a.assignmentDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+                      return (
+                        <div key={a.id} className={`bg-white rounded-xl border ${style.border} flex overflow-hidden`}>
+                          <div className={`w-1.5 shrink-0 ${style.bar}`} />
+                          <div className="flex-1 px-4 py-3 flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4 min-w-0">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-gray-800 truncate">{a.name}</p>
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
+                                {a.subject && (
+                                  <span className="text-xs text-indigo-600 font-medium">{a.subject.name} ({a.subject.code})</span>
+                                )}
+                                {a.faculty && (
+                                  <span className="text-xs text-gray-400">{a.faculty.firstName} {a.faculty.lastName}</span>
+                                )}
+                                {a.attachmentUrl && (
+                                  <a href={a.attachmentUrl} target="_blank" rel="noreferrer"
+                                    className="flex items-center gap-1 text-xs text-indigo-500 hover:underline"
+                                    onClick={(e) => e.stopPropagation()}>
+                                    <Paperclip className="h-3 w-3 shrink-0" />
+                                    {a.attachmentName ?? "Attachment"}
+                                  </a>
+                                )}
+                              </div>
+                              {a.topics && <p className="text-xs text-gray-400 truncate mt-0.5">{a.topics}</p>}
+                              {a.submission?.reviewNote && (
+                                <p className="text-xs text-orange-600 mt-0.5 italic">"{a.submission.reviewNote}"</p>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3 sm:flex-col sm:items-end shrink-0">
+                              <p className="text-xs text-gray-400 whitespace-nowrap">Assigned {asnFmt}</p>
+                              <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${style.bg} ${style.text}`}>
+                                {style.label}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            });
+          })()}
         </div>
       ) : (
         <div className="space-y-4">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -12,7 +12,7 @@ import {
   Users, Percent, UserCheck, UserX, Check, ExternalLink,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { format, parseISO, startOfWeek, endOfWeek } from "date-fns";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -1513,10 +1513,13 @@ function ScheduleRow({ s, canEdit, onEdit, onDelete, onStatus, onClick }: {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-export default function SchedulePage() {
-  const { user } = useAuthStore();
-  const qc = useQueryClient();
-  const canEdit = user?.role === "SUPER_ADMIN" || user?.role === "HR_ADMIN";
+function SchedulePage() {
+  const { user }     = useAuthStore();
+  const searchParams = useSearchParams();
+  const teacherId    = searchParams.get("teacherId");
+  const qc           = useQueryClient();
+  // Teachers can edit their own schedules (attendance + status); admins can do everything
+  const canEdit = user?.role === "SUPER_ADMIN" || user?.role === "HR_ADMIN" || !!teacherId || user?.role === "EMPLOYEE";
 
   const [view,           setView]           = useState("ALL");
   const [filterStatus,   setFilterStatus]   = useState("ALL");
@@ -1569,7 +1572,9 @@ export default function SchedulePage() {
   if (filterYear)             params.set("academicYear", filterYear);
   if (filterBatch)            params.set("batchId",      filterBatch);
   if (filterGrade)            params.set("gradeId",      filterGrade);
-  if (filterFaculty)          params.set("employeeId",   filterFaculty);
+  // If scoped to a teacher, use their ID as employeeId filter (unless admin overrode it)
+  if (teacherId && !filterFaculty) params.set("employeeId", teacherId);
+  else if (filterFaculty)          params.set("employeeId", filterFaculty);
   if (filterLocation)         params.set("locationId",   filterLocation);
   params.set("limit", "200");
 
@@ -2180,4 +2185,8 @@ export default function SchedulePage() {
       )}
     </div>
   );
+}
+
+export default function SchedulePageWrapped() {
+  return <Suspense fallback={null}><SchedulePage /></Suspense>;
 }

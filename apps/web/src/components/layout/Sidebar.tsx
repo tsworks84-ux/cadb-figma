@@ -1,18 +1,18 @@
 "use client";
 
+import React, { useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn, resolvePhotoUrl } from "@/lib/utils";
 import {
   Users, Home, CalendarOff, Receipt, Shield,
   GraduationCap, Settings, LogOut, BarChart3, Building2, User,
-  CalendarDays, UsersRound, ListTodo, Megaphone, ClipboardList, School,
+  CalendarDays, UsersRound, ListTodo, Megaphone, ClipboardList, School, MessageSquare,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useRouter } from "next/navigation";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { useCallback } from "react";
 import Image from "next/image";
 import { usePermissions } from "@/hooks/usePermissions";
 
@@ -48,10 +48,6 @@ export function Sidebar() {
   const canViewMIS = Object.keys(permissions)
     .filter((k) => k.startsWith("MIS_"))
     .some((k) => permissions[k]?.canView);
-  const canViewAcademics = canViewAdmin
-    || Object.keys(permissions)
-      .filter((k) => k.startsWith("ACA_") || k.startsWith("STU_"))
-      .some((k) => permissions[k]?.canView);
 
   const profileEntry = canViewDirectory
     ? { name: "Employees", href: "/dashboard/employees", icon: Users }
@@ -70,11 +66,26 @@ export function Sidebar() {
     { name: "Settings", href: "/dashboard/settings", icon: Settings },
   ];
 
-  const mgmtNav = [
+  const { data: feedbackSummary } = useQuery({
+    queryKey: ["feedback-summary"],
+    queryFn: () => api.get("/api/v1/feedback/summary").then((r) => r.data.data as Record<string, number>),
+    enabled: canViewAdmin,
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+  });
+  const openFeedbackCount = (feedbackSummary?.OPEN ?? 0) + (feedbackSummary?.RESPONDED ?? 0);
+
+  // For non-admin EMPLOYEE users (teachers), deep-link academics to their own filtered view
+  const academicsHref = (!canViewAdmin && role === "EMPLOYEE" && user)
+    ? `/dashboard/academics?teacherId=${user.id}`
+    : "/dashboard/academics";
+
+  const mgmtNav: { name: string; href: string; icon: React.ElementType; badge?: number }[] = [
     profileEntry,
-    ...(canViewAdmin ? [{ name: "Administration", href: "/dashboard/admin",     icon: Building2 }] : []),
-    { name: "Academics",  href: "/dashboard/academics", icon: School },
-    ...(canViewMIS   ? [{ name: "MIS Reports",    href: "/dashboard/mis",       icon: BarChart3 }] : []),
+    ...(canViewAdmin ? [{ name: "Administration",     href: "/dashboard/admin",     icon: Building2    }] : []),
+    { name: "Academics",        href: academicsHref,           icon: School        },
+    ...(canViewAdmin ? [{ name: "Student Feedback",   href: "/dashboard/feedback",  icon: MessageSquare, badge: openFeedbackCount }] : []),
+    ...(canViewMIS   ? [{ name: "MIS Reports",        href: "/dashboard/mis",       icon: BarChart3    }] : []),
   ];
 
   // Fire API prefetches when the user hovers a link — data is ready by the time they click
@@ -251,7 +262,12 @@ export function Sidebar() {
                   )}
                 >
                   <item.icon className="h-4 w-4 shrink-0" />
-                  {item.name}
+                  <span className="flex-1">{item.name}</span>
+                  {!!item.badge && (
+                    <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-semibold text-white leading-none">
+                      {item.badge > 99 ? "99+" : item.badge}
+                    </span>
+                  )}
                 </Link>
               );
             })}

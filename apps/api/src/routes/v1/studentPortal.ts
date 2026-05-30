@@ -20,6 +20,16 @@ async function authenticateStudent(fastify: FastifyInstance, request: any, reply
 export async function studentPortalRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", (req, rep) => authenticateStudent(fastify, req, rep));
 
+  // ── ACADEMIC YEARS (reference data for filters) ───────────────────────────
+  fastify.get("/academic-years", async (_request, reply) => {
+    const years = await prisma.academicYear.findMany({
+      where: { isArchived: false },
+      orderBy: { name: "desc" },
+      select: { id: true, name: true, isActive: true },
+    });
+    return reply.send({ success: true, data: years });
+  });
+
   // ── PROFILE ────────────────────────────────────────────────────────────────
   fastify.get("/profile", async (request, reply) => {
     const studentId = (request as any).student.sub as string;
@@ -235,6 +245,95 @@ export async function studentPortalRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true, data, stats: { total, present, absent, unrecorded, percentage, bySubject } });
   });
 
+  // ── ASSESSMENTS ───────────────────────────────────────────────────────────
+  fastify.get("/assessments", async (request, reply) => {
+    const studentId = (request as any).student.sub as string;
+    const { academicYear } = request.query as any;
+
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: { id: true, studentBatches: { select: { batchId: true } } },
+    });
+    if (!student) return reply.status(404).send({ success: false, error: "Student not found" });
+
+    const batchIds = student.studentBatches.map((sb) => sb.batchId);
+
+    // Find exams for this student's batches OR where student has a direct result
+    const examWhere: any = {
+      OR: [
+        ...(batchIds.length > 0 ? [{ batches: { some: { batchId: { in: batchIds } } } }] : []),
+        { results: { some: { studentId } } },
+      ],
+      status: { not: "ARCHIVED" },
+    };
+    if (academicYear) examWhere.academicYear = academicYear;
+
+    const exams = await prisma.exam.findMany({
+      where: examWhere,
+      orderBy: { examDate: "desc" },
+      include: {
+        subjects: {
+          include: { subject: { select: { id: true, name: true } } },
+          orderBy: [{ paperNum: "asc" }, { subjectSlot: "asc" }],
+        },
+        batches: { include: { batch: { select: { id: true, name: true } } } },
+        results: { where: { isExcluded: false }, include: { marks: true } },
+      },
+    });
+
+    // Fetch this student's own results separately
+    const myResultsRaw = await prisma.examResult.findMany({
+      where: { examId: { in: exams.map((e) => e.id) }, studentId },
+      include: { marks: true },
+    });
+    const myResultMap = new Map(myResultsRaw.map((r) => [r.examId, r]));
+
+    const rows = exams.map((exam) => {
+      const totalsMap = new Map<string, number>();
+      for (const r of exam.results) {
+        const total = r.marks.reduce((s: number, m: any) => s + (m.marks ?? 0), 0);
+        totalsMap.set(r.studentId, total);
+      }
+      const allTotals = [...totalsMap.values()].filter((t) => t > 0).sort((a, b) => b - a);
+      const myResult  = myResultMap.get(exam.id) ?? null;
+      const myTotal   = myResult ? myResult.marks.reduce((s: number, m: any) => s + (m.marks ?? 0), 0) : null;
+
+      let rank: number | null = null;
+      let percentile: number | null = null;
+      if (myTotal !== null && allTotals.length > 0) {
+        rank = allTotals.findIndex((t) => t <= myTotal) + 1;
+        const atOrBelow = allTotals.filter((t) => t <= myTotal).length;
+        percentile = Math.round((atOrBelow / allTotals.length) * 100 * 100) / 100;
+      }
+
+      const classMax = allTotals[0] ?? null;
+      const classAvg = allTotals.length > 0
+        ? Math.round((allTotals.reduce((s: number, t: number) => s + t, 0) / allTotals.length) * 10) / 10
+        : null;
+
+      const myMarks = myResult?.marks.map((m: any) => {
+        const subjectEntry = exam.subjects.find((es) => es.paperNum === m.paperNum && es.subjectSlot === m.subjectSlot);
+        return { paperNum: m.paperNum, subjectSlot: m.subjectSlot, marks: m.marks, maxMarks: subjectEntry?.maxMarks ?? null, subjectName: subjectEntry?.subject?.name ?? null };
+      }) ?? [];
+
+      return {
+        exam: {
+          id: exam.id, name: exam.name, examDate: exam.examDate,
+          startTime: exam.startTime, endTime: exam.endTime,
+          totalMarks: exam.totalMarks, numPapers: exam.numPapers, numSubjects: exam.numSubjects,
+          status: exam.status, academicYear: exam.academicYear,
+          batches: exam.batches.map((eb) => eb.batch.name),
+          subjects: exam.subjects,
+        },
+        result: myResult ? { id: myResult.id, attended: myResult.attended, isExcluded: myResult.isExcluded, total: myTotal, marks: myMarks } : null,
+        marksRecorded: myResult !== null,
+        stats: { rank, percentile, classMax, classAvg, totalStudents: allTotals.length },
+      };
+    });
+
+    return reply.send({ success: true, data: rows });
+  });
+
   // ── SCHEDULE ───────────────────────────────────────────────────────────────
   fastify.get("/schedule", async (request, reply) => {
     const studentId = (request as any).student.sub as string;
@@ -290,5 +389,122 @@ export async function studentPortalRoutes(fastify: FastifyInstance) {
     });
 
     return reply.send({ success: true, data });
+  });
+
+  // ── FEEDBACK ───────────────────────────────────────────────────────────────
+
+  const MSG_SELECT = {
+    id: true, senderType: true, senderName: true,
+    message: true, attachmentUrl: true, attachmentName: true, createdAt: true,
+  } as const;
+
+  // Count of feedback threads where admin has replied (sidebar badge)
+  fastify.get("/feedback/summary", async (request, reply) => {
+    const studentId = (request as any).student.sub as string;
+    const responded = await prisma.studentFeedback.count({
+      where: { studentId, retractedAt: null, status: "RESPONDED" },
+    });
+    return reply.send({ success: true, data: { responded } });
+  });
+
+  // List own feedback (excluding retracted) — with thread messages
+  fastify.get("/feedback", async (request, reply) => {
+    const studentId = (request as any).student.sub as string;
+    const rows = await prisma.studentFeedback.findMany({
+      where: { studentId, retractedAt: null },
+      orderBy: { updatedAt: "desc" },
+      select: {
+        id: true, type: true, message: true, status: true,
+        createdAt: true, updatedAt: true,
+        messages: { select: MSG_SELECT, orderBy: { createdAt: "asc" } },
+      },
+    });
+    return reply.send({ success: true, data: rows });
+  });
+
+  // Submit new feedback
+  fastify.post("/feedback", async (request, reply) => {
+    const studentId = (request as any).student.sub as string;
+    const { type, message } = request.body as { type: string; message: string };
+    if (!["SUGGESTION", "CONCERN"].includes(type))
+      return reply.status(400).send({ success: false, error: "Invalid feedback type" });
+    if (!message?.trim())
+      return reply.status(400).send({ success: false, error: "Message is required" });
+    if (message.trim().length > 1000)
+      return reply.status(400).send({ success: false, error: "Message must be under 1000 characters" });
+
+    const feedback = await prisma.studentFeedback.create({
+      data: { studentId, type: type as any, message: message.trim() },
+      select: { id: true, type: true, message: true, status: true, createdAt: true },
+    });
+    return reply.status(201).send({ success: true, data: feedback });
+  });
+
+  // Retract (soft-delete) own feedback — only if OPEN or RESPONDED
+  fastify.delete("/feedback/:id", async (request, reply) => {
+    const studentId = (request as any).student.sub as string;
+    const { id } = request.params as { id: string };
+    const existing = await prisma.studentFeedback.findFirst({
+      where: { id, studentId, retractedAt: null },
+    });
+    if (!existing) return reply.status(404).send({ success: false, error: "Feedback not found" });
+    if (existing.status === "CLOSED" || existing.status === "CLOSED_BY_STUDENT")
+      return reply.status(400).send({ success: false, error: "Closed feedback cannot be retracted" });
+    await prisma.studentFeedback.update({
+      where: { id },
+      data: { retractedAt: new Date() },
+    });
+    return reply.send({ success: true });
+  });
+
+  // Student reply — also reopens feedback if it was closed by admin
+  fastify.post("/feedback/:id/reply", async (request, reply) => {
+    const studentId = (request as any).student.sub as string;
+    const { id } = request.params as { id: string };
+    const { message } = request.body as { message: string };
+
+    if (!message?.trim())
+      return reply.status(400).send({ success: false, error: "Message is required" });
+    if (message.trim().length > 1000)
+      return reply.status(400).send({ success: false, error: "Message must be under 1000 characters" });
+
+    const fb = await prisma.studentFeedback.findFirst({ where: { id, studentId, retractedAt: null } });
+    if (!fb) return reply.status(404).send({ success: false, error: "Feedback not found" });
+    if (fb.status === "CLOSED")
+      return reply.status(400).send({ success: false, error: "This thread has been closed by admin" });
+
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: { firstName: true, lastName: true },
+    });
+    const senderName = student ? `${student.firstName} ${student.lastName}` : "Student";
+
+    // Reopen if student-closed; OPEN/RESPONDED stay as OPEN after student reply
+    const newStatus = fb.status === "CLOSED_BY_STUDENT" ? "OPEN" : fb.status;
+
+    const [msg] = await prisma.$transaction([
+      prisma.feedbackMessage.create({
+        data: { feedbackId: id, senderType: "STUDENT", senderId: studentId, senderName, message: message.trim() },
+        select: { id: true, senderType: true, senderName: true, message: true, createdAt: true },
+      }),
+      prisma.studentFeedback.update({
+        where: { id },
+        data: { status: newStatus as any, updatedAt: new Date() },
+      }),
+    ]);
+
+    return reply.status(201).send({ success: true, data: msg });
+  });
+
+  // Student closes feedback
+  fastify.patch("/feedback/:id/close", async (request, reply) => {
+    const studentId = (request as any).student.sub as string;
+    const { id } = request.params as { id: string };
+    const fb = await prisma.studentFeedback.findFirst({ where: { id, studentId, retractedAt: null } });
+    if (!fb) return reply.status(404).send({ success: false, error: "Feedback not found" });
+    if (fb.status === "CLOSED" || fb.status === "CLOSED_BY_STUDENT")
+      return reply.status(400).send({ success: false, error: "Already closed" });
+    await prisma.studentFeedback.update({ where: { id }, data: { status: "CLOSED_BY_STUDENT" } });
+    return reply.send({ success: true });
   });
 }

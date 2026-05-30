@@ -3629,8 +3629,10 @@ export default function EmployeeDetailPage() {
   const permissions = usePermissions();
 
   // Employee self-view: only Personal, Documents, Position, Salary
-  const SELF_VIEW_TABS = new Set(["personal", "documents", "position", "salary", "academics"]);
+  const SELF_VIEW_TABS = new Set(["personal", "documents", "position", "salary"]);
   const visibleTabs = PROFILE_TABS.filter((tab) => {
+    // Academics tab: only admins viewing another person's profile (self-view teachers use sidebar link)
+    if (tab.id === "academics") return isAdmin && !isSelfView;
     if (isSelfView && !isAdmin) return SELF_VIEW_TABS.has(tab.id);
     if (!(tab as any).module) return true;
     return permissions[(tab as any).module]?.canView ?? false;
@@ -5328,12 +5330,33 @@ export default function EmployeeDetailPage() {
         {/* ── Academics tab ── */}
         {activeTab === "academics" && (
           <div className="space-y-4">
+            {/* Deep-link to filtered academics view */}
+            <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-6 flex flex-col sm:flex-row items-center gap-5">
+              <div className="h-14 w-14 rounded-2xl bg-indigo-100 flex items-center justify-center shrink-0">
+                <GraduationCap className="h-7 w-7 text-indigo-600" />
+              </div>
+              <div className="flex-1 text-center sm:text-left">
+                <p className="font-bold text-gray-900 text-base">Academics — Filtered View</p>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  Opens the full academics dashboard filtered to only the batches where this teacher is associated
+                  (as Faculty Mentor, Subject Teacher, or scheduled instructor).
+                </p>
+              </div>
+              <a
+                href={`/dashboard/academics?teacherId=${id}`}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition-colors shrink-0 shadow-sm"
+              >
+                Open View <ChevronRight className="h-4 w-4" />
+              </a>
+            </div>
+
+            {/* Quick batch summary list */}
             <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
               <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
                 <GraduationCap className="h-4 w-4 text-indigo-600" />
                 <div>
-                  <p className="font-semibold text-gray-900 text-sm">My Batches</p>
-                  <p className="text-xs text-gray-400 mt-0.5">Batches where you are assigned as Faculty Mentor or Subject Teacher</p>
+                  <p className="font-semibold text-gray-900 text-sm">Associated Batches</p>
+                  <p className="text-xs text-gray-400 mt-0.5">All batches this teacher is linked to as Faculty Mentor, Subject Teacher, or Instructor</p>
                 </div>
               </div>
 
@@ -5355,15 +5378,12 @@ export default function EmployeeDetailPage() {
                     return (
                       <div
                         key={b.id}
-                        onClick={() => router.push(`/dashboard/academics/batches/${b.id}`)}
+                        onClick={() => router.push(`/dashboard/academics/batches/${b.id}?teacherId=${id}`)}
                         className="flex items-start gap-4 px-5 py-4 hover:bg-indigo-50/40 cursor-pointer transition-colors group"
                       >
-                        {/* Batch icon */}
                         <div className="h-10 w-10 rounded-xl bg-indigo-100 flex items-center justify-center shrink-0 mt-0.5">
                           <GraduationCap className="h-5 w-5 text-indigo-600" />
                         </div>
-
-                        {/* Info */}
                         <div className="flex-1 min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="font-semibold text-gray-900 text-sm">{b.name}</p>
@@ -5375,9 +5395,8 @@ export default function EmployeeDetailPage() {
                             <span className="text-xs text-gray-400">AY: <span className="text-gray-600">{b.academicYear}</span></span>
                             {b.grade    && <span className="text-xs text-gray-400">Grade: <span className="text-gray-600">{b.grade.name}</span></span>}
                             {b.location && <span className="text-xs text-gray-400">Location: <span className="text-gray-600">{b.location.name}</span></span>}
-                            <span className="text-xs text-gray-400">Students: <span className="text-gray-600">{b._count?.students ?? 0}</span></span>
+                            <span className="text-xs text-gray-400">Students: <span className="text-gray-600">{b._count?.studentBatches ?? 0}</span></span>
                           </div>
-                          {/* Role badges */}
                           <div className="flex flex-wrap gap-2 mt-2">
                             {isMentor && (
                               <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 text-rose-600 border border-rose-100 px-2.5 py-0.5 text-xs font-medium">
@@ -5391,8 +5410,6 @@ export default function EmployeeDetailPage() {
                             ))}
                           </div>
                         </div>
-
-                        {/* Arrow */}
                         <ChevronRight className="h-4 w-4 text-gray-300 group-hover:text-indigo-400 transition-colors shrink-0 mt-3" />
                       </div>
                     );

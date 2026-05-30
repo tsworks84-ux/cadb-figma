@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -9,7 +9,7 @@ import {
   Trash2, Clock, BookOpen, FileCheck2, Pencil, Archive, ArchiveRestore,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { format, parseISO } from "date-fns";
 import { AssessmentStatsPanel } from "./StatsPanel";
 
@@ -582,10 +582,13 @@ function ExamCard({ exam, canEdit, onEdit, onDelete, onStatus }: {
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
-export default function AssessmentsPage() {
-  const { user } = useAuthStore();
-  const qc = useQueryClient();
-  const canEdit = user?.role === "SUPER_ADMIN" || user?.role === "HR_ADMIN";
+function AssessmentsPage() {
+  const { user }     = useAuthStore();
+  const searchParams = useSearchParams();
+  const teacherId    = searchParams.get("teacherId");
+  const qc           = useQueryClient();
+  // Assessment write endpoints already allow any authenticated user, but mark canEdit for teachers too
+  const canEdit = user?.role === "SUPER_ADMIN" || user?.role === "HR_ADMIN" || !!teacherId || user?.role === "EMPLOYEE";
 
   const [search,           setSearch]           = useState("");
   const [filterStatus,     setFilterStatus]     = useState("ALL");
@@ -601,10 +604,13 @@ export default function AssessmentsPage() {
   const [editTarget,       setEditTarget]       = useState<any | null>(null);
   const [toolbarSearch,    setToolbarSearch]    = useState("");
 
+  const batchesUrl = teacherId
+    ? `/api/v1/academics/batches?teacherId=${teacherId}`
+    : "/api/v1/academics/batches";
   const { data: yearsData }    = useQuery({ queryKey: ["academic-years"], queryFn: () => api.get("/api/v1/academics/academic-years").then((r) => r.data.data) });
   const { data: gradesData }   = useQuery({ queryKey: ["grades"],         queryFn: () => api.get("/api/v1/academics/grades").then((r) => r.data) });
   const { data: subjectsData } = useQuery({ queryKey: ["subjects"],       queryFn: () => api.get("/api/v1/academics/subjects").then((r) => r.data.data) });
-  const { data: batchesData }  = useQuery({ queryKey: ["batches-all"],    queryFn: () => api.get("/api/v1/academics/batches").then((r) => r.data) });
+  const { data: batchesData }  = useQuery({ queryKey: ["batches-all", teacherId ?? "all"], queryFn: () => api.get(batchesUrl).then((r) => r.data) });
 
   const years    = (yearsData          ?? []) as any[];
   const grades   = (gradesData?.data   ?? []) as any[];
@@ -626,6 +632,7 @@ export default function AssessmentsPage() {
   if (filterDateTo)           params.set("dateTo",       filterDateTo);
   if (filterYear)             params.set("academicYear", filterYear);
   if (filterBatch)            params.set("batchId",      filterBatch);
+  else if (teacherId)         params.set("teacherId",    teacherId);
   if (filterGrade)            params.set("gradeId",      filterGrade);
   if (filterSubject)          params.set("subjectId",    filterSubject);
   params.set("limit", "200");
@@ -893,4 +900,8 @@ export default function AssessmentsPage() {
         batches={batches} subjects={subjects} academicYears={years} defaultYear={defaultYear} />
     </div>
   );
+}
+
+export default function AssessmentsPageWrapped() {
+  return <Suspense fallback={null}><AssessmentsPage /></Suspense>;
 }

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@cadb/db";
 import { authenticate } from "../../middleware/authenticate.js";
 import { maybeAutoConcludes } from "./scheduleHelpers.js";
+import { getTeacherBatchIds } from "./teacherUtils.js";
 import { createWriteStream, unlinkSync } from "fs";
 import { pipeline } from "stream/promises";
 import { join, dirname } from "path";
@@ -47,6 +48,27 @@ function requireAdmin(request: any, reply: any) {
   if (!["SUPER_ADMIN", "HR_ADMIN"].includes(role)) {
     return reply.status(403).send({ success: false, error: "Insufficient permissions" });
   }
+}
+
+/** Returns true if the caller is admin, false if EMPLOYEE (caller should do scope check), or sends 403. */
+function isAdminOrEmployee(request: any, reply: any): boolean | null {
+  const role = request.user?.role;
+  if (["SUPER_ADMIN", "HR_ADMIN"].includes(role)) return true;
+  if (role === "EMPLOYEE") return false;
+  reply.status(403).send({ success: false, error: "Insufficient permissions" });
+  return null;
+}
+
+async function checkTeacherOwnsBatchIds(teacherId: string, batchIds: string[]): Promise<boolean> {
+  const tBatchIds = await getTeacherBatchIds(teacherId);
+  return batchIds.every((b) => tBatchIds.includes(b));
+}
+
+async function checkTeacherOwnsAssignment(teacherId: string, assignmentId: string): Promise<boolean> {
+  const a = await prisma.assignment.findUnique({ where: { id: assignmentId }, select: { batches: { select: { batchId: true } } } });
+  if (!a) return false;
+  const tBatchIds = await getTeacherBatchIds(teacherId);
+  return a.batches.every((b) => tBatchIds.includes(b.batchId));
 }
 
 export async function assignmentRoutes(fastify: FastifyInstance) {
@@ -240,11 +262,19 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
   // ── CREATE ─────────────────────────────────────────────────────────────────
 
   fastify.post("/", async (request, reply) => {
-    requireAdmin(request, reply);
+    const isAdmin = isAdminOrEmployee(request, reply);
+    if (isAdmin === null) return;
+
     const parsed = assignmentSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
     const { batchIds, assignmentDate, submissionDate, subjectId, employeeId, scheduleId, note, topics, ...rest } = parsed.data;
+
+    if (!isAdmin) {
+      const userId = (request.user as any)?.sub;
+      const allowed = await checkTeacherOwnsBatchIds(userId, batchIds);
+      if (!allowed) return reply.status(403).send({ success: false, error: "You can only create assignments for your assigned batches" });
+    }
 
     const assignment = await prisma.assignment.create({
       data: {
@@ -269,8 +299,14 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
   // ── UPDATE ─────────────────────────────────────────────────────────────────
 
   fastify.patch("/:id", async (request, reply) => {
-    requireAdmin(request, reply);
+    const isAdmin = isAdminOrEmployee(request, reply);
+    if (isAdmin === null) return;
     const { id } = request.params as any;
+    if (!isAdmin) {
+      const userId = (request.user as any)?.sub;
+      const ok = await checkTeacherOwnsAssignment(userId, id);
+      if (!ok) return reply.status(403).send({ success: false, error: "Insufficient permissions" });
+    }
     const parsed = assignmentSchema.partial().safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
@@ -303,8 +339,14 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
   // ── STATUS ─────────────────────────────────────────────────────────────────
 
   fastify.patch("/:id/status", async (request, reply) => {
-    requireAdmin(request, reply);
+    const isAdmin = isAdminOrEmployee(request, reply);
+    if (isAdmin === null) return;
     const { id } = request.params as any;
+    if (!isAdmin) {
+      const userId = (request.user as any)?.sub;
+      const ok = await checkTeacherOwnsAssignment(userId, id);
+      if (!ok) return reply.status(403).send({ success: false, error: "Insufficient permissions" });
+    }
     const { status } = request.body as any;
 
     const valid = ["DUE", "COMPLETED", "ARCHIVED"];
@@ -317,8 +359,14 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
   // ── ATTACHMENT UPLOAD ──────────────────────────────────────────────────────
 
   fastify.post("/:id/attachment", async (request, reply) => {
-    requireAdmin(request, reply);
+    const isAdmin = isAdminOrEmployee(request, reply);
+    if (isAdmin === null) return;
     const { id } = request.params as any;
+    if (!isAdmin) {
+      const userId = (request.user as any)?.sub;
+      const ok = await checkTeacherOwnsAssignment(userId, id);
+      if (!ok) return reply.status(403).send({ success: false, error: "Insufficient permissions" });
+    }
 
     const existing = await prisma.assignment.findUnique({ where: { id }, select: { attachmentUrl: true } });
     if (!existing) return reply.status(404).send({ success: false, error: "Assignment not found" });
@@ -411,8 +459,14 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
   // ── UPDATE SUBMISSION ──────────────────────────────────────────────────────
 
   fastify.patch("/:id/submissions/:studentId", async (request, reply) => {
-    requireAdmin(request, reply);
+    const isAdmin = isAdminOrEmployee(request, reply);
+    if (isAdmin === null) return;
     const { id: assignmentId, studentId } = request.params as any;
+    if (!isAdmin) {
+      const userId = (request.user as any)?.sub;
+      const ok = await checkTeacherOwnsAssignment(userId, assignmentId);
+      if (!ok) return reply.status(403).send({ success: false, error: "Insufficient permissions" });
+    }
     const { status, reviewNote } = request.body as any;
 
     const VALID = ["NOT_SUBMITTED", "SUBMITTED", "IN_PROCESS", "APPROVED", "REJECTED"];
@@ -439,8 +493,14 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
   // ── SUBMISSION ATTACHMENT ──────────────────────────────────────────────────
 
   fastify.post("/:id/submissions/:studentId/attachment", async (request, reply) => {
-    requireAdmin(request, reply);
+    const isAdmin = isAdminOrEmployee(request, reply);
+    if (isAdmin === null) return;
     const { id: assignmentId, studentId } = request.params as any;
+    if (!isAdmin) {
+      const userId = (request.user as any)?.sub;
+      const ok = await checkTeacherOwnsAssignment(userId, assignmentId);
+      if (!ok) return reply.status(403).send({ success: false, error: "Insufficient permissions" });
+    }
 
     const existing = await prisma.assignmentSubmission.findUnique({
       where: { assignmentId_studentId: { assignmentId, studentId } },

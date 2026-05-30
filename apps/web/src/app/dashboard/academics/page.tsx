@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import Link from "next/link";
 import {
@@ -299,23 +299,30 @@ function ScheduleModal({ schedules, onClose }: { schedules: any[]; onClose: () =
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-export default function AcademicsOverviewPage() {
-  const router = useRouter();
-  const { user } = useAuthStore();
+function AcademicsOverviewPage() {
+  const router       = useRouter();
+  const searchParams = useSearchParams();
+  const teacherId    = searchParams.get("teacherId");
+  const { user }     = useAuthStore();
 
   useEffect(() => {
-    if (user?.role === "EMPLOYEE") {
+    // EMPLOYEE without a teacherId scope → redirect to batches
+    if (user?.role === "EMPLOYEE" && !teacherId) {
       router.replace("/dashboard/academics/batches");
     }
-  }, [user?.role, router]);
+  }, [user?.role, router, teacherId]);
 
   const [revenueOpen,      setRevenueOpen]      = useState(false);
   const [scheduleOpen,     setScheduleOpen]     = useState(false);
   const [studentStatsOpen, setStudentStatsOpen] = useState(false);
 
+  const overviewUrl = teacherId
+    ? `/api/v1/academics/overview?teacherId=${teacherId}`
+    : "/api/v1/academics/overview";
+
   const { data: overview, isLoading } = useQuery({
-    queryKey: ["academics-overview"],
-    queryFn: () => api.get("/api/v1/academics/overview").then((r) => r.data.data),
+    queryKey: ["academics-overview", teacherId ?? "all"],
+    queryFn: () => api.get(overviewUrl).then((r) => r.data.data),
     staleTime: 2 * 60 * 1000,
   });
 
@@ -570,4 +577,8 @@ export default function AcademicsOverviewPage() {
       )}
     </div>
   );
+}
+
+export default function AcademicsOverviewPageWrapped() {
+  return <Suspense fallback={null}><AcademicsOverviewPage /></Suspense>;
 }

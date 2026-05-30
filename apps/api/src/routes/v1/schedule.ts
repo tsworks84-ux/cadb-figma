@@ -171,7 +171,14 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
   // ── SAVE ATTENDANCE ────────────────────────────────────────────────────────
 
   fastify.post("/:id/attendance", async (request, reply) => {
-    requireAdmin(request, reply);
+    const role   = (request.user as any)?.role;
+    const userId = (request.user as any)?.sub;
+    if (!["SUPER_ADMIN", "HR_ADMIN"].includes(role)) {
+      const sched = await prisma.schedule.findUnique({ where: { id: (request.params as any).id }, select: { employeeId: true } });
+      if (!sched || sched.employeeId !== userId) {
+        return reply.status(403).send({ success: false, error: "Insufficient permissions" });
+      }
+    }
     const { id } = request.params as any;
     const { records } = request.body as {
       records: { studentId: string; isPresent: boolean; note?: string }[];
@@ -261,7 +268,14 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
   // ── STATUS ─────────────────────────────────────────────────────────────────
 
   fastify.patch("/:id/status", async (request, reply) => {
-    requireAdmin(request, reply);
+    const role   = (request.user as any)?.role;
+    const userId = (request.user as any)?.sub;
+    if (!["SUPER_ADMIN", "HR_ADMIN"].includes(role)) {
+      const sched = await prisma.schedule.findUnique({ where: { id: (request.params as any).id }, select: { employeeId: true } });
+      if (!sched || sched.employeeId !== userId) {
+        return reply.status(403).send({ success: false, error: "Insufficient permissions" });
+      }
+    }
     const { id } = request.params as any;
     const { status } = request.body as any;
 
