@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -2844,11 +2844,15 @@ function LoginTab({ student, canEdit, onRefetch }: { student: any; canEdit: bool
 export default function StudentDetailPage() {
   const { id } = useParams() as { id: string };
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuthStore();
   const permissions = usePermissions();
   const qc = useQueryClient();
 
-  const [tab, setTab] = useState("profile");
+  const [tab, setTab] = useState(() => {
+    const t = searchParams.get("tab");
+    return TABS.some((tb) => tb.id === t) ? t! : "profile";
+  });
   const tabsRef = useRef<HTMLDivElement>(null);
 
   const canEdit =

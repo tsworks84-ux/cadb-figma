@@ -805,10 +805,100 @@ export default function BatchDetailPage() {
 
       {/* ── PTM tab ──────────────────────────────────────────────────────────── */}
       {activeTab === "ptm" && (
-        <div className="flex flex-col items-center justify-center py-24 text-center">
-          <MessageSquare className="h-12 w-12 text-gray-200 mb-3" />
-          <p className="font-semibold text-gray-600 text-base">PTM Reports</p>
-          <p className="text-sm text-gray-400 mt-1 max-w-xs">Parent-Teacher Meeting reports are coming soon. You'll be able to log and review student-wise PTM notes here.</p>
+        <div>
+          {studentsLoading ? (
+            <div className="space-y-2">
+              {[1, 2, 3, 4, 5].map((i) => <div key={i} className="h-14 rounded-xl bg-white animate-pulse" />)}
+            </div>
+          ) : students.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-gray-200 py-16 text-center bg-white">
+              <Users className="h-10 w-10 text-gray-200 mx-auto mb-2" />
+              <p className="text-sm text-gray-400">No students in this batch yet.</p>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-gray-100 overflow-hidden bg-white shadow-sm">
+              <table className="w-full text-sm hidden sm:table">
+                <thead className="bg-gray-50 border-b border-gray-100">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-10">#</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Student</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell">Phone</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+                    <th className="px-4 py-3 w-10" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {students.map((s: any, idx: number) => (
+                    <tr key={s.id}
+                      onClick={() => router.push(`/dashboard/academics/students/${s.id}?tab=ptms`)}
+                      className="hover:bg-indigo-50/40 transition-colors cursor-pointer"
+                    >
+                      <td className="px-4 py-3 text-xs text-gray-400 tabular-nums">{(page - 1) * LIMIT + idx + 1}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-semibold text-xs shrink-0">
+                            {s.firstName[0]}{s.lastName[0]}
+                          </div>
+                          <div>
+                            <p className="font-medium text-gray-900">{s.firstName} {s.lastName}</p>
+                            <p className="text-xs text-gray-400">{s.studentCode} · {s.admissionNumber ?? "—"}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 hidden md:table-cell">{s.phone ?? "—"}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[s.status] ?? "bg-gray-100 text-gray-600"}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[s.status] ?? "bg-gray-400"}`} />
+                          {STATUS_LABEL[s.status] ?? s.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <MessageSquare className="h-4 w-4 text-indigo-400" />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {/* Mobile list */}
+              <div className="sm:hidden divide-y divide-gray-50">
+                {students.map((s: any, idx: number) => (
+                  <div key={s.id}
+                    onClick={() => router.push(`/dashboard/academics/students/${s.id}?tab=ptms`)}
+                    className="px-4 py-3 flex items-center gap-3 hover:bg-indigo-50/40 transition-colors cursor-pointer"
+                  >
+                    <div className="h-9 w-9 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-semibold text-xs shrink-0">
+                      {s.firstName[0]}{s.lastName[0]}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900 text-sm">{s.firstName} {s.lastName}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{s.studentCode} · {s.phone ?? "—"}</p>
+                    </div>
+                    <MessageSquare className="h-4 w-4 text-indigo-400 shrink-0" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-4 px-1">
+              <p className="text-xs text-gray-400">
+                Showing {(page - 1) * LIMIT + 1}–{Math.min(page * LIMIT, meta.total)} of {meta.total} students
+              </p>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}
+                  className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <span className="text-xs text-gray-600 px-2">Page {page} of {totalPages}</span>
+                <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+                  className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
