@@ -507,33 +507,52 @@ export function BatchPTMTab({ students, studentsLoading, canEdit }: {
   }
 
   return (
-    <div className="space-y-5">
-      {/* Student picker */}
-      <div className="bg-white rounded-xl border border-gray-100 p-4">
-        <label className="block text-xs font-semibold text-gray-500 mb-2">Select Student</label>
-        <select
-          value={selectedId ?? ""}
-          onChange={(e) => setSelectedId(e.target.value || null)}
-          className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-indigo-400 focus:outline-none bg-white text-gray-800"
-        >
-          <option value="">— Choose a student —</option>
-          {students.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.firstName} {s.lastName} ({s.studentCode})
-            </option>
-          ))}
-        </select>
+    <div className="flex flex-col lg:flex-row gap-4 items-start">
+      {/* ── Student list ── */}
+      <div className="w-full lg:w-64 shrink-0 bg-white rounded-xl border border-gray-100 overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-50">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Students</p>
+        </div>
+        <div className="divide-y divide-gray-50 max-h-[70vh] overflow-y-auto">
+          {students.map((s) => {
+            const isActive = s.id === selectedId;
+            return (
+              <button
+                key={s.id}
+                onClick={() => setSelectedId(isActive ? null : s.id)}
+                className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+                  isActive ? "bg-indigo-50 border-l-2 border-indigo-500" : "hover:bg-gray-50 border-l-2 border-transparent"
+                }`}
+              >
+                <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                  isActive ? "bg-indigo-500 text-white" : "bg-indigo-100 text-indigo-600"
+                }`}>
+                  {s.firstName[0]}{s.lastName[0]}
+                </div>
+                <div className="min-w-0">
+                  <p className={`text-sm font-medium truncate ${isActive ? "text-indigo-700" : "text-gray-800"}`}>
+                    {s.firstName} {s.lastName}
+                  </p>
+                  <p className="text-xs text-gray-400 truncate">{s.studentCode}</p>
+                </div>
+                <MessageSquare className={`h-3.5 w-3.5 shrink-0 ml-auto ${isActive ? "text-indigo-400" : "text-gray-300"}`} />
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {/* PTM panel */}
-      {selected ? (
-        <StudentPTMPanel student={selected} canEdit={canEdit} />
-      ) : (
-        <div className="flex flex-col items-center justify-center py-16 text-gray-400 bg-white rounded-xl border border-gray-100">
-          <MessageSquare className="h-10 w-10 mb-3 text-gray-200" />
-          <p className="text-sm font-semibold">Select a student to view their PTMs</p>
-        </div>
-      )}
+      {/* ── PTM panel ── */}
+      <div className="flex-1 min-w-0">
+        {selected ? (
+          <StudentPTMPanel student={selected} canEdit={canEdit} />
+        ) : (
+          <div className="flex flex-col items-center justify-center py-20 text-gray-400 bg-white rounded-xl border border-gray-100">
+            <MessageSquare className="h-10 w-10 mb-3 text-gray-200" />
+            <p className="text-sm font-semibold">Select a student to view their PTMs</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
