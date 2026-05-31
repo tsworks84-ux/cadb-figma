@@ -8,7 +8,7 @@ import { useAuthStore } from "@/store/auth";
 import Link from "next/link";
 import {
   IndianRupee, TrendingUp, TrendingDown, Tag, Users,
-  ChevronRight, Search, X, Loader2,
+  ChevronRight, Search, X, Loader2, Wallet,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -417,12 +417,20 @@ export default function RevenuePage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <SummaryCard
+          icon={Wallet}
+          label="Gross Fee"
+          value={formatCurrency(summary?.totalFee ?? 0)}
+          sub={`Before discounts · ${summary?.studentCount ?? 0} students`}
+          accent="#6366f1"
+          iconBg="bg-indigo-50"
+        />
         <SummaryCard
           icon={IndianRupee}
           label="Fee Receivable"
           value={formatCurrency(summary?.netReceivable ?? 0)}
-          sub={`${summary?.studentCount ?? 0} students · Gross ${formatCurrency(summary?.totalFee ?? 0)}`}
+          sub={`Net after discounts · ${summary?.studentCount ?? 0} students`}
           accent="#2563eb"
           iconBg="bg-blue-50"
         />
