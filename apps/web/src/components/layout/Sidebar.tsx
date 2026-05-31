@@ -7,7 +7,7 @@ import { cn, resolvePhotoUrl } from "@/lib/utils";
 import {
   Users, Home, CalendarOff, Receipt, Shield,
   GraduationCap, Settings, LogOut, BarChart3, Building2, User,
-  CalendarDays, UsersRound, ListTodo, Megaphone, ClipboardList, School, MessageSquare,
+  CalendarDays, UsersRound, ListTodo, Megaphone, ClipboardList, School, MessageSquare, IndianRupee,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useRouter } from "next/navigation";
@@ -85,6 +85,7 @@ export function Sidebar() {
     ...(canViewAdmin ? [{ name: "Administration",     href: "/dashboard/admin",     icon: Building2    }] : []),
     { name: "Academics",        href: academicsHref,           icon: School        },
     ...(canViewAdmin ? [{ name: "Student Feedback",   href: "/dashboard/feedback",  icon: MessageSquare, badge: openFeedbackCount }] : []),
+    ...(canViewAdmin ? [{ name: "Revenue",            href: "/dashboard/revenue",   icon: IndianRupee  }] : []),
     ...(canViewMIS   ? [{ name: "MIS Reports",        href: "/dashboard/mis",       icon: BarChart3    }] : []),
   ];
 

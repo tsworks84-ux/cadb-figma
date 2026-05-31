@@ -42,6 +42,7 @@ import { assignmentRoutes } from "./routes/v1/assignments.js";
 import { assessmentRoutes } from "./routes/v1/assessments.js";
 import { academicReportsRoutes } from "./routes/v1/academicReports.js";
 import { adminFeedbackRoutes } from "./routes/v1/adminFeedback.js";
+import { revenueRoutes } from "./routes/v1/revenue.js";
 import { createReadStream, existsSync } from "fs";
 import { join, dirname, extname } from "path";
 import { fileURLToPath } from "url";
@@ -135,6 +136,7 @@ await server.register(assignmentRoutes,         { prefix: "/api/v1/academics/ass
 await server.register(assessmentRoutes,         { prefix: "/api/v1/academics/assessments" });
 await server.register(academicReportsRoutes,    { prefix: "/api/v1/academics/reports" });
 await server.register(adminFeedbackRoutes,      { prefix: "/api/v1/feedback" });
+await server.register(revenueRoutes,            { prefix: "/api/v1/revenue" });
 const MIME: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
