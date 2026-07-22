@@ -63,7 +63,7 @@ export function Sidebar() {
     { name: "Claims", href: "/dashboard/claims", icon: Receipt },
     { name: "Policies", href: "/dashboard/policies", icon: Shield },
     { name: "Training", href: "/dashboard/training", icon: GraduationCap },
-    { name: "Settings", href: "/dashboard/settings", icon: Settings },
+    ...(role !== "EMPLOYEE" ? [{ name: "Settings", href: "/dashboard/settings", icon: Settings }] : []),
   ];
 
   const { data: feedbackSummary } = useQuery({

@@ -37,6 +37,16 @@ function requireAdmin(request: any, reply: any) {
   }
 }
 
+async function requireTeacherBatchAccess(request: any, reply: any, batchId: string): Promise<boolean> {
+  if (request.user?.role !== "EMPLOYEE") return true;
+  const allowed = await getTeacherBatchIds(request.user.id);
+  if (!allowed.includes(batchId)) {
+    reply.status(403).send({ success: false, error: "Access denied" });
+    return false;
+  }
+  return true;
+}
+
 export async function academicsRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", authenticate);
 
@@ -247,6 +257,7 @@ export async function academicsRoutes(fastify: FastifyInstance) {
 
   fastify.get("/batches/:id", async (request, reply) => {
     const { id } = request.params as any;
+    if (!(await requireTeacherBatchAccess(request, reply, id))) return;
     const batch = await prisma.batch.findUnique({
       where: { id },
       include: {
@@ -417,6 +428,7 @@ export async function academicsRoutes(fastify: FastifyInstance) {
 
   fastify.get("/batches/:id/subjects", async (request, reply) => {
     const { id } = request.params as any;
+    if (!(await requireTeacherBatchAccess(request, reply, id))) return;
     const assignments = await prisma.batchSubject.findMany({
       where:   { batchId: id },
       include: {
@@ -524,6 +536,7 @@ export async function academicsRoutes(fastify: FastifyInstance) {
 
   fastify.get("/batches/:id/attendance-summary", async (request, reply) => {
     const { id } = request.params as any;
+    if (!(await requireTeacherBatchAccess(request, reply, id))) return;
 
     const [schedules, totalStudents] = await Promise.all([
       prisma.schedule.findMany({
@@ -571,6 +584,7 @@ export async function academicsRoutes(fastify: FastifyInstance) {
 
   fastify.get("/batches/:id/assignment-summary", async (request, reply) => {
     const { id } = request.params as any;
+    if (!(await requireTeacherBatchAccess(request, reply, id))) return;
 
     const totalStudents = await prisma.studentBatch.count({
       where: { batchId: id, student: { isArchived: false, status: "ACTIVE" } },
@@ -617,6 +631,7 @@ export async function academicsRoutes(fastify: FastifyInstance) {
 
   fastify.get("/batches/:id/exam-summary", async (request, reply) => {
     const { id } = request.params as any;
+    if (!(await requireTeacherBatchAccess(request, reply, id))) return;
 
     const exams = await prisma.exam.findMany({
       where: { batches: { some: { batchId: id } } },
@@ -666,6 +681,7 @@ export async function academicsRoutes(fastify: FastifyInstance) {
 
   fastify.get("/batches/:id/stats", async (request, reply) => {
     const { id } = request.params as any;
+    if (!(await requireTeacherBatchAccess(request, reply, id))) return;
     const { dateFrom, dateTo } = request.query as any;
 
     const dateFilter: any = {};

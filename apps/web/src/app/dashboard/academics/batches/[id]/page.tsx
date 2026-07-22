@@ -135,10 +135,18 @@ export default function BatchDetailPage() {
   useEffect(() => { setPage(1); }, [debouncedSearch, statusFilter]);
 
   // ── Batch details ────────────────────────────────────────────────────────────
-  const { data: batch, isLoading: batchLoading } = useQuery({
+  const { data: batch, isLoading: batchLoading, isError: batchError, error: batchFetchError } = useQuery({
     queryKey: ["batch", id],
     queryFn: () => api.get(`/api/v1/academics/batches/${id}`).then((r) => r.data.data),
+    retry: false,
   });
+
+  // Redirect EMPLOYEE users who try to access a batch they are not associated with
+  useEffect(() => {
+    if (batchError && (batchFetchError as any)?.response?.status === 403) {
+      router.replace("/dashboard/academics/batches");
+    }
+  }, [batchError, batchFetchError, router]);
 
   // ── Tab data queries ─────────────────────────────────────────────────────────
   const { data: attendanceSummary, isLoading: attendanceLoading } = useQuery({
