@@ -3785,9 +3785,14 @@ export default function EmployeeDetailPage() {
     enabled: activeTab === "leaves",
   });
 
+  // SUPER_ADMIN / HR_ADMIN view the profiled employee's claims (incl. pending) via the
+  // admin endpoint; everyone else only ever sees their own. Mirrors the leaves query above.
+  const canViewAllClaims = currentUser?.role === "SUPER_ADMIN" || currentUser?.role === "HR_ADMIN";
   const { data: claims } = useQuery({
-    queryKey: ["claims", id],
-    queryFn: () => api.get(`/api/v1/claims/my`).then((r) => r.data.data),
+    queryKey: ["claims", id, canViewAllClaims],
+    queryFn: () => canViewAllClaims
+      ? api.get(`/api/v1/claims/admin/all?employeeId=${id}`).then((r) => r.data.data)
+      : api.get(`/api/v1/claims/my`).then((r) => r.data.data),
     enabled: activeTab === "claims",
   });
 
