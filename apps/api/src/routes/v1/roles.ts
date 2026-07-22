@@ -8,6 +8,8 @@ const MODULES = [
   "EMP_PROFILE", "EMP_DOCUMENTS", "EMP_SALARY", "EMP_BANK", "EMP_LEAVES", "EMP_PAYOUT",
   "LEAVES", "CLAIMS", "POLICIES", "TRAINING",
   "MIS_EMP_DIRECTORY", "MIS_SALARY_STRUCT", "MIS_SALARY_DISB", "MIS_LEAVE_RECORDS", "MIS_HOLIDAYS", "MIS_CLAIMS",
+  "ACA_BATCH", "ACA_SUBJECT", "ACA_SETTINGS",
+  "STU_PROFILE", "STU_ADMISSION", "STU_ATTENDANCE", "STU_ASSIGNMENT", "STU_ASSESSMENT", "STU_TIMETABLE",
   "ADMIN",
 ] as const;
 
@@ -89,6 +91,25 @@ const DEFAULT_PERMISSIONS: Record<string, Record<string, Partial<Record<"canView
     ADMIN:             { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
   },
 };
+
+// Academics / student modules — wired into the RBAC matrix so they can be assigned to
+// custom roles & DEPT_HEAD and take effect. (SUPER_ADMIN / HR_ADMIN also bypass academics
+// checks in the UI, but we seed sensible defaults here for consistency and the /seed reset.)
+const ACADEMICS_MODULES = [
+  "ACA_BATCH", "ACA_SUBJECT", "ACA_SETTINGS",
+  "STU_PROFILE", "STU_ADMISSION", "STU_ATTENDANCE", "STU_ASSIGNMENT", "STU_ASSESSMENT", "STU_TIMETABLE",
+] as const;
+const ACADEMICS_DEFAULTS: Record<string, Record<"canView"|"canCreate"|"canEdit"|"canDelete"|"canApprove"|"canAppraise", boolean>> = {
+  SUPER_ADMIN: { canView: true,  canCreate: true,  canEdit: true,  canDelete: true,  canApprove: true,  canAppraise: false },
+  HR_ADMIN:    { canView: true,  canCreate: true,  canEdit: true,  canDelete: false, canApprove: false, canAppraise: false },
+  DEPT_HEAD:   { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
+  EMPLOYEE:    { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
+};
+for (const role of ROLES) {
+  for (const m of ACADEMICS_MODULES) {
+    DEFAULT_PERMISSIONS[role][m] = { ...ACADEMICS_DEFAULTS[role] };
+  }
+}
 
 export async function roleRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", authenticate);

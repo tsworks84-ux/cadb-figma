@@ -49,6 +49,7 @@ const MODULE_ROWS: ModuleRow[] = [
   { key: "STU_ASSIGNMENT",    label: "Assignments",              indent: true },
   { key: "STU_ASSESSMENT",    label: "Assessments",              indent: true },
   { key: "STU_TIMETABLE",     label: "Timetable",                indent: true },
+  { key: "ACA_SETTINGS",      label: "Academics Settings",       indent: true },
   { key: "ADMIN",     label: "Admin" },
 ];
 const ROLE_META: Record<string, { label: string; color: string; description: string }> = {
