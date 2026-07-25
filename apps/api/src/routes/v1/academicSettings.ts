@@ -2,13 +2,8 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "@cadb/db";
 import { authenticate } from "../../middleware/authenticate.js";
-
-function requireAdmin(request: any, reply: any) {
-  const role = request.user?.role;
-  if (!["SUPER_ADMIN", "HR_ADMIN"].includes(role)) {
-    return reply.status(403).send({ success: false, error: "Insufficient permissions" });
-  }
-}
+import { hasPermission } from "../../utils/permissions.js";
+import type { JwtPayload } from "@cadb/types";
 
 // ── Academic Years ─────────────────────────────────────────────────────────────
 const academicYearSchema = z.object({
@@ -55,6 +50,18 @@ const centreSchema = z.object({
 export async function academicSettingsRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", authenticate);
 
+  // Reads only need authentication; writes require the ACA_SETTINGS edit grant
+  // (built-in SA/HR always allowed, matching the Academic Settings UI edit gate).
+  fastify.addHook("preHandler", async (request, reply) => {
+    if (request.method === "GET") return;
+    const user = request.user as JwtPayload;
+    const allowed = user.role === "SUPER_ADMIN" || user.role === "HR_ADMIN"
+      || await hasPermission(user, "ACA_SETTINGS", "canEdit");
+    if (!allowed) {
+      return reply.status(403).send({ success: false, error: "Insufficient permissions", statusCode: 403 });
+    }
+  });
+
   // ── ACADEMIC YEARS ─────────────────────────────────────────────────────────
 
   fastify.get("/academic-years", async (request, reply) => {
@@ -67,7 +74,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post("/academic-years", async (request, reply) => {
-    requireAdmin(request, reply);
     const parsed = academicYearSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
@@ -79,7 +85,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/academic-years/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const parsed = academicYearSchema.partial().safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -94,7 +99,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/academic-years/:id/archive", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const year = await prisma.academicYear.findUnique({ where: { id } });
     if (!year) return reply.status(404).send({ success: false, error: "Academic year not found" });
@@ -107,7 +111,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.delete("/academic-years/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     await prisma.academicYear.delete({ where: { id } });
     return reply.send({ success: true });
@@ -125,7 +128,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post("/target-exams", async (request, reply) => {
-    requireAdmin(request, reply);
     const parsed = targetExamSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
@@ -137,7 +139,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/target-exams/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const parsed = targetExamSchema.partial().safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -152,7 +153,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/target-exams/:id/toggle", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const exam = await prisma.targetExam.findUnique({ where: { id } });
     if (!exam) return reply.status(404).send({ success: false, error: "Exam not found" });
@@ -162,7 +162,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.delete("/target-exams/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     await prisma.targetExam.delete({ where: { id } });
     return reply.send({ success: true });
@@ -180,7 +179,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post("/grades", async (request, reply) => {
-    requireAdmin(request, reply);
     const parsed = gradeSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
@@ -192,7 +190,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/grades/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const parsed = gradeSchema.partial().safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -207,7 +204,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/grades/:id/toggle", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const grade = await prisma.grade.findUnique({ where: { id } });
     if (!grade) return reply.status(404).send({ success: false, error: "Grade not found" });
@@ -217,7 +213,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.delete("/grades/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     await prisma.grade.delete({ where: { id } });
     return reply.send({ success: true });
@@ -235,7 +230,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post("/schools", async (request, reply) => {
-    requireAdmin(request, reply);
     const parsed = schoolSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
@@ -244,7 +238,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/schools/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const parsed = schoolSchema.partial().safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -254,7 +247,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/schools/:id/toggle", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const school = await prisma.school.findUnique({ where: { id } });
     if (!school) return reply.status(404).send({ success: false, error: "School not found" });
@@ -264,7 +256,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.delete("/schools/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     await prisma.school.delete({ where: { id } });
     return reply.send({ success: true });
@@ -282,7 +273,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post("/locations", async (request, reply) => {
-    requireAdmin(request, reply);
     const parsed = locationSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
@@ -294,7 +284,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/locations/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const parsed = locationSchema.partial().safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -309,7 +298,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/locations/:id/toggle", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const loc = await prisma.location.findUnique({ where: { id } });
     if (!loc) return reply.status(404).send({ success: false, error: "Location not found" });
@@ -319,7 +307,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.delete("/locations/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const count = await prisma.batch.count({ where: { locationId: id } });
     if (count > 0) return reply.status(400).send({ success: false, error: `Cannot delete — ${count} batch(es) use this location` });
@@ -341,7 +328,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post("/centres", async (request, reply) => {
-    requireAdmin(request, reply);
     const parsed = centreSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
@@ -357,7 +343,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/centres/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const parsed = centreSchema.partial().safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -377,7 +362,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/centres/:id/toggle", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const centre = await prisma.centre.findUnique({ where: { id } });
     if (!centre) return reply.status(404).send({ success: false, error: "Centre not found" });
@@ -391,7 +375,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.delete("/centres/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     await prisma.centre.delete({ where: { id } });
     return reply.send({ success: true });
@@ -414,7 +397,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post("/courses", async (request, reply) => {
-    requireAdmin(request, reply);
     const parsed = courseSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
@@ -428,7 +410,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/courses/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const parsed = courseSchema.partial().safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -438,7 +419,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/courses/:id/toggle", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const course = await prisma.course.findUnique({ where: { id } });
     if (!course) return reply.status(404).send({ success: false, error: "Course not found" });
@@ -448,7 +428,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.delete("/courses/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     await prisma.course.delete({ where: { id } });
     return reply.send({ success: true });
@@ -502,7 +481,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post("/instalment-plans", async (request, reply) => {
-    requireAdmin(request, reply);
     const parsed = planSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
@@ -521,7 +499,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/instalment-plans/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const parsed = planSchema.partial().safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -547,7 +524,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/instalment-plans/:id/toggle", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const plan = await prisma.instalmentPlan.findUnique({ where: { id } });
     if (!plan) return reply.status(404).send({ success: false, error: "Plan not found" });
@@ -556,7 +532,6 @@ export async function academicSettingsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.delete("/instalment-plans/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     await prisma.instalmentPlan.delete({ where: { id } });
     return reply.send({ success: true });
