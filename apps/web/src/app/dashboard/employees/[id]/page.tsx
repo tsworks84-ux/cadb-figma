@@ -926,6 +926,7 @@ function DocumentCard({
   canWrite?: boolean;
 }) {
   const qc = useQueryClient();
+  const { user: currentUser, updateUser } = useAuthStore();
   const fileRef = useRef<HTMLInputElement>(null);
   const { label, accept, hint } = DOC_LABELS[docType];
   const [uploading, setUploading] = useState(false);
@@ -934,6 +935,11 @@ function DocumentCard({
     mutationFn: () => api.delete(`/api/v1/employees/${employeeId}/documents/${existing!.id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["documents", employeeId] });
+      // Removing the passport photo also clears the profile picture (server-side); refresh it.
+      if (docType === "PASSPORT_PHOTO") {
+        qc.invalidateQueries({ queryKey: ["employee", employeeId] });
+        if (currentUser?.id === employeeId) updateUser({ photoUrl: null });
+      }
       toast.success(`${label} removed`);
     },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Delete failed"),
@@ -3670,6 +3676,21 @@ export default function EmployeeDetailPage() {
     }
   }
 
+  async function handlePhotoRemove() {
+    if (!confirm("Remove profile photo?")) return;
+    setPhotoUploading(true);
+    try {
+      await api.delete(`/api/v1/employees/${id}/photo`);
+      qc.invalidateQueries({ queryKey: ["employee", id] });
+      if (currentUser?.id === id) updateUser({ photoUrl: null });
+      toast.success("Profile photo removed");
+    } catch (e: any) {
+      toast.error(e.response?.data?.error ?? "Failed to remove photo");
+    } finally {
+      setPhotoUploading(false);
+    }
+  }
+
   const adminCanEdit    = (mod: string) => isAdmin && (permissions[mod]?.canEdit   ?? false);
   const adminCanCreate  = (mod: string) => isAdmin && (permissions[mod]?.canCreate ?? false);
   const adminCanDelete  = (mod: string) => isAdmin && (permissions[mod]?.canDelete ?? false);
@@ -4028,24 +4049,36 @@ export default function EmployeeDetailPage() {
           <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
             {/* Left: avatar + info */}
             <div className="flex items-start gap-4">
-              <div
-                className={`relative flex h-20 w-20 shrink-0 items-center justify-center rounded-xl border-4 border-white/30 text-white text-2xl font-bold overflow-hidden ${canEditPhoto ? "cursor-pointer group" : ""}`}
-                style={{ backgroundColor: "#1a2d5a" }}
-                onClick={() => canEditPhoto && photoRef.current?.click()}
-                title={canEditPhoto ? "Click to change profile photo" : undefined}
-              >
-                {emp.photoUrl ? (
-                  <img src={resolvePhotoUrl(emp.photoUrl)!} alt="photo" className="h-full w-full object-cover" />
-                ) : (
-                  getInitials(emp.firstName, emp.lastName)
-                )}
-                {canEditPhoto && (
-                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    {photoUploading
-                      ? <div className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      : <Camera className="h-6 w-6 text-white" />
-                    }
-                  </div>
+              <div className="relative shrink-0">
+                <div
+                  className={`relative flex h-20 w-20 items-center justify-center rounded-xl border-4 border-white/30 text-white text-2xl font-bold overflow-hidden ${canEditPhoto ? "cursor-pointer group" : ""}`}
+                  style={{ backgroundColor: "#1a2d5a" }}
+                  onClick={() => canEditPhoto && photoRef.current?.click()}
+                  title={canEditPhoto ? "Click to change profile photo" : undefined}
+                >
+                  {emp.photoUrl ? (
+                    <img src={resolvePhotoUrl(emp.photoUrl)!} alt="photo" className="h-full w-full object-cover" />
+                  ) : (
+                    getInitials(emp.firstName, emp.lastName)
+                  )}
+                  {canEditPhoto && (
+                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      {photoUploading
+                        ? <div className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        : <Camera className="h-6 w-6 text-white" />
+                      }
+                    </div>
+                  )}
+                </div>
+                {canEditPhoto && emp.photoUrl && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handlePhotoRemove(); }}
+                    className="absolute -top-1.5 -right-1.5 h-6 w-6 rounded-full bg-white text-red-600 shadow-md flex items-center justify-center hover:bg-red-50 transition-colors"
+                    title="Remove profile photo"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
                 )}
               </div>
               <input

@@ -833,6 +833,18 @@ export async function employeeRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true, data: { photoUrl } });
   });
 
+  // Remove the profile photo (independent of the passport-photo document). Employees may
+  // remove their own; managers/admins may remove any employee's — mirrors document delete.
+  fastify.delete("/:id/photo", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const user = request.user as JwtPayload;
+    if (user.role === "EMPLOYEE" && user.sub !== id) {
+      return reply.status(403).send({ success: false, error: "Forbidden", statusCode: 403 });
+    }
+    await prisma.employee.update({ where: { id }, data: { photoUrl: null } });
+    return reply.send({ success: true, data: { photoUrl: null } });
+  });
+
   // ── Send Credentials ────────────────────────────────────────────────────────
   fastify.post("/:id/send-credentials", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN") }, async (request, reply) => {
     const { id } = request.params as { id: string };

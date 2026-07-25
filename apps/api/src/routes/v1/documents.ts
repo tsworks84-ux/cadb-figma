@@ -143,6 +143,15 @@ export async function documentRoutes(fastify: FastifyInstance) {
 
     await prisma.employeeDocument.delete({ where: { id: docId } });
     try { unlinkSync(join(UPLOADS_DIR, doc.fileUrl.replace("/uploads/", ""))); } catch {}
+
+    // If this passport photo was also serving as the profile picture, clear it too.
+    if (doc.type === "PASSPORT_PHOTO") {
+      await prisma.employee.updateMany({
+        where: { id: employeeId, photoUrl: doc.fileUrl },
+        data: { photoUrl: null },
+      });
+    }
+
     return reply.send({ success: true, data: null, message: "Document deleted" });
   });
 }
