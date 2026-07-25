@@ -3821,34 +3821,34 @@ export default function EmployeeDetailPage() {
         primary: { id: string; name: string; code: string; isPrimary: true; isHead: false };
         additional: { membershipId: string; id: string; name: string; code: string; isHead: boolean; addedAt: string; addedBy: string | null }[];
       }),
-    enabled: activeTab === "personal" && (isAdmin || isSelfView),
+    enabled: (activeTab === "personal" || activeTab === "position") && (isAdmin || isSelfView),
   });
 
   const { data: allDepts = [] } = useQuery({
     queryKey: ["all-departments"],
     queryFn: () => api.get(`/api/v1/departments`).then((r) => r.data.data as { id: string; name: string; code: string }[]),
-    enabled: activeTab === "personal" && isAdmin,
+    enabled: (activeTab === "personal" || activeTab === "position") && isAdmin,
     staleTime: 5 * 60 * 1000,
   });
 
   const { data: allDesignations = [] } = useQuery({
     queryKey: ["all-designations"],
     queryFn: () => api.get("/api/v1/designations").then((r) => r.data.data as { id: string; title: string }[]),
-    enabled: activeTab === "personal" && isAdmin,
+    enabled: (activeTab === "personal" || activeTab === "position") && isAdmin,
     staleTime: 5 * 60 * 1000,
   });
 
   const { data: profileWorkLocations = [] } = useQuery({
     queryKey: ["work-locations"],
     queryFn: () => api.get("/api/v1/work-locations").then((r) => r.data.data as { id: string; name: string }[]),
-    enabled: activeTab === "personal" && isAdmin,
+    enabled: (activeTab === "personal" || activeTab === "position") && isAdmin,
     staleTime: 5 * 60 * 1000,
   });
 
   const { data: allEmployeesList = [] } = useQuery({
     queryKey: ["employees-list"],
     queryFn: () => api.get("/api/v1/employees", { params: { limit: 500 } }).then((r) => r.data.data),
-    enabled: activeTab === "personal" && isAdmin && editingEmployment,
+    enabled: (activeTab === "personal" || activeTab === "position") && isAdmin && editingEmployment,
     staleTime: 5 * 60 * 1000,
   });
 
