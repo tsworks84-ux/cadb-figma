@@ -23,6 +23,19 @@ import { z } from "zod";
 
 // ─── Tab config ─────────────────────────────────────────────────────────────
 
+// Build a user-friendly message from a failed upload Response. Guards against non-JSON
+// bodies (e.g. an nginx "413 Request Entity Too Large" HTML page) that would otherwise make
+// res.json() throw a cryptic browser error ("The string did not match the expected pattern.").
+async function uploadErrorMessage(res: Response, fallback = "Upload failed"): Promise<string> {
+  if (res.status === 413) return "File too large — please upload a file under 5 MB.";
+  try {
+    const err = await res.json();
+    return err?.error ?? fallback;
+  } catch {
+    return `${fallback} (server error ${res.status})`;
+  }
+}
+
 const PROFILE_TABS = [
   { id: "personal",  label: "Personal",   icon: User        },
   { id: "documents", label: "Documents",  icon: FileText    },
@@ -215,10 +228,7 @@ function AddQualificationModal({
           headers: { Authorization: `Bearer ${token}` },
           body: fd,
         });
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.error ?? "Failed");
-        }
+        if (!res.ok) throw new Error(await uploadErrorMessage(res, "Failed"));
         return res.json();
       }
       return api.post(`/api/v1/employees/${employeeId}/qualifications`, {
@@ -942,10 +952,7 @@ function DocumentCard({
         headers: { Authorization: `Bearer ${token}` },
         body: fd,
       });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error ?? "Upload failed");
-      }
+      if (!res.ok) throw new Error(await uploadErrorMessage(res));
       qc.invalidateQueries({ queryKey: ["documents", employeeId] });
       toast.success(`${label} uploaded`);
     } catch (e: any) {
@@ -1071,7 +1078,7 @@ function OtherDocumentsSection({ employeeId, docs, canWrite = false }: { employe
         headers: { Authorization: `Bearer ${token}` },
         body: fd,
       });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.error ?? "Upload failed"); }
+      if (!res.ok) throw new Error(await uploadErrorMessage(res));
       qc.invalidateQueries({ queryKey: ["documents", employeeId] });
       toast.success("Document uploaded");
     } catch (e: any) {
@@ -3651,10 +3658,7 @@ export default function EmployeeDetailPage() {
         headers: { Authorization: `Bearer ${token}` },
         body: fd,
       });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error ?? "Upload failed");
-      }
+      if (!res.ok) throw new Error(await uploadErrorMessage(res));
       const json = await res.json();
       qc.invalidateQueries({ queryKey: ["employee", id] });
       if (currentUser?.id === id) updateUser({ photoUrl: json.data.photoUrl });
