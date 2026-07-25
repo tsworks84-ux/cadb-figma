@@ -836,6 +836,7 @@ model LeavePolicy {
   name        String
   description String?
   isActive    Boolean           @default(true)
+  carryForward Boolean          @default(false)
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
 

@@ -621,10 +621,10 @@ const LEAVE_LABEL: Record<string, string> = {
 };
 
 type LeaveRule = { leaveType: string; daysPerYear: number; maxCarryForward: number };
-type PolicyForm = { name: string; description: string; isActive: boolean; rules: LeaveRule[]; grades: string[] };
+type PolicyForm = { name: string; description: string; isActive: boolean; carryForward: boolean; rules: LeaveRule[]; grades: string[] };
 
 const BLANK_FORM: PolicyForm = {
-  name: "", description: "", isActive: true,
+  name: "", description: "", isActive: true, carryForward: false,
   rules: ALL_LEAVE_TYPES.map((lt) => ({ leaveType: lt, daysPerYear: 0, maxCarryForward: 0 })),
   grades: [],
 };
@@ -693,6 +693,7 @@ function LeavePoliciesTab() {
       name: p.name,
       description: p.description ?? "",
       isActive: p.isActive,
+      carryForward: p.carryForward ?? false,
       rules: ALL_LEAVE_TYPES.map((lt) => rulesMap[lt] ?? { leaveType: lt, daysPerYear: 0, maxCarryForward: 0 }),
       grades: (p.grades ?? []).map((g: any) => g.grade),
     });
@@ -757,6 +758,19 @@ function LeavePoliciesTab() {
                 className="rounded"
               />
               <label htmlFor="isActive" className="text-sm text-gray-700">Active (applies to employees)</label>
+            </div>
+            <div className="flex items-start gap-2">
+              <input
+                type="checkbox" id="carryForward" checked={form.carryForward}
+                onChange={(e) => setForm({ ...form, carryForward: e.target.checked })}
+                className="rounded mt-0.5"
+              />
+              <label htmlFor="carryForward" className="text-sm text-gray-700">
+                Carry forward unused leaves
+                <span className="block text-xs text-gray-400">
+                  When on, leftover balance at the end of the FY (Apr–Mar) rolls into next year. When off, balances reset to zero on 1 April.
+                </span>
+              </label>
             </div>
           </div>
         </div>

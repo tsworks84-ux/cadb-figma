@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "@cadb/db";
 import { authenticate, requireRole } from "../../middleware/authenticate.js";
+import { computeCarryForward } from "../../utils/leave.js";
 
 const LEAVE_TYPES = ["CASUAL", "SICK", "EARNED", "MATERNITY", "PATERNITY", "COMPENSATORY", "UNPAID", "SPECIAL"] as const;
 
@@ -15,6 +16,7 @@ const policySchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   isActive: z.boolean().default(true),
+  carryForward: z.boolean().default(false),
   rules: z.array(ruleSchema).min(1),
   grades: z.array(z.string().min(1)),
 });
@@ -64,13 +66,14 @@ export async function leavePolicyRoutes(fastify: FastifyInstance) {
     if (!parsed.success) {
       return reply.status(400).send({ success: false, error: "Validation failed", statusCode: 400 });
     }
-    const { name, description, isActive, rules, grades } = parsed.data;
+    const { name, description, isActive, carryForward, rules, grades } = parsed.data;
 
     const policy = await prisma.leavePolicy.create({
       data: {
         name,
         description,
         isActive,
+        carryForward,
         rules: { create: rules },
         grades: { create: grades.map((g) => ({ grade: g })) },
       },
@@ -90,7 +93,7 @@ export async function leavePolicyRoutes(fastify: FastifyInstance) {
     if (!parsed.success) {
       return reply.status(400).send({ success: false, error: "Validation failed", statusCode: 400 });
     }
-    const { name, description, isActive, rules, grades } = parsed.data;
+    const { name, description, isActive, carryForward, rules, grades } = parsed.data;
 
     // Replace all rules and grades atomically
     await prisma.$transaction([
@@ -104,6 +107,7 @@ export async function leavePolicyRoutes(fastify: FastifyInstance) {
         name,
         description,
         isActive,
+        carryForward,
         rules: { create: rules },
         grades: { create: grades.map((g) => ({ grade: g })) },
       },
@@ -157,12 +161,30 @@ export async function leavePolicyRoutes(fastify: FastifyInstance) {
 
     const employees = await prisma.employee.findMany({
       where: { deletedAt: null, designation: { grade: { in: grades } } },
-      select: { id: true },
+      select: { id: true, joiningDate: true },
     });
+
+    // When carry-forward is on, load prior-FY balances so we can roll leftover forward.
+    const prevByEmpType = new Map<string, { allocated: number; used: number }>();
+    if (policy.carryForward) {
+      const prev = await prisma.leaveBalance.findMany({
+        where: { employeeId: { in: employees.map((e) => e.id) }, year: year - 1 },
+        select: { employeeId: true, leaveType: true, allocated: true, used: true },
+      });
+      prev.forEach((p) => prevByEmpType.set(`${p.employeeId}:${p.leaveType}`, p));
+    }
 
     let applied = 0;
     for (const emp of employees) {
       for (const rule of policy.rules) {
+        const carried = policy.carryForward
+          ? computeCarryForward(
+              prevByEmpType.get(`${emp.id}:${rule.leaveType}`),
+              year - 1,
+              emp.joiningDate,
+              rule.maxCarryForward,
+            )
+          : 0;
         await prisma.leaveBalance.upsert({
           where: { employeeId_leaveType_year: { employeeId: emp.id, leaveType: rule.leaveType, year } },
           create: {
@@ -172,11 +194,12 @@ export async function leavePolicyRoutes(fastify: FastifyInstance) {
             allocated: rule.daysPerYear,
             used: 0,
             pending: 0,
-            carried: 0,
+            carried,
           },
           update: {
             // Only increase allocation, never silently reduce below what's used
             allocated: rule.daysPerYear,
+            carried,
           },
         });
       }

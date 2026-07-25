@@ -7,6 +7,7 @@ import { sendCredentialsMail } from "../../utils/mailer.js";
 import type { JwtPayload } from "@cadb/types";
 import { randomUUID } from "crypto";
 import { uploadFile } from "../../utils/s3.js";
+import { computeAccrued, computeCarryForward } from "../../utils/leave.js";
 import { createWriteStream, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -1011,14 +1012,11 @@ export async function employeeRoutes(fastify: FastifyInstance) {
     const defaultFY = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
     const year = parseInt((request.query as any).year ?? defaultFY);
 
-    function computeAccruedLocal(allocated: number, fyYear: number): number {
-      const fyStart = new Date(fyYear, 3, 1);
-      const fyEndExclusive = new Date(fyYear + 1, 3, 1);
-      if (now < fyStart) return 0;
-      if (now >= fyEndExclusive) return allocated;
-      const monthsElapsed = (now.getFullYear() - fyYear) * 12 + (now.getMonth() + 1) - 3;
-      return Math.round((Math.min(monthsElapsed, 12) / 12) * allocated * 10) / 10;
-    }
+    const emp = await prisma.employee.findUnique({
+      where: { id },
+      select: { joiningDate: true, designation: { select: { grade: true } } },
+    });
+    const joiningDate = emp?.joiningDate ?? null;
 
     let balances = await prisma.leaveBalance.findMany({
       where: { employeeId: id, year },
@@ -1026,48 +1024,53 @@ export async function employeeRoutes(fastify: FastifyInstance) {
     });
 
     // Auto-provision from the applicable leave policy if no records exist yet
-    if (balances.length === 0) {
-      const emp = await prisma.employee.findUnique({
-        where: { id },
-        select: { designation: { select: { grade: true } } },
+    if (balances.length === 0 && emp?.designation?.grade) {
+      const policy = await prisma.leavePolicy.findFirst({
+        where: {
+          isActive: true,
+          grades: { some: { grade: emp.designation.grade } },
+        },
+        include: { rules: true },
       });
 
-      if (emp?.designation?.grade) {
-        const policy = await prisma.leavePolicy.findFirst({
-          where: {
-            isActive: true,
-            grades: { some: { grade: emp.designation.grade } },
-          },
-          include: { rules: true },
-        });
-
-        if (policy?.rules.length) {
-          await Promise.all(
-            policy.rules.map((rule) =>
-              prisma.leaveBalance.upsert({
-                where: { employeeId_leaveType_year: { employeeId: id, leaveType: rule.leaveType, year } },
-                create: { employeeId: id, leaveType: rule.leaveType, year, allocated: rule.daysPerYear },
-                update: {},
-              })
-            )
-          );
-
-          balances = await prisma.leaveBalance.findMany({
-            where: { employeeId: id, year },
-            orderBy: { leaveType: "asc" },
+      if (policy?.rules.length) {
+        // Carry-forward unused balance from the prior FY when the policy allows it.
+        const prevByType = new Map<string, { allocated: number; used: number }>();
+        if (policy.carryForward) {
+          const prev = await prisma.leaveBalance.findMany({
+            where: { employeeId: id, year: year - 1 },
           });
+          prev.forEach((p) => prevByType.set(p.leaveType, p));
         }
+
+        await Promise.all(
+          policy.rules.map((rule) => {
+            const carried = policy.carryForward
+              ? computeCarryForward(prevByType.get(rule.leaveType), year - 1, joiningDate, rule.maxCarryForward)
+              : 0;
+            return prisma.leaveBalance.upsert({
+              where: { employeeId_leaveType_year: { employeeId: id, leaveType: rule.leaveType, year } },
+              create: { employeeId: id, leaveType: rule.leaveType, year, allocated: rule.daysPerYear, carried },
+              update: {},
+            });
+          })
+        );
+
+        balances = await prisma.leaveBalance.findMany({
+          where: { employeeId: id, year },
+          orderBy: { leaveType: "asc" },
+        });
       }
     }
 
     const data = balances.map((b) => {
-      const accrued = computeAccruedLocal(b.allocated, year);
+      const accrued = computeAccrued(b.allocated, year, joiningDate);
       const availed = b.used + b.pending;
       return {
         ...b,
         accrued,
         availed,
-        balance: Math.max(0, accrued - availed),
+        balance: Math.max(0, accrued + b.carried - availed),
       };
     });
 

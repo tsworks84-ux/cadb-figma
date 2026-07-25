@@ -4,6 +4,7 @@ import { prisma } from "@cadb/db";
 import { authenticate, requireRole } from "../../middleware/authenticate.js";
 import type { JwtPayload } from "@cadb/types";
 import { sendMail } from "../../utils/mailer.js";
+import { getFiscalYear, computeAccrued, computeCarryForward } from "../../utils/leave.js";
 
 const applyLeaveSchema = z.object({
   leaveType: z.enum(["CASUAL", "SICK", "EARNED", "MATERNITY", "PATERNITY", "COMPENSATORY", "UNPAID", "SPECIAL"]),
@@ -13,27 +14,6 @@ const applyLeaveSchema = z.object({
   duration: z.enum(["FULL", "FIRST_HALF", "SECOND_HALF"]).default("FULL"),
   documentUrl: z.string().optional(),
 });
-
-/** Returns the FY start year for a date (FY runs April 1 – March 31). */
-function getFiscalYear(date: Date): number {
-  return date.getMonth() >= 3 ? date.getFullYear() : date.getFullYear() - 1;
-}
-
-/** How many days have accrued in the FY starting `fyYear` (April 1) as of today. */
-function computeAccrued(allocated: number, fyYear: number): number {
-  const now = new Date();
-  const fyStart = new Date(fyYear, 3, 1); // April 1
-  const fyEndExclusive = new Date(fyYear + 1, 3, 1); // April 1 next year
-
-  if (now < fyStart) return 0;
-  if (now >= fyEndExclusive) return allocated;
-
-  // Months elapsed since April 1 — April = 1, May = 2, …, March = 12
-  const monthsElapsed =
-    (now.getFullYear() - fyYear) * 12 + (now.getMonth() + 1) - 3;
-
-  return Math.round((Math.min(monthsElapsed, 12) / 12) * allocated * 10) / 10;
-}
 
 function workingDaysBetween(from: Date, to: Date): number {
   let count = 0;
@@ -143,43 +123,54 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     const q = request.query as Record<string, string>;
     const year = q.year ? parseInt(q.year) : getFiscalYear(new Date());
 
+    const employee = await prisma.employee.findUnique({
+      where: { id: user.sub },
+      select: { joiningDate: true, designation: { select: { grade: true } } },
+    });
+    const joiningDate = employee?.joiningDate ?? null;
+
     let balances = await prisma.leaveBalance.findMany({
       where: { employeeId: user.sub, year },
       orderBy: { leaveType: "asc" },
     });
 
     // Auto-provision from the applicable leave policy if no records exist yet
-    if (balances.length === 0) {
-      const employee = await prisma.employee.findUnique({
-        where: { id: user.sub },
-        select: { designation: { select: { grade: true } } },
+    if (balances.length === 0 && employee?.designation?.grade) {
+      const policy = await prisma.leavePolicy.findFirst({
+        where: {
+          isActive: true,
+          grades: { some: { grade: employee.designation.grade } },
+        },
+        include: { rules: true },
       });
 
-      if (employee?.designation?.grade) {
-        const policy = await prisma.leavePolicy.findFirst({
-          where: {
-            isActive: true,
-            grades: { some: { grade: employee.designation.grade } },
-          },
-          include: { rules: true },
-        });
-
-        if (policy?.rules.length) {
-          await Promise.all(
-            policy.rules.map((rule) =>
-              prisma.leaveBalance.upsert({
-                where: { employeeId_leaveType_year: { employeeId: user.sub, leaveType: rule.leaveType, year } },
-                create: { employeeId: user.sub, leaveType: rule.leaveType, year, allocated: rule.daysPerYear },
-                update: {},
-              })
-            )
-          );
-
-          balances = await prisma.leaveBalance.findMany({
-            where: { employeeId: user.sub, year },
-            orderBy: { leaveType: "asc" },
+      if (policy?.rules.length) {
+        // Carry-forward unused balance from the prior FY when the policy allows it.
+        const prevByType = new Map<string, { allocated: number; used: number }>();
+        if (policy.carryForward) {
+          const prev = await prisma.leaveBalance.findMany({
+            where: { employeeId: user.sub, year: year - 1 },
           });
+          prev.forEach((p) => prevByType.set(p.leaveType, p));
         }
+
+        await Promise.all(
+          policy.rules.map((rule) => {
+            const carried = policy.carryForward
+              ? computeCarryForward(prevByType.get(rule.leaveType), year - 1, joiningDate, rule.maxCarryForward)
+              : 0;
+            return prisma.leaveBalance.upsert({
+              where: { employeeId_leaveType_year: { employeeId: user.sub, leaveType: rule.leaveType, year } },
+              create: { employeeId: user.sub, leaveType: rule.leaveType, year, allocated: rule.daysPerYear, carried },
+              update: {},
+            });
+          })
+        );
+
+        balances = await prisma.leaveBalance.findMany({
+          where: { employeeId: user.sub, year },
+          orderBy: { leaveType: "asc" },
+        });
       }
     }
 
@@ -213,7 +204,7 @@ export async function leaveRoutes(fastify: FastifyInstance) {
       lopMarkedLeaves.reduce((s, l) => s + l.lopDays, 0);
 
     const data = balances.map((b) => {
-      const accrued = computeAccrued(b.allocated, year);
+      const accrued = computeAccrued(b.allocated, year, joiningDate);
       const availed = b.used + b.pending;
       return {
         leaveType: b.leaveType,
@@ -222,7 +213,7 @@ export async function leaveRoutes(fastify: FastifyInstance) {
         used: b.used,
         pending: b.pending,
         availed,
-        balance: Math.max(0, accrued - availed),
+        balance: Math.max(0, accrued + b.carried - availed),
         carried: b.carried,
       };
     });
