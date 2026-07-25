@@ -1746,6 +1746,10 @@ export default function LeavesPage() {
   const { data: balancesResp } = useQuery<LeaveBalancesResponse>({
     queryKey: ["my-leave-balances"],
     queryFn: () => api.get("/api/v1/leaves/balances").then((r) => ({ data: r.data.data, lopDays: r.data.lopDays ?? 0 })),
+    // Balances are auto-provisioned server-side on first access; always refetch on
+    // mount so a stale (pre-provision) empty result isn't shown until a hard reload.
+    staleTime: 0,
+    refetchOnMount: "always",
   });
   const balances = balancesResp?.data ?? [];
   const lopDays  = balancesResp?.lopDays ?? 0;

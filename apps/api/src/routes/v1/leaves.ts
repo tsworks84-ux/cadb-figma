@@ -5,6 +5,7 @@ import { authenticate, requireRole } from "../../middleware/authenticate.js";
 import type { JwtPayload } from "@cadb/types";
 import { sendMail } from "../../utils/mailer.js";
 import { getFiscalYear, computeAccrued, computeCarryForward } from "../../utils/leave.js";
+import { hasPermission, isCustomRole } from "../../utils/permissions.js";
 
 const applyLeaveSchema = z.object({
   leaveType: z.enum(["CASUAL", "SICK", "EARNED", "MATERNITY", "PATERNITY", "COMPENSATORY", "UNPAID", "SPECIAL"]),
@@ -263,8 +264,11 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     const user = request.user as JwtPayload;
     const { employeeId } = request.params as { employeeId: string };
 
-    const isAdmin = user.role === "SUPER_ADMIN" || user.role === "HR_ADMIN";
-    if (!isAdmin) {
+    // Built-in admins (SA/HR) as before, or a custom role granted EMP_LEAVES view. DEPT_HEAD
+    // stays team-scoped via the membership check below.
+    const canViewAll = user.role === "SUPER_ADMIN" || user.role === "HR_ADMIN"
+      || (isCustomRole(user.role) && await hasPermission(user, "EMP_LEAVES", "canView"));
+    if (!canViewAll) {
       const membership = await prisma.teamMembership.findFirst({
         where: { teamOwnerId: user.sub, memberId: employeeId },
       });

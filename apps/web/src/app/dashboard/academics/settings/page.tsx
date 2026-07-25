@@ -11,6 +11,7 @@ import {
   ChevronDown, ChevronUp, MapPin, Landmark,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
+import { usePermissions } from "@/hooks/usePermissions";
 
 // ── Design tokens ───────────────────────────────────────────────────────────────
 const D = { line: "#e6e8ef", muted: "#7c8598", ink: "#111827", nav2: "#28245f", bg: "#f4f6fa", accent: "#eef2ff" };
@@ -963,9 +964,13 @@ const NAV_GROUPS = [
 // ── Page ───────────────────────────────────────────────────────────────────────
 export default function AcademicSettingsPage() {
   const { user } = useAuthStore();
+  const permissions = usePermissions();
   const [tab, setTab] = useState("academic-years");
   const [mobileOpen, setMobileOpen] = useState(false);
-  const canEdit = user?.role === "SUPER_ADMIN" || user?.role === "HR_ADMIN";
+  // Respect the assignable ACA_SETTINGS.canEdit grant so custom roles work; keep built-in
+  // admins as overrides (matches the Settings nav visibility convention).
+  const canEdit = user?.role === "SUPER_ADMIN" || user?.role === "HR_ADMIN"
+    || (permissions.ACA_SETTINGS?.canEdit ?? false);
 
   const sidebarContent = (
     <>

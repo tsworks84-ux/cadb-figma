@@ -3777,20 +3777,29 @@ export default function EmployeeDetailPage() {
     enabled: activeTab === "leaves",
   });
 
+  // Whether the viewer sees the *profiled* employee's HR data (vs their own). Built-in roles
+  // keep their prior behaviour; custom roles are enabled via the EMP_LEAVES view grant (which
+  // also gates the Leaves/Claims tabs). Self-view always shows one's own data.
+  const BUILTIN_ROLES = ["SUPER_ADMIN", "HR_ADMIN", "DEPT_HEAD", "EMPLOYEE"];
+  const isCustomRole = !!currentUser?.role && !BUILTIN_ROLES.includes(currentUser.role);
+  const customCanViewHR = isCustomRole && (permissions.EMP_LEAVES?.canView ?? false);
+  // Leaves: SA/HR/DEPT_HEAD (isAdmin) as before, or custom-with-grant. Backend team-scopes DEPT_HEAD.
+  const canViewProfiledLeaves = !isSelfView && (isAdmin || customCanViewHR);
+  // Claims: SA/HR only as before, or custom-with-grant.
+  const isBuiltinClaimsAdmin = currentUser?.role === "SUPER_ADMIN" || currentUser?.role === "HR_ADMIN";
+  const canViewProfiledClaims = !isSelfView && (isBuiltinClaimsAdmin || customCanViewHR);
+
   const { data: myLeaves } = useQuery({
-    queryKey: ["leaves", id],
-    queryFn: () => isAdmin
+    queryKey: ["leaves", id, canViewProfiledLeaves],
+    queryFn: () => canViewProfiledLeaves
       ? api.get(`/api/v1/leaves/employee/${id}`).then((r) => r.data.data)
       : api.get(`/api/v1/leaves/my`).then((r) => r.data.data),
     enabled: activeTab === "leaves",
   });
 
-  // SUPER_ADMIN / HR_ADMIN view the profiled employee's claims (incl. pending) via the
-  // admin endpoint; everyone else only ever sees their own. Mirrors the leaves query above.
-  const canViewAllClaims = currentUser?.role === "SUPER_ADMIN" || currentUser?.role === "HR_ADMIN";
   const { data: claims } = useQuery({
-    queryKey: ["claims", id, canViewAllClaims],
-    queryFn: () => canViewAllClaims
+    queryKey: ["claims", id, canViewProfiledClaims],
+    queryFn: () => canViewProfiledClaims
       ? api.get(`/api/v1/claims/admin/all?employeeId=${id}`).then((r) => r.data.data)
       : api.get(`/api/v1/claims/my`).then((r) => r.data.data),
     enabled: activeTab === "claims",

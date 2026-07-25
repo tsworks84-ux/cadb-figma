@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@cadb/db";
 import { authenticate, requireRole } from "../../middleware/authenticate.js";
 import { generateClaimNumber } from "../../utils/claimNumber.js";
+import { hasAnyPermission, isCustomRole } from "../../utils/permissions.js";
 import type { JwtPayload } from "@cadb/types";
 import { createWriteStream, mkdirSync, unlinkSync } from "fs";
 import { join, dirname } from "path";
@@ -82,7 +83,15 @@ export async function claimRoutes(fastify: FastifyInstance) {
   });
 
   // ── Get all claims (admin) with optional status/type filter ──────────────
-  fastify.get("/admin/all", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN") }, async (request, reply) => {
+  fastify.get("/admin/all", async (request, reply) => {
+    const user = request.user as JwtPayload;
+    // Built-in admins (SA/HR) as before, or a custom role granted view over Claims / employee
+    // HR data (EMP_LEAVES). Built-in DEPT_HEAD/EMPLOYEE stay excluded from the all-claims view.
+    const allowed = user.role === "SUPER_ADMIN" || user.role === "HR_ADMIN"
+      || (isCustomRole(user.role) && await hasAnyPermission(user, ["CLAIMS", "EMP_LEAVES"], "canView"));
+    if (!allowed) {
+      return reply.status(403).send({ success: false, error: "Forbidden", statusCode: 403 });
+    }
     const q = request.query as Record<string, string>;
     const where: any = {};
     if (q.status) where.status = q.status;
