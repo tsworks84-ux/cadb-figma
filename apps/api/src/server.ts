@@ -43,6 +43,7 @@ import { assessmentRoutes } from "./routes/v1/assessments.js";
 import { academicReportsRoutes } from "./routes/v1/academicReports.js";
 import { adminFeedbackRoutes } from "./routes/v1/adminFeedback.js";
 import { revenueRoutes } from "./routes/v1/revenue.js";
+import { confirmExpiredProbations } from "./utils/probation.js";
 import { createReadStream, existsSync } from "fs";
 import { join, dirname, extname } from "path";
 import { fileURLToPath } from "url";
@@ -180,6 +181,18 @@ try {
   await server.listen({ port, host: "0.0.0.0" });
   console.log(`API running at http://localhost:${port}`);
   console.log(`Swagger docs at http://localhost:${port}/docs`);
+
+  // Auto-confirm employees whose 3-month probation has elapsed — on startup, then daily.
+  const runProbationCheck = async () => {
+    try {
+      const n = await confirmExpiredProbations();
+      if (n > 0) console.log(`Probation check: confirmed ${n} employee(s) to ACTIVE`);
+    } catch (err) {
+      server.log.error({ err }, "Probation confirmation check failed");
+    }
+  };
+  await runProbationCheck();
+  setInterval(runProbationCheck, 24 * 60 * 60 * 1000).unref();
 } catch (err) {
   server.log.error(err);
   process.exit(1);
