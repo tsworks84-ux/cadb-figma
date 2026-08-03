@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { resolvePhotoUrl } from "@/lib/utils";
 import { usePermissions } from "@/hooks/usePermissions";
+import { ACADEMICS_TABS, canViewAcademicsTab } from "@/lib/academicsAccess";
 import Image from "next/image";
 import { ArrowLeft } from "lucide-react";
 
@@ -12,37 +13,20 @@ const NAV_BG   = "#141735";
 const NAV2     = "#28245f";
 const ORANGE   = "#ff914d";
 
-const NAV_ITEMS = [
-  { name: "Overview",    href: "/dashboard/academics",             permKey: null,             exact: true  },
-  { name: "Students",    href: "/dashboard/academics/students",    permKey: "STU_PROFILE",    exact: false },
-  { name: "Schedule",    href: "/dashboard/academics/schedule",    permKey: "STU_TIMETABLE",  exact: false },
-  { name: "Batches",     href: "/dashboard/academics/batches",     permKey: "ACA_BATCH",      exact: false },
-  { name: "Assignments", href: "/dashboard/academics/assignments", permKey: "STU_ASSIGNMENT", exact: false },
-  { name: "Assessments", href: "/dashboard/academics/assessments", permKey: "STU_ASSESSMENT", exact: false },
-  { name: "Reports",     href: "/dashboard/academics/reports",     permKey: null,             exact: false },
-  { name: "Settings",    href: "/dashboard/academics/settings",    permKey: "ACA_SETTINGS",   exact: false },
-];
-
 export function AcademicsTopNav() {
   const pathname     = usePathname();
   const searchParams = useSearchParams();
   const teacherId    = searchParams.get("teacherId");
   const { user }    = useAuthStore();
   const permissions = usePermissions();
-  const isSuperAdmin = user?.role === "SUPER_ADMIN";
-  const isHRAdmin    = user?.role === "HR_ADMIN";
-  const isEmployee   = !isSuperAdmin && !isHRAdmin && user?.role === "EMPLOYEE";
 
   // Build href preserving teacherId query param
   const buildHref = (href: string) => teacherId ? `${href}?teacherId=${teacherId}` : href;
 
-  const visibleItems = NAV_ITEMS.filter(({ permKey, name }) => {
-    // When viewing a teacher's scoped academics — show all except Settings
-    if (teacherId) return name !== "Settings";
-    if (isEmployee) return name === "Batches";
-    if (!permKey) return true;
-    if (isSuperAdmin || isHRAdmin) return true;
-    return permissions[permKey]?.canView ?? false;
+  const visibleItems = ACADEMICS_TABS.filter(({ module, name }) => {
+    // A teacher-scoped view never exposes global Academic Settings.
+    if (teacherId && name === "Settings") return false;
+    return canViewAcademicsTab(user?.role, permissions, module);
   });
 
   return (
@@ -149,18 +133,12 @@ export function AcademicsMobileTabStrip() {
   const teacherId    = searchParams.get("teacherId");
   const { user }    = useAuthStore();
   const permissions = usePermissions();
-  const isSuperAdmin = user?.role === "SUPER_ADMIN";
-  const isHRAdmin    = user?.role === "HR_ADMIN";
-  const isEmployee   = !isSuperAdmin && !isHRAdmin && user?.role === "EMPLOYEE";
 
   const buildHref = (href: string) => teacherId ? `${href}?teacherId=${teacherId}` : href;
 
-  const visibleItems = NAV_ITEMS.filter(({ permKey, name }) => {
-    if (teacherId) return name !== "Settings";
-    if (isEmployee) return name === "Batches";
-    if (!permKey) return true;
-    if (isSuperAdmin || isHRAdmin) return true;
-    return permissions[permKey]?.canView ?? false;
+  const visibleItems = ACADEMICS_TABS.filter(({ module, name }) => {
+    if (teacherId && name === "Settings") return false;
+    return canViewAcademicsTab(user?.role, permissions, module);
   });
 
   return (

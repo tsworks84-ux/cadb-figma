@@ -6,6 +6,8 @@ import { api } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
+import { usePermissionsState } from "@/hooks/usePermissions";
+import { ACADEMICS_TABS, canViewAcademicsTab, isAcademicsAdmin } from "@/lib/academicsAccess";
 import Link from "next/link";
 import {
   BarChart2, X, ChevronRight, Clock, MapPin, BookOpen,
@@ -304,13 +306,18 @@ function AcademicsOverviewPage() {
   const searchParams = useSearchParams();
   const teacherId    = searchParams.get("teacherId");
   const { user }     = useAuthStore();
+  const { permissions, ready } = usePermissionsState();
+
+  // The overview aggregates org-wide figures, so it stays an admin (or explicitly
+  // teacher-scoped) view. Anyone else lands on the first tab they're granted.
+  const firstAllowedTab = ACADEMICS_TABS.find(
+    (t) => t.module && canViewAcademicsTab(user?.role, permissions, t.module),
+  );
 
   useEffect(() => {
-    // EMPLOYEE without a teacherId scope → redirect to batches
-    if (user?.role === "EMPLOYEE" && !teacherId) {
-      router.replace("/dashboard/academics/batches");
-    }
-  }, [user?.role, router, teacherId]);
+    if (!ready || teacherId || isAcademicsAdmin(user?.role)) return;
+    if (firstAllowedTab) router.replace(firstAllowedTab.href);
+  }, [ready, teacherId, user?.role, firstAllowedTab, router]);
 
   const [revenueOpen,      setRevenueOpen]      = useState(false);
   const [scheduleOpen,     setScheduleOpen]     = useState(false);

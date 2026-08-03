@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
+import { canViewAcademicsTab } from "@/lib/academicsAccess";
 import Image from "next/image";
 
 const NAV_ITEMS = [
@@ -27,14 +28,10 @@ export function AcademicsNav() {
   const pathname = usePathname();
   const { user } = useAuthStore();
   const permissions = usePermissions();
-  const isSuperAdmin = user?.role === "SUPER_ADMIN";
-  const isHRAdmin    = user?.role === "HR_ADMIN";
 
-  const visibleItems = NAV_ITEMS.filter(({ permKey }) => {
-    if (!permKey) return true;
-    if (isSuperAdmin || isHRAdmin) return true;
-    return permissions[permKey]?.canView ?? false;
-  });
+  const visibleItems = NAV_ITEMS.filter(({ permKey }) =>
+    canViewAcademicsTab(user?.role, permissions, permKey),
+  );
 
   return (
     <aside className="flex h-screen w-56 flex-col bg-slate-900 text-white shrink-0">

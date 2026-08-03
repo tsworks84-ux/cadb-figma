@@ -30,10 +30,15 @@ const ALLOW_ALL: PermMap = Object.fromEntries(
   ALL_MODULES.map((m) => [m, { canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true, canAppraise: true }])
 );
 
-export function usePermissions(): PermMap {
+/**
+ * Permission map plus a `ready` flag. Use this (rather than `usePermissions`)
+ * when a denied result triggers a redirect or an "Access denied" screen, so the
+ * UI can wait instead of flashing a false negative while the fetch is in flight.
+ */
+export function usePermissionsState(): { permissions: PermMap; ready: boolean } {
   const role = useAuthStore((s) => s.user?.role) ?? "EMPLOYEE";
 
-  const { data } = useQuery<PermMap>({
+  const { data, isPending } = useQuery<PermMap>({
     queryKey: ["my-permissions", role],
     queryFn: () => api.get("/api/v1/roles/my-permissions").then((r) => r.data.data),
     staleTime: 2 * 60 * 1000,
@@ -42,8 +47,12 @@ export function usePermissions(): PermMap {
   });
 
   // SUPER_ADMIN always has everything — their permissions row cannot be edited in the admin panel
-  if (role === "SUPER_ADMIN") return ALLOW_ALL;
+  if (role === "SUPER_ADMIN") return { permissions: ALLOW_ALL, ready: true };
 
-  // Return fetched data once available; deny all while loading to prevent flash of forbidden content
-  return data ?? DENY_ALL;
+  // Deny all while loading to prevent a flash of forbidden content
+  return { permissions: data ?? DENY_ALL, ready: !isPending };
+}
+
+export function usePermissions(): PermMap {
+  return usePermissionsState().permissions;
 }

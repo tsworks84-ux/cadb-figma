@@ -1,6 +1,8 @@
 import { type FastifyPluginAsync } from "fastify";
 import { prisma } from "@cadb/db";
 import ExcelJS from "exceljs";
+import { authenticate } from "../../middleware/authenticate.js";
+import { ACADEMICS_MODULES, requireModulePermission } from "../../utils/permissions.js";
 
 // ── Excel helpers ─────────────────────────────────────────────────────────────
 
@@ -56,6 +58,11 @@ function fmtDate(d: Date | null | undefined) {
 // ── Route plugin ──────────────────────────────────────────────────────────────
 
 export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
+  // These routes previously had no auth hook at all — the Excel exports were
+  // downloadable unauthenticated.
+  fastify.addHook("preHandler", authenticate);
+  // Reports draw on every academics module, so any academics view grant suffices.
+  fastify.addHook("preHandler", requireModulePermission([...ACADEMICS_MODULES]));
 
   // ── GET /batch-performance ─────────────────────────────────────────────────
   // Excel: 3 sheets — Exam Summary, Student Rankings, Detailed Marks Matrix

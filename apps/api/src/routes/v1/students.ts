@@ -8,6 +8,7 @@ import { sendMail } from "../../utils/mailer.js";
 import { randomUUID } from "crypto";
 import path from "path";
 import { getTeacherBatchIds } from "./teacherUtils.js";
+import { requireModulePermission } from "../../utils/permissions.js";
 
 const DEFAULT_PASSWORD = "Welcome@123";
 
@@ -95,6 +96,8 @@ const updateSchema = createSchema.partial().extend({
 
 export async function studentRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", authenticate);
+  // Students tab — gated on the STU_PROFILE grant (SUPER_ADMIN / HR_ADMIN bypass).
+  fastify.addHook("preHandler", requireModulePermission("STU_PROFILE"));
 
   // ── LIST ───────────────────────────────────────────────────────────────────
 

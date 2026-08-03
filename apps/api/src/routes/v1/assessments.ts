@@ -3,6 +3,8 @@ import { prisma } from "@cadb/db";
 import { z } from "zod";
 import ExcelJS from "exceljs";
 import { getTeacherBatchIds } from "./teacherUtils.js";
+import { authenticate } from "../../middleware/authenticate.js";
+import { requireModulePermission } from "../../utils/permissions.js";
 
 const examInclude = {
   subjects: {
@@ -200,6 +202,11 @@ function styleDataRow(row: ExcelJS.Row, even: boolean) {
 }
 
 export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
+  // These routes previously had no auth hook at all — anyone could read/write
+  // assessment data unauthenticated.
+  fastify.addHook("preHandler", authenticate);
+  // Assessments tab — gated on the STU_ASSESSMENT grant (SUPER_ADMIN / HR_ADMIN bypass).
+  fastify.addHook("preHandler", requireModulePermission("STU_ASSESSMENT"));
 
   // ── GET /stats ────────────────────────────────────────────────────────────
   fastify.get("/stats", async (req, reply) => {

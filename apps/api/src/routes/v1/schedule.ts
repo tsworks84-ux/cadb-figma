@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@cadb/db";
 import { authenticate } from "../../middleware/authenticate.js";
 import { maybeAutoConcludes } from "./scheduleHelpers.js";
+import { requireModulePermission } from "../../utils/permissions.js";
 
 const scheduleSchema = z.object({
   academicYear: z.string().min(1),
@@ -48,6 +49,21 @@ function requireAdmin(request: any, reply: any) {
 
 export async function scheduleRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", authenticate);
+
+  // Schedule tab — STU_TIMETABLE, with attendance marking under STU_ATTENDANCE.
+  fastify.addHook("preHandler", requireModulePermission((request) => {
+    const url = request.url.split("?")[0];
+
+    // "My upcoming lectures" on the home dashboard: a user listing their OWN
+    // schedule isn't browsing Academics, so it stays open.
+    if (request.method === "GET" && /^\/api\/v1\/academics\/schedules\/?$/.test(url)) {
+      const { employeeId } = request.query as { employeeId?: string };
+      if (employeeId && employeeId === (request.user as any)?.sub) return null;
+    }
+
+    if (url.includes("/attendance")) return "STU_ATTENDANCE";
+    return "STU_TIMETABLE";
+  }));
 
   // ── LIST ───────────────────────────────────────────────────────────────────
 

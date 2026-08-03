@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@cadb/db";
 import { authenticate } from "../../middleware/authenticate.js";
 import { getTeacherBatchIds } from "./teacherUtils.js";
+import { ACADEMICS_MODULES, requireModulePermission } from "../../utils/permissions.js";
 
 const batchSchema = z.object({
   name:            z.string().min(1),
@@ -39,7 +40,9 @@ function requireAdmin(request: any, reply: any) {
 
 async function requireTeacherBatchAccess(request: any, reply: any, batchId: string): Promise<boolean> {
   if (request.user?.role !== "EMPLOYEE") return true;
-  const allowed = await getTeacherBatchIds(request.user.id);
+  // JWT payload keys off `sub` — `request.user.id` is undefined, which silently
+  // denied every teacher here.
+  const allowed = await getTeacherBatchIds(request.user.sub);
   if (!allowed.includes(batchId)) {
     reply.status(403).send({ success: false, error: "Access denied" });
     return false;
@@ -49,6 +52,23 @@ async function requireTeacherBatchAccess(request: any, reply: any, batchId: stri
 
 export async function academicsRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", authenticate);
+
+  // Academics access is driven by the permission matrix (Admin → Roles & Permissions).
+  // SUPER_ADMIN / HR_ADMIN bypass; everyone else needs the module grant.
+  fastify.addHook("preHandler", requireModulePermission((request) => {
+    const url = request.url.split("?")[0];
+
+    // A user reading their OWN batch list (employee profile page) is not
+    // browsing Academics — keep that open regardless of the matrix.
+    const own = url.match(/^\/api\/v1\/academics\/employees\/([^/]+)\/batches$/);
+    if (own && own[1] === (request.user as any)?.sub) return null;
+
+    // Batch-scoped routes (incl. /batches/:id/subjects) belong to ACA_BATCH.
+    if (url.includes("/batches"))  return "ACA_BATCH";
+    if (url.includes("/subjects")) return "ACA_SUBJECT";
+    // Overview dashboard — any academics grant is enough to land on it.
+    return [...ACADEMICS_MODULES];
+  }));
 
   // ── OVERVIEW DASHBOARD ─────────────────────────────────────────────────────
 

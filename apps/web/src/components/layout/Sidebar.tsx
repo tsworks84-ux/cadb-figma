@@ -15,6 +15,7 @@ import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import Image from "next/image";
 import { usePermissions } from "@/hooks/usePermissions";
+import { canViewAcademics } from "@/lib/academicsAccess";
 
 // How long cached data stays fresh — must match each page's staleTime
 const STALE = {
@@ -79,11 +80,13 @@ export function Sidebar() {
   const academicsHref = (!canViewAdmin && role === "EMPLOYEE" && user)
     ? `/dashboard/academics?teacherId=${user.id}`
     : "/dashboard/academics";
+  // Academics is only offered to roles that actually hold an academics grant
+  const canViewAcademicsNav = canViewAcademics(role, permissions);
 
   const mgmtNav: { name: string; href: string; icon: React.ElementType; badge?: number }[] = [
     profileEntry,
     ...(canViewAdmin ? [{ name: "Administration",     href: "/dashboard/admin",     icon: Building2    }] : []),
-    { name: "Academics",        href: academicsHref,           icon: School        },
+    ...(canViewAcademicsNav ? [{ name: "Academics",   href: academicsHref,          icon: School       }] : []),
     ...(canViewAdmin ? [{ name: "Student Feedback",   href: "/dashboard/feedback",  icon: MessageSquare, badge: openFeedbackCount }] : []),
     ...(canViewAdmin ? [{ name: "Revenue",            href: "/dashboard/revenue",   icon: IndianRupee  }] : []),
     ...(canViewMIS   ? [{ name: "MIS Reports",        href: "/dashboard/mis",       icon: BarChart3    }] : []),

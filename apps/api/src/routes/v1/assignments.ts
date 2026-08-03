@@ -4,6 +4,7 @@ import { prisma } from "@cadb/db";
 import { authenticate } from "../../middleware/authenticate.js";
 import { maybeAutoConcludes } from "./scheduleHelpers.js";
 import { getTeacherBatchIds } from "./teacherUtils.js";
+import { requireModulePermission } from "../../utils/permissions.js";
 import { createWriteStream, unlinkSync } from "fs";
 import { pipeline } from "stream/promises";
 import { join, dirname } from "path";
@@ -73,6 +74,8 @@ async function checkTeacherOwnsAssignment(teacherId: string, assignmentId: strin
 
 export async function assignmentRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", authenticate);
+  // Assignments tab — gated on the STU_ASSIGNMENT grant (SUPER_ADMIN / HR_ADMIN bypass).
+  fastify.addHook("preHandler", requireModulePermission("STU_ASSIGNMENT"));
 
   // ── LIST ───────────────────────────────────────────────────────────────────
 
