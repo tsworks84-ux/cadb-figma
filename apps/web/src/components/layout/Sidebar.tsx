@@ -7,7 +7,7 @@ import { cn, resolvePhotoUrl } from "@/lib/utils";
 import {
   Users, Home, CalendarOff, Receipt, Shield,
   GraduationCap, Settings, LogOut, BarChart3, Building2, User,
-  CalendarDays, UsersRound, ListTodo, Megaphone, ClipboardList, School, MessageSquare, IndianRupee,
+  CalendarDays, UsersRound, ListTodo, Megaphone, ClipboardList, School, MessageSquare, IndianRupee, X,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useRouter } from "next/navigation";
@@ -23,7 +23,13 @@ const STALE = {
   medium: 2 * 60 * 1000,
 };
 
-export function Sidebar() {
+interface SidebarProps {
+  /** Drawer state — only meaningful below the `lg` breakpoint. */
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
+}
+
+export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
   const pathname = usePathname();
   const { user, clearAuth } = useAuthStore();
   const router = useRouter();
@@ -214,14 +220,42 @@ export function Sidebar() {
   };
 
   return (
-    <aside className={cn("flex h-screen w-64 flex-col text-inherit", theme.aside)}>
+    <>
+      {/* Mobile backdrop — tap to dismiss the drawer */}
+      <div
+        onClick={onMobileClose}
+        className={cn(
+          "fixed inset-0 z-40 bg-black/50 backdrop-blur-sm transition-opacity duration-300 lg:hidden",
+          mobileOpen ? "opacity-100" : "opacity-0 pointer-events-none",
+        )}
+      />
+
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex h-full w-64 flex-col text-inherit",
+          // Below lg the sidebar slides in as an overlay drawer…
+          "transform transition-transform duration-300 ease-in-out",
+          mobileOpen ? "translate-x-0" : "-translate-x-full",
+          // …and from lg up it sits in the normal flow, always visible.
+          "lg:relative lg:translate-x-0",
+          theme.aside,
+        )}
+      >
       {/* Logo */}
       <div className={cn("flex h-16 items-center gap-3 px-4 border-b", theme.logoBorder)}>
         <Image src="/logo.png" alt="Centum Academy" width={36} height={36} className="shrink-0 rounded-full" />
-        <div>
-          <p className="font-semibold text-sm leading-tight text-gray-900">Centum Academy</p>
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-sm leading-tight text-gray-900 truncate">Centum Academy</p>
           <p className={theme.logoSubtitle}>{isSuperAdmin ? "Administration" : "Dashboard"}</p>
         </div>
+        {/* Mobile close button */}
+        <button
+          onClick={onMobileClose}
+          className="lg:hidden p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors"
+          aria-label="Close menu"
+        >
+          <X className="h-4 w-4" />
+        </button>
       </div>
 
       {/* Nav */}
@@ -237,6 +271,7 @@ export function Sidebar() {
               href={item.href}
               prefetch={true}
               onMouseEnter={() => prefetch(item.href)}
+              onClick={onMobileClose}
               className={cn(
                 "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                 active ? theme.activeLink : theme.inactiveLink
@@ -260,6 +295,7 @@ export function Sidebar() {
                   href={item.href}
                   prefetch={true}
                   onMouseEnter={() => prefetch(item.href)}
+                  onClick={onMobileClose}
                   className={cn(
                     "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                     active ? theme.activeLink : theme.inactiveLink
@@ -298,6 +334,7 @@ export function Sidebar() {
           </button>
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }
