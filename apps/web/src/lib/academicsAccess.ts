@@ -14,11 +14,23 @@ export const ACADEMICS_MODULES = [
 ] as const;
 
 /**
- * SUPER_ADMIN and HR_ADMIN bypass the matrix for Academics, matching the API.
- * Everyone else — DEPT_HEAD, EMPLOYEE and custom roles — needs the grant.
+ * Only SUPER_ADMIN bypasses the matrix, matching the API. Every other role —
+ * HR_ADMIN included — needs the grant, so nothing is editable in Academics
+ * unless the super admin has granted it.
  */
 export function isAcademicsAdmin(role: string | undefined): boolean {
-  return role === "SUPER_ADMIN" || role === "HR_ADMIN";
+  return role === "SUPER_ADMIN";
+}
+
+/** Does the role hold `action` on `module` for Academics? */
+export function hasAcademicsAction(
+  role: string | undefined,
+  permissions: PermMap,
+  module: string,
+  action: "canCreate" | "canEdit" | "canDelete",
+): boolean {
+  if (isAcademicsAdmin(role)) return true;
+  return permissions[module]?.[action] ?? false;
 }
 
 /** `null` module = no specific grant needed beyond having *some* academics access. */

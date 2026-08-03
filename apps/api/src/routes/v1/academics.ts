@@ -31,12 +31,6 @@ const subjectSchema = z.object({
   isActive:    z.boolean().optional(),
 });
 
-function requireAdmin(request: any, reply: any) {
-  const role = request.user?.role;
-  if (!["SUPER_ADMIN", "HR_ADMIN"].includes(role)) {
-    return reply.status(403).send({ success: false, error: "Insufficient permissions" });
-  }
-}
 
 async function requireTeacherBatchAccess(request: any, reply: any, batchId: string): Promise<boolean> {
   if (request.user?.role !== "EMPLOYEE") return true;
@@ -299,7 +293,6 @@ export async function academicsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post("/batches", async (request, reply) => {
-    requireAdmin(request, reply);
     const parsed = batchSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
@@ -329,7 +322,6 @@ export async function academicsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/batches/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const parsed = batchSchema.partial().safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -363,7 +355,6 @@ export async function academicsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/batches/:id/archive", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const batch = await prisma.batch.findUnique({ where: { id } });
     if (!batch) return reply.status(404).send({ success: false, error: "Batch not found" });
@@ -376,7 +367,6 @@ export async function academicsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.delete("/batches/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const count = await prisma.studentBatch.count({ where: { batchId: id } });
     if (count > 0) return reply.status(400).send({ success: false, error: `Cannot delete — ${count} student(s) assigned to this batch` });
@@ -398,7 +388,6 @@ export async function academicsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post("/subjects", async (request, reply) => {
-    requireAdmin(request, reply);
     const parsed = subjectSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
@@ -410,7 +399,6 @@ export async function academicsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/subjects/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const parsed = subjectSchema.partial().safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -425,7 +413,6 @@ export async function academicsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/subjects/:id/toggle", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const subject = await prisma.subject.findUnique({ where: { id } });
     if (!subject) return reply.status(404).send({ success: false, error: "Subject not found" });
@@ -435,7 +422,6 @@ export async function academicsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.delete("/subjects/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const count = await prisma.batchSubject.count({ where: { subjectId: id } });
     if (count > 0) return reply.status(400).send({ success: false, error: `Cannot delete — subject is assigned to ${count} batch(es)` });
@@ -461,7 +447,6 @@ export async function academicsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.put("/batches/:id/subjects", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const { subjectId, employeeId } = (request.body as any) ?? {};
     if (!subjectId) return reply.status(400).send({ success: false, error: "subjectId required" });
@@ -479,7 +464,6 @@ export async function academicsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.delete("/batches/:id/subjects/:subjectId", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id, subjectId } = request.params as any;
     await prisma.batchSubject.deleteMany({ where: { batchId: id, subjectId } });
     return reply.send({ success: true });
@@ -488,7 +472,6 @@ export async function academicsRoutes(fastify: FastifyInstance) {
   // ── BATCH-STUDENT MANAGEMENT ───────────────────────────────────────────────
 
   fastify.put("/batches/:id/students/:studentId", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id, studentId } = request.params as any;
 
     const [batch, student] = await Promise.all([
@@ -509,7 +492,6 @@ export async function academicsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.delete("/batches/:id/students/:studentId", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id, studentId } = request.params as any;
 
     const membership = await prisma.studentBatch.findUnique({
@@ -537,7 +519,6 @@ export async function academicsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/batches/:id/students/:studentId/status", async (request, reply) => {
-    requireAdmin(request, reply);
     const { studentId } = request.params as any;
     const { status } = request.body as any;
 

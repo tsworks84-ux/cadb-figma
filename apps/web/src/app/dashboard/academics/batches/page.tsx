@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { X, Archive, ArchiveRestore, Trash2, Pencil, Check, ChevronRight, ChevronDown } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
+import { hasAcademicsAction } from "@/lib/academicsAccess";
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const D = {
@@ -180,9 +181,7 @@ function BatchesPage() {
   const [showArchived,   setShowArchived]   = useState(false);
 
   const canEdit =
-    user?.role === "SUPER_ADMIN" ||
-    user?.role === "HR_ADMIN" ||
-    (permissions["ACA_BATCH"]?.canCreate ?? false);
+    hasAcademicsAction(user?.role, permissions, "ACA_BATCH", "canCreate");
 
   const isEmployeeRole = user?.role === "EMPLOYEE";
   // teacherId in URL means "scoped teacher view" — treat like employee role for fetching

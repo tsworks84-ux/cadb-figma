@@ -44,20 +44,15 @@ const assignmentInclude = {
   },
 } as const;
 
-function requireAdmin(request: any, reply: any) {
-  const role = request.user?.role;
-  if (!["SUPER_ADMIN", "HR_ADMIN"].includes(role)) {
-    return reply.status(403).send({ success: false, error: "Insufficient permissions" });
-  }
-}
 
-/** Returns true if the caller is admin, false if EMPLOYEE (caller should do scope check), or sends 403. */
-function isAdminOrEmployee(request: any, reply: any): boolean | null {
-  const role = request.user?.role;
-  if (["SUPER_ADMIN", "HR_ADMIN"].includes(role)) return true;
-  if (role === "EMPLOYEE") return false;
-  reply.status(403).send({ success: false, error: "Insufficient permissions" });
-  return null;
+/**
+ * Returns false for EMPLOYEE (the caller then scopes to their own batches), true
+ * for everyone else. The plugin-level hook has already proved the STU_ASSIGNMENT
+ * grant, so there is nothing left to reject here — the old version 403'd any role
+ * that wasn't literally SUPER_ADMIN/HR_ADMIN, overriding the matrix.
+ */
+function isAdminOrEmployee(request: any, _reply: any): boolean | null {
+  return request.user?.role === "EMPLOYEE" ? false : true;
 }
 
 async function checkTeacherOwnsBatchIds(teacherId: string, batchIds: string[]): Promise<boolean> {
@@ -533,7 +528,6 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
   // ── DELETE ─────────────────────────────────────────────────────────────────
 
   fastify.delete("/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const assignment = await prisma.assignment.findUnique({ where: { id }, select: { attachmentUrl: true } });
     if (assignment?.attachmentUrl) {

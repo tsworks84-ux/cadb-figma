@@ -12,12 +12,6 @@ import { requireModulePermission } from "../../utils/permissions.js";
 
 const DEFAULT_PASSWORD = "Welcome@123";
 
-function requireAdmin(request: any, reply: any) {
-  const role = request.user?.role;
-  if (!["SUPER_ADMIN", "HR_ADMIN"].includes(role)) {
-    return reply.status(403).send({ success: false, error: "Insufficient permissions" });
-  }
-}
 
 async function generateStudentCode(): Promise<string> {
   const last = await prisma.student.findFirst({
@@ -228,7 +222,6 @@ export async function studentRoutes(fastify: FastifyInstance) {
   // ── CREATE ─────────────────────────────────────────────────────────────────
 
   fastify.post("/", async (request, reply) => {
-    requireAdmin(request, reply);
     const parsed = createSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
@@ -298,7 +291,6 @@ export async function studentRoutes(fastify: FastifyInstance) {
   // ── UPDATE ─────────────────────────────────────────────────────────────────
 
   fastify.patch("/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const parsed = updateSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -330,7 +322,6 @@ export async function studentRoutes(fastify: FastifyInstance) {
   // ── ARCHIVE TOGGLE ─────────────────────────────────────────────────────────
 
   fastify.patch("/:id/archive", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const student = await prisma.student.findUnique({ where: { id }, select: { isArchived: true } });
     if (!student) return reply.status(404).send({ success: false, error: "Student not found" });
@@ -342,7 +333,6 @@ export async function studentRoutes(fastify: FastifyInstance) {
   // ── RESET PASSWORD ─────────────────────────────────────────────────────────
 
   fastify.post("/:id/reset-password", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const student = await prisma.student.findUnique({ where: { id }, select: { id: true } });
     if (!student) return reply.status(404).send({ success: false, error: "Student not found" });
@@ -357,7 +347,6 @@ export async function studentRoutes(fastify: FastifyInstance) {
   // ── PHOTO UPLOAD ──────────────────────────────────────────────────────────
 
   fastify.patch("/:id/photo", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const student = await prisma.student.findUnique({ where: { id }, select: { id: true } });
     if (!student) return reply.status(404).send({ success: false, error: "Student not found" });
@@ -383,7 +372,6 @@ export async function studentRoutes(fastify: FastifyInstance) {
   // ── DELETE ─────────────────────────────────────────────────────────────────
 
   fastify.delete("/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     await prisma.student.delete({ where: { id } });
     return reply.send({ success: true });
@@ -411,7 +399,6 @@ export async function studentRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post("/:id/payment-logs", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const parsed = paymentLogSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -451,7 +438,6 @@ export async function studentRoutes(fastify: FastifyInstance) {
   });
 
   fastify.delete("/:id/payment-logs/:logId", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id, logId } = request.params as any;
     const log = await prisma.studentPaymentLog.findUnique({ where: { id: logId, studentId: id } });
     if (!log) return reply.status(404).send({ success: false, error: "Log not found" });
@@ -474,7 +460,6 @@ export async function studentRoutes(fastify: FastifyInstance) {
   // ── ADD INSTALMENT ─────────────────────────────────────────────────────────
 
   fastify.post("/:id/instalments", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const body = request.body as any;
 
@@ -810,7 +795,6 @@ export async function studentRoutes(fastify: FastifyInstance) {
   // ── INSTALMENT PAY ─────────────────────────────────────────────────────────
 
   fastify.patch("/:id/instalments/:instalmentId", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id, instalmentId } = request.params as any;
     const body = request.body as any;
     const ins = await prisma.studentInstalment.findUnique({ where: { id: instalmentId, studentId: id } });
@@ -860,7 +844,6 @@ export async function studentRoutes(fastify: FastifyInstance) {
 
   // POST /students/:id/ptms — schedule a new PTM and send emails
   fastify.post("/:id/ptms", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const body = request.body as any;
 
@@ -973,7 +956,6 @@ export async function studentRoutes(fastify: FastifyInstance) {
 
   // PATCH /students/:id/ptms/:ptmId — update status or notes
   fastify.patch("/:id/ptms/:ptmId", async (request, reply) => {
-    requireAdmin(request, reply);
     const { ptmId } = request.params as any;
     const { status, notes, venue, agenda, startTime, endTime } = request.body as any;
     const data: any = {};
@@ -989,7 +971,6 @@ export async function studentRoutes(fastify: FastifyInstance) {
 
   // DELETE /students/:id/ptms/:ptmId
   fastify.delete("/:id/ptms/:ptmId", async (request, reply) => {
-    requireAdmin(request, reply);
     const { ptmId } = request.params as any;
     await prisma.pTM.delete({ where: { id: ptmId } });
     return reply.send({ success: true });
@@ -1014,7 +995,6 @@ export async function studentRoutes(fastify: FastifyInstance) {
 
   // POST /students/:id/ptms/:ptmId/action-items
   fastify.post("/:id/ptms/:ptmId/action-items", async (request, reply) => {
-    requireAdmin(request, reply);
     const { ptmId } = request.params as any;
     const { description, status } = request.body as any;
     if (!description?.trim()) return reply.status(400).send({ success: false, error: "description is required" });
@@ -1030,7 +1010,6 @@ export async function studentRoutes(fastify: FastifyInstance) {
 
   // PATCH /students/:id/ptms/:ptmId/action-items/:itemId
   fastify.patch("/:id/ptms/:ptmId/action-items/:itemId", async (request, reply) => {
-    requireAdmin(request, reply);
     const { itemId } = request.params as any;
     const { description, status } = request.body as any;
     const data: any = {};
@@ -1042,7 +1021,6 @@ export async function studentRoutes(fastify: FastifyInstance) {
 
   // DELETE /students/:id/ptms/:ptmId/action-items/:itemId
   fastify.delete("/:id/ptms/:ptmId/action-items/:itemId", async (request, reply) => {
-    requireAdmin(request, reply);
     const { itemId } = request.params as any;
     await prisma.pTMActionItem.delete({ where: { id: itemId } });
     return reply.send({ success: true });

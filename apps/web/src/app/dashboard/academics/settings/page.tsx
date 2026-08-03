@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
+import { hasAcademicsAction } from "@/lib/academicsAccess";
 
 // ── Design tokens ───────────────────────────────────────────────────────────────
 const D = { line: "#e6e8ef", muted: "#7c8598", ink: "#111827", nav2: "#28245f", bg: "#f4f6fa", accent: "#eef2ff" };
@@ -969,8 +970,7 @@ export default function AcademicSettingsPage() {
   const [mobileOpen, setMobileOpen] = useState(false);
   // Respect the assignable ACA_SETTINGS.canEdit grant so custom roles work; keep built-in
   // admins as overrides (matches the Settings nav visibility convention).
-  const canEdit = user?.role === "SUPER_ADMIN" || user?.role === "HR_ADMIN"
-    || (permissions.ACA_SETTINGS?.canEdit ?? false);
+  const canEdit = hasAcademicsAction(user?.role, permissions, "ACA_SETTINGS", "canEdit");
 
   const sidebarContent = (
     <>

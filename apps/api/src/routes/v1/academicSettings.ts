@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "@cadb/db";
 import { authenticate } from "../../middleware/authenticate.js";
-import { hasPermission } from "../../utils/permissions.js";
+import { hasPermission, isAcademicsAdmin } from "../../utils/permissions.js";
 import type { JwtPayload } from "@cadb/types";
 
 // ── Academic Years ─────────────────────────────────────────────────────────────
@@ -50,12 +50,13 @@ const centreSchema = z.object({
 export async function academicSettingsRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", authenticate);
 
-  // Reads only need authentication; writes require the ACA_SETTINGS edit grant
-  // (built-in SA/HR always allowed, matching the Academic Settings UI edit gate).
+  // Reads only need authentication (grades/schools/courses are lookup data the
+  // academics forms need); writes require the ACA_SETTINGS edit grant. Only
+  // SUPER_ADMIN bypasses — HR_ADMIN goes through the matrix like everyone else.
   fastify.addHook("preHandler", async (request, reply) => {
     if (request.method === "GET") return;
     const user = request.user as JwtPayload;
-    const allowed = user.role === "SUPER_ADMIN" || user.role === "HR_ADMIN"
+    const allowed = isAcademicsAdmin(user.role)
       || await hasPermission(user, "ACA_SETTINGS", "canEdit");
     if (!allowed) {
       return reply.status(403).send({ success: false, error: "Insufficient permissions", statusCode: 403 });

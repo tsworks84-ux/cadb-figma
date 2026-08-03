@@ -15,6 +15,8 @@ import {
   ResponsiveContainer, ComposedChart, Area,
 } from "recharts";
 import { useAuthStore } from "@/store/auth";
+import { usePermissions } from "@/hooks/usePermissions";
+import { hasAcademicsAction } from "@/lib/academicsAccess";
 import { useRouter, useSearchParams } from "next/navigation";
 import { format, parseISO, startOfWeek, endOfWeek } from "date-fns";
 
@@ -1038,8 +1040,9 @@ function AssignmentsPage() {
   const searchParams = useSearchParams();
   const teacherId    = searchParams.get("teacherId");
   const qc           = useQueryClient();
-  // Teachers can create/edit assignments for their batches
-  const canEdit = user?.role === "SUPER_ADMIN" || user?.role === "HR_ADMIN" || !!teacherId || user?.role === "EMPLOYEE";
+  const permissions  = usePermissions();
+  // Write access comes from the permission matrix; only SUPER_ADMIN bypasses it
+  const canEdit = hasAcademicsAction(user?.role, permissions, "STU_ASSIGNMENT", "canEdit");
 
   // Filter state
   const [search,         setSearch]         = useState("");

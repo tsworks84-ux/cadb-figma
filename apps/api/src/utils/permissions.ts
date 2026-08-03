@@ -58,12 +58,16 @@ export const ACADEMICS_MODULES = [
 ] as const;
 
 /**
- * SUPER_ADMIN and HR_ADMIN keep unconditional academics access — matching the
- * existing academic-settings gate and the UI, where those two bypass the matrix.
- * Everyone else (DEPT_HEAD, EMPLOYEE, custom roles) goes through RolePermission.
+ * Only SUPER_ADMIN bypasses the matrix — its grants are implicit and not editable
+ * in the admin panel. EVERY other role, HR_ADMIN included, goes through
+ * RolePermission, so "nobody touches academic records unless the super admin
+ * grants it" holds literally.
+ *
+ * Do not re-add a blanket HR_ADMIN bypass here: it silently overrode the matrix
+ * and made the admin panel's checkboxes decorative for that role.
  */
 export function isAcademicsAdmin(role: string | undefined): boolean {
-  return role === "SUPER_ADMIN" || role === "HR_ADMIN";
+  return role === "SUPER_ADMIN";
 }
 
 const METHOD_ACTION: Record<string, PermAction> = {

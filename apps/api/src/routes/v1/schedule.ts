@@ -39,12 +39,6 @@ const scheduleInclude = {
   },
 } as const;
 
-function requireAdmin(request: any, reply: any) {
-  const role = request.user?.role;
-  if (!["SUPER_ADMIN", "HR_ADMIN"].includes(role)) {
-    return reply.status(403).send({ success: false, error: "Insufficient permissions" });
-  }
-}
 
 
 export async function scheduleRoutes(fastify: FastifyInstance) {
@@ -189,7 +183,9 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
   fastify.post("/:id/attendance", async (request, reply) => {
     const role   = (request.user as any)?.role;
     const userId = (request.user as any)?.sub;
-    if (!["SUPER_ADMIN", "HR_ADMIN"].includes(role)) {
+    // The plugin hook already proved the STU_ATTENDANCE/STU_TIMETABLE grant.
+    // What's left is teacher scoping: an EMPLOYEE may only touch their own lecture.
+    if (role === "EMPLOYEE") {
       const sched = await prisma.schedule.findUnique({ where: { id: (request.params as any).id }, select: { employeeId: true } });
       if (!sched || sched.employeeId !== userId) {
         return reply.status(403).send({ success: false, error: "Insufficient permissions" });
@@ -221,7 +217,6 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
   // ── DELETE ATTENDANCE RECORD ───────────────────────────────────────────────
 
   fastify.delete("/:id/attendance/:studentId", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id, studentId } = request.params as any;
     await prisma.scheduleAttendance.deleteMany({
       where: { scheduleId: id, studentId },
@@ -232,7 +227,6 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
   // ── CREATE ─────────────────────────────────────────────────────────────────
 
   fastify.post("/", async (request, reply) => {
-    requireAdmin(request, reply);
     const parsed = scheduleSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
@@ -254,7 +248,6 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
   // ── UPDATE ─────────────────────────────────────────────────────────────────
 
   fastify.patch("/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     const parsed = scheduleSchema.partial().safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -286,7 +279,9 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
   fastify.patch("/:id/status", async (request, reply) => {
     const role   = (request.user as any)?.role;
     const userId = (request.user as any)?.sub;
-    if (!["SUPER_ADMIN", "HR_ADMIN"].includes(role)) {
+    // The plugin hook already proved the STU_ATTENDANCE/STU_TIMETABLE grant.
+    // What's left is teacher scoping: an EMPLOYEE may only touch their own lecture.
+    if (role === "EMPLOYEE") {
       const sched = await prisma.schedule.findUnique({ where: { id: (request.params as any).id }, select: { employeeId: true } });
       if (!sched || sched.employeeId !== userId) {
         return reply.status(403).send({ success: false, error: "Insufficient permissions" });
@@ -305,7 +300,6 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
   // ── DELETE ─────────────────────────────────────────────────────────────────
 
   fastify.delete("/:id", async (request, reply) => {
-    requireAdmin(request, reply);
     const { id } = request.params as any;
     await prisma.schedule.delete({ where: { id } });
     return reply.send({ success: true });

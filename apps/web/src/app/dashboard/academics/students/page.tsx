@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
+import { hasAcademicsAction } from "@/lib/academicsAccess";
 import { useDebounce } from "@/hooks/useDebounce";
 
 // ── helpers ────────────────────────────────────────────────────────────────────
@@ -174,9 +175,7 @@ function StudentsPage() {
   const qc           = useQueryClient();
 
   const canEdit =
-    user?.role === "SUPER_ADMIN" ||
-    user?.role === "HR_ADMIN" ||
-    (permissions["STU_PROFILE"]?.canCreate ?? false);
+    hasAcademicsAction(user?.role, permissions, "STU_PROFILE", "canCreate");
 
   // ── Filter state ─────────────────────────────────────────────────────────────
   const [search, setSearch]             = useState("");
