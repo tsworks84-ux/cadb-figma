@@ -1,11 +1,17 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "@cadb/db";
-import { authenticate, requireRole } from "../../middleware/authenticate.js";
+import { authenticate } from "../../middleware/authenticate.js";
 import type { JwtPayload } from "@cadb/types";
 import { sendMail } from "../../utils/mailer.js";
 import { getFiscalYear, computeAccrued, computeCarryForward } from "../../utils/leave.js";
 import { hasPermission, isCustomRole } from "../../utils/permissions.js";
+import {
+  buildReportingScopeFilter,
+  getHeadedDepartmentIds,
+  isDepartmentHeadOf,
+  isImmediateSupervisor,
+} from "../../utils/orgHierarchy.js";
 
 const applyLeaveSchema = z.object({
   leaveType: z.enum(["CASUAL", "SICK", "EARNED", "MATERNITY", "PATERNITY", "COMPENSATORY", "UNPAID", "SPECIAL"]),
@@ -25,6 +31,34 @@ function workingDaysBetween(from: Date, to: Date): number {
     cur.setDate(cur.getDate() + 1);
   }
   return count;
+}
+
+/** SUPER_ADMIN / HR_ADMIN see and decide every leave, as before. */
+function isLeaveAdmin(role: string): boolean {
+  return role === "SUPER_ADMIN" || role === "HR_ADMIN";
+}
+
+/**
+ * Who may see or act on `targetId`'s leave records:
+ *   - SUPER_ADMIN / HR_ADMIN
+ *   - the employee's immediate supervisor (`reportingToId`)
+ *   - the head of any department the employee belongs to
+ *   - custom roles holding the matching EMP_LEAVES grant
+ *
+ * The supervisor and head checks are role-independent: an EMPLOYEE-role manager
+ * has authority over their reports. They also never match self, so heading your
+ * own department doesn't let you approve your own leave.
+ */
+async function hasLeaveAuthorityOver(
+  user: JwtPayload,
+  targetId: string,
+  action: "canView" | "canApprove",
+): Promise<boolean> {
+  if (isLeaveAdmin(user.role)) return true;
+  if (isCustomRole(user.role) && await hasPermission(user, "EMP_LEAVES", action)) return true;
+  if (await isImmediateSupervisor(user.sub, targetId)) return true;
+  if (await isDepartmentHeadOf(user.sub, targetId)) return true;
+  return false;
 }
 
 export async function leaveRoutes(fastify: FastifyInstance) {
@@ -238,16 +272,39 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true, data });
   });
 
-  // Get pending leaves for approval
-  fastify.get("/pending", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN", "DEPT_HEAD") }, async (request, reply) => {
+  // What approval authority does the caller hold? Drives whether the UI offers the
+  // Team Leaves tab and the profile Leaves tab, since authority now comes from the
+  // reporting line rather than the role name.
+  fastify.get("/authority", async (request, reply) => {
     const user = request.user as JwtPayload;
 
-    // SUPER_ADMIN and HR_ADMIN see all pending leaves.
-    // DEPT_HEAD sees only leaves from employees whose reporting manager is them.
-    const employeeFilter =
-      user.role === "DEPT_HEAD"
-        ? { reportingToId: user.sub }
-        : undefined;
+    const [headedDepartmentIds, directReportCount] = await Promise.all([
+      getHeadedDepartmentIds(user.sub),
+      prisma.employee.count({ where: { reportingToId: user.sub, deletedAt: null } }),
+    ]);
+
+    const canApproveAny = isLeaveAdmin(user.role)
+      || (isCustomRole(user.role) && await hasPermission(user, "EMP_LEAVES", "canApprove"))
+      || directReportCount > 0
+      || headedDepartmentIds.length > 0;
+
+    return reply.send({
+      success: true,
+      data: { canApproveAny, headedDepartmentIds, directReportCount },
+    });
+  });
+
+  // Get pending leaves for approval
+  fastify.get("/pending", async (request, reply) => {
+    const user = request.user as JwtPayload;
+
+    // SUPER_ADMIN / HR_ADMIN (and custom roles granted EMP_LEAVES approval) see
+    // everything. Everyone else sees their direct reports plus the members of any
+    // department they head — no role name required.
+    const seesAll = isLeaveAdmin(user.role)
+      || (isCustomRole(user.role) && await hasPermission(user, "EMP_LEAVES", "canApprove"));
+
+    const employeeFilter = seesAll ? undefined : await buildReportingScopeFilter(user.sub);
 
     const data = await prisma.leaveApplication.findMany({
       where: { status: "PENDING", ...(employeeFilter && { employee: employeeFilter }) },
@@ -264,17 +321,17 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     const user = request.user as JwtPayload;
     const { employeeId } = request.params as { employeeId: string };
 
-    // Built-in admins (SA/HR) as before, or a custom role granted EMP_LEAVES view. DEPT_HEAD
-    // stays team-scoped via the membership check below.
-    const canViewAll = user.role === "SUPER_ADMIN" || user.role === "HR_ADMIN"
-      || (isCustomRole(user.role) && await hasPermission(user, "EMP_LEAVES", "canView"));
-    if (!canViewAll) {
-      const membership = await prisma.teamMembership.findFirst({
+    // Admins, the employee's immediate supervisor, the head of a department they
+    // belong to, or a custom role granted EMP_LEAVES view. Falls back to an
+    // explicit My Team membership, which grants the same visibility.
+    const allowed = user.sub === employeeId
+      || await hasLeaveAuthorityOver(user, employeeId, "canView")
+      || (await prisma.teamMembership.findFirst({
         where: { teamOwnerId: user.sub, memberId: employeeId },
-      });
-      if (!membership) {
-        return reply.status(403).send({ success: false, error: "Forbidden", statusCode: 403 });
-      }
+      })) !== null;
+
+    if (!allowed) {
+      return reply.status(403).send({ success: false, error: "Forbidden", statusCode: 403 });
     }
 
     const data = await prisma.leaveApplication.findMany({
@@ -289,7 +346,7 @@ export async function leaveRoutes(fastify: FastifyInstance) {
   });
 
   // Approve or reject leave
-  fastify.patch("/:id/decision", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN", "DEPT_HEAD") }, async (request, reply) => {
+  fastify.patch("/:id/decision", async (request, reply) => {
     const { id } = request.params as { id: string };
     const user = request.user as JwtPayload;
     const body = request.body as { action: "APPROVED" | "REJECTED"; note?: string; lopDays?: number };
@@ -306,11 +363,14 @@ export async function leaveRoutes(fastify: FastifyInstance) {
       return reply.status(404).send({ success: false, error: "Application not found or already processed", statusCode: 404 });
     }
 
-    // DEPT_HEAD may only approve leaves for employees who report directly to them
-    if (user.role === "DEPT_HEAD") {
-      if (application.employee.reportingToId !== user.sub) {
-        return reply.status(403).send({ success: false, error: "Forbidden: this employee does not report to you", statusCode: 403 });
-      }
+    // Immediate supervisor or head of the employee's department — plus HR/SUPER_ADMIN
+    // and custom roles with the EMP_LEAVES approve grant.
+    if (!await hasLeaveAuthorityOver(user, application.employeeId, "canApprove")) {
+      return reply.status(403).send({
+        success: false,
+        error: "Forbidden: you are not this employee's supervisor or department head",
+        statusCode: 403,
+      });
     }
 
     // Validate lopDays: must be between 0 and totalDays (inclusive)
@@ -353,8 +413,9 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true, data: updated, message: `Leave ${body.action.toLowerCase()}${lopDays > 0 ? ` (${lopDays} day${lopDays !== 1 ? "s" : ""} LoP)` : ""}` });
   });
 
-  // Get all leaves decided (approved/rejected) by the current manager/HR
-  fastify.get("/decided", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN", "DEPT_HEAD") }, async (request, reply) => {
+  // Get all leaves decided (approved/rejected) by the current manager/HR.
+  // Inherently self-scoped by approverId, so no role gate is needed.
+  fastify.get("/decided", async (request, reply) => {
     const user = request.user as JwtPayload;
 
     const data = await prisma.leaveApplication.findMany({

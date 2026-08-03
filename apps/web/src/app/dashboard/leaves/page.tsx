@@ -1636,9 +1636,15 @@ interface DecidedLeave {
 }
 
 function DecisionHistory() {
-  const { user } = useAuthStore();
   const [open, setOpen] = useState(false);
-  const isApprover = user?.role !== "EMPLOYEE";
+
+  // Same reporting-line authority as the tab itself — served from cache
+  const { data: authority } = useQuery<LeaveAuthority>({
+    queryKey: ["leave-authority"],
+    queryFn: () => api.get("/api/v1/leaves/authority").then((r) => r.data.data),
+    staleTime: 5 * 60 * 1000,
+  });
+  const isApprover = authority?.canApproveAny ?? false;
 
   const { data: decided = [], isLoading } = useQuery<DecidedLeave[]>({
     queryKey: ["decided-leaves"],
@@ -1732,12 +1738,26 @@ type PendingLeave = {
   employee: { id: string; firstName: string; lastName: string; department: { name: string } };
 };
 
+type LeaveAuthority = {
+  canApproveAny: boolean;
+  headedDepartmentIds: string[];
+  directReportCount: number;
+};
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function LeavesPage() {
   const { user } = useAuthStore();
   const queryClient = useQueryClient();
-  const isApprover = user?.role !== "EMPLOYEE";
+
+  // Approval authority follows the reporting line, not the role name — an
+  // EMPLOYEE-role supervisor or department head approves for their people too.
+  const { data: authority } = useQuery<LeaveAuthority>({
+    queryKey: ["leave-authority"],
+    queryFn: () => api.get("/api/v1/leaves/authority").then((r) => r.data.data),
+    staleTime: 5 * 60 * 1000,
+  });
+  const isApprover = authority?.canApproveAny ?? false;
 
   const [activeTab, setActiveTab] = useState<"my-leaves" | "team-leaves">("my-leaves");
   const [showApplyLeave, setShowApplyLeave] = useState(false);

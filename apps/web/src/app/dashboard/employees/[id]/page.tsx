@@ -3808,8 +3808,24 @@ export default function EmployeeDetailPage() {
   const BUILTIN_ROLES = ["SUPER_ADMIN", "HR_ADMIN", "DEPT_HEAD", "EMPLOYEE"];
   const isCustomRole = !!currentUser?.role && !BUILTIN_ROLES.includes(currentUser.role);
   const customCanViewHR = isCustomRole && (permissions.EMP_LEAVES?.canView ?? false);
-  // Leaves: SA/HR/DEPT_HEAD (isAdmin) as before, or custom-with-grant. Backend team-scopes DEPT_HEAD.
-  const canViewProfiledLeaves = !isSelfView && (isAdmin || customCanViewHR);
+
+  // The reporting line also confers leave visibility, whatever the viewer's role:
+  // the employee's immediate supervisor and the head of their department.
+  const { data: leaveAuthority } = useQuery({
+    queryKey: ["leave-authority"],
+    queryFn: () => api.get("/api/v1/leaves/authority").then((r) => r.data.data as {
+      canApproveAny: boolean; headedDepartmentIds: string[]; directReportCount: number;
+    }),
+    staleTime: 5 * 60 * 1000,
+  });
+  const isSupervisorOfProfiled = !!currentUser?.id && emp?.reportingToId === currentUser.id;
+  const headsProfiledDept = !!emp?.departmentId
+    && (leaveAuthority?.headedDepartmentIds ?? []).includes(emp.departmentId);
+
+  // Leaves: SA/HR/DEPT_HEAD (isAdmin) as before, custom-with-grant, or the
+  // employee's supervisor / department head. Backend enforces the same rule.
+  const canViewProfiledLeaves = !isSelfView
+    && (isAdmin || customCanViewHR || isSupervisorOfProfiled || headsProfiledDept);
   // Claims: SA/HR only as before, or custom-with-grant.
   const isBuiltinClaimsAdmin = currentUser?.role === "SUPER_ADMIN" || currentUser?.role === "HR_ADMIN";
   const canViewProfiledClaims = !isSelfView && (isBuiltinClaimsAdmin || customCanViewHR);
