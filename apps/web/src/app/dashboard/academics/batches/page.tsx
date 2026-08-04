@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useMemo, useRef, Suspense } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
@@ -140,6 +140,128 @@ function MultiPicker({ options, selected, onChange, placeholder = "None" }: {
   );
 }
 
+// ── SearchSelect — single-choice dropdown with type-to-search ─────────────────
+type PickOption = { id: string; name: string; sub?: string };
+
+function SearchSelect({ options, value, onChange, placeholder = "None", searchPlaceholder = "Type a name…" }: {
+  options: PickOption[];
+  value: string;
+  onChange: (id: string) => void;
+  placeholder?: string;
+  searchPlaceholder?: string;
+}) {
+  const [open, setOpen]     = useState(false);
+  const [query, setQuery]   = useState("");
+  const [active, setActive] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef  = useRef<HTMLDivElement>(null);
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return options;
+    return options.filter((o) => `${o.name} ${o.sub ?? ""}`.toLowerCase().includes(needle));
+  }, [options, query]);
+
+  useEffect(() => {
+    if (!open) return;
+    setQuery("");
+    setActive(0);
+    const t = setTimeout(() => inputRef.current?.focus(), 0);
+    return () => clearTimeout(t);
+  }, [open]);
+
+  useEffect(() => { setActive(0); }, [query]);
+
+  useEffect(() => {
+    const el = listRef.current?.children[active] as HTMLElement | undefined;
+    el?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+
+  const selected = options.find((o) => o.id === value);
+  const pick = (id: string) => { onChange(id); setOpen(false); };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown")      { e.preventDefault(); setActive((i) => Math.min(i + 1, filtered.length - 1)); }
+    else if (e.key === "ArrowUp")   { e.preventDefault(); setActive((i) => Math.max(i - 1, 0)); }
+    else if (e.key === "Enter")     { e.preventDefault(); if (filtered[active]) pick(filtered[active].id); }
+    else if (e.key === "Escape")    { e.preventDefault(); setOpen(false); }
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{ ...inputBase, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", gap: 8, textAlign: "left" }}
+      >
+        <span style={{ color: selected ? D.ink : "#9ca3af", fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+          {selected ? selected.name : placeholder}
+          {selected?.sub && <span style={{ color: D.muted }}> — {selected.sub}</span>}
+        </span>
+        {selected && (
+          <span
+            role="button"
+            aria-label="Clear"
+            onClick={(e) => { e.stopPropagation(); onChange(""); }}
+            style={{ display: "flex", alignItems: "center", color: "#9aa3b4", flexShrink: 0 }}
+          >
+            <X style={{ width: 13, height: 13 }} />
+          </span>
+        )}
+        <ChevronDown style={{ width: 14, height: 14, color: D.muted, flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+      </button>
+
+      {open && (
+        <>
+          <div style={{ position: "fixed", inset: 0, zIndex: 15 }} onClick={() => setOpen(false)} />
+          <div style={{
+            position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 20,
+            background: "white", border: `1px solid ${D.line}`, borderRadius: 12, padding: 8,
+            boxShadow: "0 8px 24px rgba(0,0,0,.1)",
+          }}>
+            <input
+              ref={inputRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={onKeyDown}
+              placeholder={searchPlaceholder}
+              style={{ ...inputBase, minHeight: 36, fontSize: 13, marginBottom: 6 }}
+            />
+            <div ref={listRef} style={{ maxHeight: 200, overflowY: "auto" }}>
+              <div
+                onClick={() => pick("")}
+                style={{ padding: "7px 10px", cursor: "pointer", borderRadius: 8, fontSize: 13, color: D.muted }}
+              >
+                {placeholder}
+              </div>
+              {filtered.map((o, i) => (
+                <div
+                  key={o.id}
+                  onClick={() => pick(o.id)}
+                  onMouseEnter={() => setActive(i)}
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+                    padding: "7px 10px", cursor: "pointer", borderRadius: 8, fontSize: 13,
+                    background: i === active ? "#f5f7ff" : "transparent",
+                    color: o.id === value ? "#4f46e5" : D.ink,
+                    fontWeight: o.id === value ? 800 : 500,
+                  }}
+                >
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.name}</span>
+                  {o.sub && <span style={{ color: D.muted, fontSize: 12, flexShrink: 0 }}>{o.sub}</span>}
+                </div>
+              ))}
+              {filtered.length === 0 && (
+                <p style={{ padding: "8px 10px", fontSize: 13, color: D.muted, margin: 0 }}>No matches</p>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Form type ─────────────────────────────────────────────────────────────────
 type SubjectRow = { subjectId: string; employeeId: string };
 
@@ -235,12 +357,41 @@ function BatchesPage() {
     queryFn: () => api.get("/api/v1/academics/subjects").then((r) => r.data.data),
     staleTime: 10 * 60 * 1000,
   });
+  // The employees endpoint is paginated (20/page, 100 max) — walk every page so
+  // the faculty pickers list the whole staff, not just the first page.
   const { data: employees = [] } = useQuery({
-    queryKey: ["employees"],
-    queryFn: () => api.get("/api/v1/employees").then((r) => r.data.data),
+    queryKey: ["employees-all"],
+    queryFn: async () => {
+      const first = await api.get("/api/v1/employees", { params: { page: 1, limit: 100 } }).then((r) => r.data);
+      const totalPages = first.meta?.totalPages ?? 1;
+      if (totalPages <= 1) return first.data;
+      const rest = await Promise.all(
+        Array.from({ length: totalPages - 1 }, (_, i) =>
+          api.get("/api/v1/employees", { params: { page: i + 2, limit: 100 } }).then((r) => r.data.data)
+        )
+      );
+      return [...first.data, ...rest.flat()];
+    },
     staleTime: 5 * 60 * 1000,
     enabled: canEdit,
   });
+
+  // Only currently-employed staff can be assigned; a mentor/teacher already saved
+  // on the batch stays selectable even if they have since left.
+  const facultyOptions = useMemo(() => {
+    const assignable = new Set(["ACTIVE", "PROBATION", "ON_LEAVE", "NOTICE_PERIOD"]);
+    const assigned = new Set(
+      [form.facultyMentorId, ...form.subjects.map((s) => s.employeeId)].filter(Boolean)
+    );
+    return (employees as any[])
+      .filter((e) => assignable.has(e.status) || assigned.has(e.id))
+      .map((e) => ({
+        id:   e.id,
+        name: `${e.firstName ?? ""} ${e.lastName ?? ""}`.trim() || e.employeeCode || "Unnamed",
+        sub:  e.designation?.title ?? e.department?.name ?? "",
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [employees, form.facultyMentorId, form.subjects]);
 
   useEffect(() => {
     const active = (academicYears as any[]).filter((y) => !y.isArchived);
@@ -692,18 +843,13 @@ function BatchesPage() {
 
                   {/* Faculty Mentor */}
                   <DField label="Faculty Mentor">
-                    <DSelect
+                    <SearchSelect
+                      options={facultyOptions}
                       value={form.facultyMentorId}
-                      onChange={(e) => setForm({ ...form, facultyMentorId: e.target.value })}
-                    >
-                      <option value="">None</option>
-                      {(employees as any[]).map((emp: any) => (
-                        <option key={emp.id} value={emp.id}>
-                          {emp.firstName} {emp.lastName}
-                          {emp.designation?.name ? ` — ${emp.designation.name}` : ""}
-                        </option>
-                      ))}
-                    </DSelect>
+                      onChange={(id) => setForm({ ...form, facultyMentorId: id })}
+                      placeholder="None"
+                      searchPlaceholder="Search faculty by name or designation…"
+                    />
                   </DField>
 
                   {/* Subject Teachers */}
@@ -724,8 +870,9 @@ function BatchesPage() {
                     ) : (
                       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                         {form.subjects.map((row, idx) => (
-                          <div key={idx} style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8, alignItems: "center" }}>
+                          <div key={idx} className="grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_1fr_auto] gap-2 items-center">
                             <DSelect
+                              className="order-1"
                               value={row.subjectId}
                               onChange={(e) => {
                                 const updated = [...form.subjects];
@@ -738,23 +885,22 @@ function BatchesPage() {
                                 <option key={s.id} value={s.id}>{s.name}</option>
                               ))}
                             </DSelect>
-                            <DSelect
-                              value={row.employeeId}
-                              onChange={(e) => {
-                                const updated = [...form.subjects];
-                                updated[idx] = { ...updated[idx], employeeId: e.target.value };
-                                setForm({ ...form, subjects: updated });
-                              }}
-                            >
-                              <option value="">Teacher…</option>
-                              {(employees as any[]).map((emp: any) => (
-                                <option key={emp.id} value={emp.id}>
-                                  {emp.firstName} {emp.lastName}
-                                </option>
-                              ))}
-                            </DSelect>
+                            <div className="col-span-2 sm:col-span-1 order-3 sm:order-2">
+                              <SearchSelect
+                                options={facultyOptions}
+                                value={row.employeeId}
+                                onChange={(id) => {
+                                  const updated = [...form.subjects];
+                                  updated[idx] = { ...updated[idx], employeeId: id };
+                                  setForm({ ...form, subjects: updated });
+                                }}
+                                placeholder="Teacher…"
+                                searchPlaceholder="Search teacher…"
+                              />
+                            </div>
                             <button
                               type="button"
+                              className="order-2 sm:order-3"
                               onClick={() => setForm({ ...form, subjects: form.subjects.filter((_, i) => i !== idx) })}
                               style={{ width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", border: `1px solid ${D.line}`, borderRadius: 8, background: "white", cursor: "pointer", color: "#ef4444", flexShrink: 0 }}
                             >
