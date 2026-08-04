@@ -9,6 +9,10 @@ import { randomUUID } from "crypto";
 import path from "path";
 import { getTeacherBatchIds } from "./teacherUtils.js";
 import { requireModulePermission } from "../../utils/permissions.js";
+import {
+  buildTemplateWorkbook, loadWorkbook, parseAndValidate,
+  type ReferenceData,
+} from "../../utils/studentImport.js";
 
 const DEFAULT_PASSWORD = "Welcome@123";
 
@@ -286,6 +290,166 @@ export async function studentRoutes(fastify: FastifyInstance) {
       data: student,
       defaultPassword: chosenPassword,
     });
+  });
+
+  // ── BULK IMPORT ────────────────────────────────────────────────────────────
+
+  async function loadReferenceData(): Promise<ReferenceData> {
+    const [schools, grades, courses, batches, academicYears] = await Promise.all([
+      prisma.school.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+      prisma.grade.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+      prisma.course.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+      prisma.batch.findMany({ where: { isArchived: false }, select: { id: true, name: true, academicYear: true }, orderBy: { name: "asc" } }),
+      prisma.academicYear.findMany({ where: { isArchived: false }, select: { name: true }, orderBy: { name: "desc" } }),
+    ]);
+    return { schools, grades, courses, batches, academicYears };
+  }
+
+  // Blank workbook the user fills in — carries the live School/Grade/Course/Batch
+  // names on a reference sheet so the lookup columns can be copied, not guessed.
+  fastify.get("/import/template", async (_request, reply) => {
+    const wb = buildTemplateWorkbook(await loadReferenceData());
+    const buf = await wb.xlsx.writeBuffer();
+    reply.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    reply.header("Content-Disposition", `attachment; filename="student_import_template_${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    return reply.send(Buffer.from(buf));
+  });
+
+  // Upload the filled template. `dryRun` validates and previews without writing;
+  // without it the whole file is created in one transaction (all-or-nothing unless
+  // skipInvalid is set, in which case bad rows are reported and the rest go in).
+  fastify.post("/import", async (request, reply) => {
+    const q = request.query as any;
+    const dryRun      = q.dryRun === "true" || q.dryRun === true;
+    const skipInvalid = q.skipInvalid === "true" || q.skipInvalid === true;
+
+    const upload = await request.file().catch(() => null);
+    if (!upload) return reply.status(400).send({ success: false, error: "No file was uploaded" });
+    if (!/\.(xlsx|csv)$/i.test(upload.filename)) {
+      return reply.status(400).send({ success: false, error: "Upload the .xlsx template (or a .csv with the same columns)" });
+    }
+
+    let buffer: Buffer;
+    try {
+      buffer = await upload.toBuffer();
+    } catch {
+      return reply.status(400).send({ success: false, error: "The file is larger than 5 MB" });
+    }
+
+    let workbook;
+    try {
+      workbook = await loadWorkbook(buffer, upload.filename);
+    } catch {
+      return reply.status(400).send({ success: false, error: "That file could not be read as a spreadsheet. Use the downloaded template." });
+    }
+
+    const [ref, existingStudents] = await Promise.all([
+      loadReferenceData(),
+      prisma.student.findMany({ select: { email: true, admissionNumber: true } }),
+    ]);
+    const existing = {
+      emails:           new Set(existingStudents.map((s) => s.email.toLowerCase())),
+      admissionNumbers: new Set(existingStudents.flatMap((s) => s.admissionNumber ? [s.admissionNumber.toLowerCase()] : [])),
+    };
+
+    const { rows, errors, totalRows } = parseAndValidate(workbook, ref, existing);
+
+    if (dryRun) {
+      return reply.send({
+        success: true,
+        data: {
+          dryRun: true,
+          totalRows,
+          validRows: rows.length,
+          errors,
+          preview: rows.slice(0, 10).map((r) => ({ row: r.row, ...r.display })),
+        },
+      });
+    }
+
+    if (!totalRows) {
+      return reply.status(400).send({ success: false, error: "The sheet has no student rows to import" });
+    }
+    if (errors.length && !skipInvalid) {
+      return reply.status(400).send({
+        success: false,
+        error: `${errors.length} problem${errors.length === 1 ? "" : "s"} found — nothing was imported`,
+        data: { totalRows, validRows: rows.length, errors },
+      });
+    }
+    if (!rows.length) {
+      return reply.status(400).send({ success: false, error: "No valid rows to import", data: { totalRows, validRows: 0, errors } });
+    }
+
+    // Codes are allocated up front from the current maximum: generating them per
+    // row would issue a query each time and race inside the transaction.
+    const lastStudent = await prisma.student.findFirst({ orderBy: { studentCode: "desc" }, select: { studentCode: true } });
+    let codeSeq = lastStudent ? parseInt(lastStudent.studentCode.replace(/\D/g, ""), 10) || 0 : 0;
+
+    const admissionPrefix = `ADM-${new Date().getFullYear()}-`;
+    const lastAdmission = await prisma.student.findFirst({
+      where: { admissionNumber: { startsWith: admissionPrefix } },
+      orderBy: { admissionNumber: "desc" },
+      select: { admissionNumber: true },
+    });
+    let admissionSeq = lastAdmission?.admissionNumber
+      ? parseInt(lastAdmission.admissionNumber.replace(admissionPrefix, ""), 10) || 0
+      : 0;
+
+    // One hash for the whole file — bcrypt per row would dominate the runtime.
+    const passwordHash = await hashPassword(DEFAULT_PASSWORD);
+
+    const payloads = rows.map((r) => {
+      const { batchId, dateOfBirth, admissionDate, admissionNumber, ...rest } = r.data as any;
+      codeSeq += 1;
+      return {
+        batchId,
+        data: {
+          ...rest,
+          studentCode:         `STU${String(codeSeq).padStart(4, "0")}`,
+          admissionNumber:     admissionNumber || `${admissionPrefix}${String((admissionSeq += 1)).padStart(4, "0")}`,
+          passwordHash,
+          initialPasswordHash: passwordHash,
+          mustChangePassword:  true,
+          dateOfBirth:   dateOfBirth   ? new Date(dateOfBirth)   : undefined,
+          admissionDate: admissionDate ? new Date(admissionDate) : undefined,
+        },
+      };
+    });
+
+    try {
+      const created = await prisma.$transaction(async (tx) => {
+        const out: { id: string; studentCode: string; name: string }[] = [];
+        for (const p of payloads) {
+          const student = await tx.student.create({
+            data: p.data,
+            select: { id: true, studentCode: true, firstName: true, lastName: true },
+          });
+          if (p.batchId) {
+            await tx.studentBatch.create({ data: { studentId: student.id, batchId: p.batchId, joinedAt: new Date() } });
+          }
+          out.push({ id: student.id, studentCode: student.studentCode, name: `${student.firstName} ${student.lastName}` });
+        }
+        return out;
+      }, { timeout: 120_000, maxWait: 15_000 });
+
+      return reply.status(201).send({
+        success: true,
+        data: {
+          created: created.length,
+          skipped: totalRows - created.length,
+          errors,
+          defaultPassword: DEFAULT_PASSWORD,
+          students: created,
+        },
+      });
+    } catch (err: any) {
+      request.log.error({ err }, "student bulk import failed");
+      return reply.status(500).send({
+        success: false,
+        error: "The import failed and nothing was saved. Please check the file and try again.",
+      });
+    }
   });
 
   // ── UPDATE ─────────────────────────────────────────────────────────────────

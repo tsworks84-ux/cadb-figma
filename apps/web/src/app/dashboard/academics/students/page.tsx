@@ -15,6 +15,7 @@ import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { hasAcademicsAction } from "@/lib/academicsAccess";
 import { useDebounce } from "@/hooks/useDebounce";
+import ImportStudentsModal from "./ImportStudentsModal";
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -185,6 +186,7 @@ function StudentsPage() {
   const [gradeId, setGradeId]           = useState("");
   const [batchId, setBatchId]           = useState("");
   const [sortBy, setSortBy]             = useState<"createdAt" | "name">("createdAt");
+  const [importOpen, setImportOpen]     = useState(false);
 
   const debouncedSearch = useDebounce(search, 300);
 
@@ -286,9 +288,14 @@ function StudentsPage() {
           </div>
         </div>
         <div className="flex items-center gap-2.5">
-          <button className="min-h-[42px] rounded-xl border border-gray-200 bg-white px-4 text-sm font-extrabold text-gray-600 hover:bg-gray-50 flex items-center gap-2">
-            <Upload className="h-4 w-4" /> Import
-          </button>
+          {canEdit && (
+            <button
+              onClick={() => setImportOpen(true)}
+              className="min-h-[42px] rounded-xl border border-gray-200 bg-white px-4 text-sm font-extrabold text-gray-600 hover:bg-gray-50 flex items-center gap-2"
+            >
+              <Upload className="h-4 w-4" /> Import
+            </button>
+          )}
           {canEdit && (
             <button
               onClick={() => router.push("/dashboard/academics/students/new")}
@@ -520,6 +527,13 @@ function StudentsPage() {
           </div>
         </div>
       </div>
+
+      {importOpen && (
+        <ImportStudentsModal
+          onClose={() => setImportOpen(false)}
+          onImported={() => qc.invalidateQueries({ queryKey: ["students"] })}
+        />
+      )}
     </div>
   );
 }
