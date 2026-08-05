@@ -445,7 +445,13 @@ function RolesTab({ isSA }: { isSA: boolean }) {
   const COLS = PERMS.length;
   const allRoles = [
     ...SYSTEM_ROLE_ORDER.map((r) => ({ name: r, label: ROLE_META[r].label, color: ROLE_META[r].color, description: ROLE_META[r].description, isCustom: false })),
-    ...(customRoles as any[]).map((r) => ({ name: r.name, label: r.label, color: "bg-orange-100 text-orange-700", description: `Custom role · ${r.deptAccess.length} dept${r.deptAccess.length !== 1 ? "s" : ""}`, isCustom: true })),
+    ...(customRoles as any[]).map((r) => ({
+      name: r.name, label: r.label, color: "bg-orange-100 text-orange-700",
+      description: r.deptAccess.length === 0
+        ? "Custom role · no department access"
+        : `Custom role · ${r.deptAccess.length} dept${r.deptAccess.length !== 1 ? "s" : ""}`,
+      isCustom: true,
+    })),
   ];
 
   return (
@@ -1134,14 +1140,17 @@ function CustomRolesTab() {
             </div>
           </div>
           <div>
-            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Department Access</label>
-            <p className="text-xs text-gray-400 mt-0.5 mb-2">This role can view employees from the selected departments.</p>
+            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Department Access <span className="text-gray-400 normal-case font-normal">(optional)</span></label>
+            <p className="text-xs text-gray-400 mt-0.5 mb-2">
+              This role can view employees from the selected departments. Leave it empty for a role that
+              works only inside a module such as Academics — what it can do there is set on Roles &amp; Permissions.
+            </p>
             <DeptMultiSelect value={form.departmentIds} onChange={(ids) => setForm((f) => ({ ...f, departmentIds: ids }))} />
           </div>
           <div className="flex gap-3 pt-1">
             <button
               onClick={() => createMut.mutate()}
-              disabled={!form.label || !form.name || form.departmentIds.length === 0 || createMut.isPending}
+              disabled={!form.label || !form.name || createMut.isPending}
               className="rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60" style={{ backgroundColor: "#2C3E7C" }}
             >
               {createMut.isPending ? "Creating…" : "Create Role"}
@@ -1184,13 +1193,14 @@ function CustomRolesTab() {
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Department Access</label>
+                    <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Department Access <span className="text-gray-400 normal-case font-normal">(optional)</span></label>
+                    <p className="text-xs text-gray-400 mt-0.5 mb-2">Clear every department for a role that only works inside a module such as Academics.</p>
                     <DeptMultiSelect value={editForm.departmentIds} onChange={(ids) => setEditForm((f) => ({ ...f, departmentIds: ids }))} />
                   </div>
                   <div className="flex gap-3">
                     <button
                       onClick={() => updateMut.mutate(role.name)}
-                      disabled={!editForm.label || editForm.departmentIds.length === 0 || updateMut.isPending}
+                      disabled={!editForm.label || updateMut.isPending}
                       className="rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60" style={{ backgroundColor: "#2C3E7C" }}
                     >
                       {updateMut.isPending ? "Saving…" : "Save Changes"}
@@ -1208,7 +1218,11 @@ function CustomRolesTab() {
                       <span className="font-mono text-xs text-gray-400 bg-gray-100 rounded px-1.5 py-0.5">{role.name}</span>
                     </div>
                     <div className="flex flex-wrap gap-1.5 mt-2">
-                      {role.deptAccess.map((d: any) => (
+                      {role.deptAccess.length === 0 ? (
+                        <span className="rounded-full bg-gray-100 text-gray-500 px-2.5 py-0.5 text-xs font-medium">
+                          No department access — module permissions only
+                        </span>
+                      ) : role.deptAccess.map((d: any) => (
                         <span key={d.departmentId} className="rounded-full bg-blue-100 text-blue-700 px-2.5 py-0.5 text-xs font-medium">
                           {deptMap[d.departmentId] ?? d.departmentId}
                         </span>

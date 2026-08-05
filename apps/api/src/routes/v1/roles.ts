@@ -233,7 +233,9 @@ export async function roleRoutes(fastify: FastifyInstance) {
     const schema = z.object({
       name:          z.string().min(2).max(50).regex(/^[A-Z0-9_]+$/, "Use uppercase letters, digits, underscores"),
       label:         z.string().min(2).max(80),
-      departmentIds: z.array(z.string()).min(1, "Select at least one department"),
+      // Optional: a role that only works inside Academics needs no department
+      // access at all. Empty simply means "no employee directory access".
+      departmentIds: z.array(z.string()).default([]),
     });
     const parsed = schema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -268,7 +270,7 @@ export async function roleRoutes(fastify: FastifyInstance) {
     const { name } = request.params as { name: string };
     const schema = z.object({
       label:         z.string().min(2).max(80).optional(),
-      departmentIds: z.array(z.string()).min(1).optional(),
+      departmentIds: z.array(z.string()).optional(),
     });
     const parsed = schema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -280,11 +282,14 @@ export async function roleRoutes(fastify: FastifyInstance) {
 
     await prisma.$transaction(async (tx) => {
       if (label) await tx.customRole.update({ where: { name }, data: { label } });
+      // An empty array is a deliberate "clear all department access", not a no-op.
       if (departmentIds) {
         await tx.roleDepartmentAccess.deleteMany({ where: { roleName: name } });
-        await tx.roleDepartmentAccess.createMany({
-          data: departmentIds.map((departmentId) => ({ roleName: name, departmentId })),
-        });
+        if (departmentIds.length) {
+          await tx.roleDepartmentAccess.createMany({
+            data: departmentIds.map((departmentId) => ({ roleName: name, departmentId })),
+          });
+        }
       }
     });
 
