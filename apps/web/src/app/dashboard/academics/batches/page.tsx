@@ -357,21 +357,11 @@ function BatchesPage() {
     queryFn: () => api.get("/api/v1/academics/subjects").then((r) => r.data.data),
     staleTime: 10 * 60 * 1000,
   });
-  // The employees endpoint is paginated (20/page, 100 max) — walk every page so
-  // the faculty pickers list the whole staff, not just the first page.
+  // Name-only staff list: unpaginated, and reachable by roles that hold an
+  // Academics grant without department access (the paginated directory is not).
   const { data: employees = [] } = useQuery({
-    queryKey: ["employees-all"],
-    queryFn: async () => {
-      const first = await api.get("/api/v1/employees", { params: { page: 1, limit: 100 } }).then((r) => r.data);
-      const totalPages = first.meta?.totalPages ?? 1;
-      if (totalPages <= 1) return first.data;
-      const rest = await Promise.all(
-        Array.from({ length: totalPages - 1 }, (_, i) =>
-          api.get("/api/v1/employees", { params: { page: i + 2, limit: 100 } }).then((r) => r.data.data)
-        )
-      );
-      return [...first.data, ...rest.flat()];
-    },
+    queryKey: ["employees-lookup"],
+    queryFn: () => api.get("/api/v1/employees/lookup").then((r) => r.data.data),
     staleTime: 5 * 60 * 1000,
     enabled: canEdit,
   });

@@ -1290,7 +1290,7 @@ function PTMScheduleModal({ student, onClose, onSaved }: {
   const { data: empResults = [] } = useQuery({
     queryKey: ["emp-search-ptm", search],
     queryFn: () => search.length >= 2
-      ? api.get(`/api/v1/employees?search=${encodeURIComponent(search)}&limit=8`).then((r) => r.data.data)
+      ? api.get(`/api/v1/employees/lookup?search=${encodeURIComponent(search)}`).then((r) => r.data.data.slice(0, 8))
       : Promise.resolve([]),
     staleTime: 10 * 1000,
     enabled: search.length >= 2,

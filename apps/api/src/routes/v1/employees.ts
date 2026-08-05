@@ -8,6 +8,7 @@ import type { JwtPayload } from "@cadb/types";
 import { randomUUID } from "crypto";
 import { uploadFile } from "../../utils/s3.js";
 import { computeAccrued, computeCarryForward } from "../../utils/leave.js";
+import { hasAnyPermission, ACADEMICS_MODULES } from "../../utils/permissions.js";
 import { createWriteStream, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -222,6 +223,45 @@ export async function employeeRoutes(fastify: FastifyInstance) {
       success: true,
       data: { total, onLeaveToday, onboardedThisMonth, quitThisMonth, monthName },
     });
+  });
+
+  // Name-only staff list for pickers (faculty mentor, subject teacher, PTM
+  // attendees). Deliberately separate from the directory below: it carries no
+  // contact, salary or personal fields, so it can be opened to roles that hold
+  // an Academics grant but no department access — e.g. an Academic Coordinator
+  // custom role created with no departments.
+  fastify.get("/lookup", async (request, reply) => {
+    const user = request.user as JwtPayload;
+    const q = request.query as Record<string, string>;
+
+    const privileged = user.role === "SUPER_ADMIN" || user.role === "HR_ADMIN" || user.role === "DEPT_HEAD";
+    if (!privileged && !(await hasAnyPermission(user, [...ACADEMICS_MODULES], "canView"))) {
+      return reply.status(403).send({ success: false, error: "Forbidden", statusCode: 403 });
+    }
+
+    const search = (q.search ?? "").trim();
+    const employees = await prisma.employee.findMany({
+      where: {
+        deletedAt: null,
+        ...(search
+          ? {
+              OR: [
+                { firstName:    { contains: search, mode: "insensitive" as const } },
+                { lastName:     { contains: search, mode: "insensitive" as const } },
+                { employeeCode: { contains: search, mode: "insensitive" as const } },
+              ],
+            }
+          : {}),
+      },
+      select: {
+        id: true, employeeCode: true, firstName: true, lastName: true, status: true,
+        designation: { select: { id: true, title: true } },
+        department:  { select: { id: true, name: true } },
+      },
+      orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+    });
+
+    return reply.send({ success: true, data: employees });
   });
 
   // List employees with pagination + search

@@ -1070,7 +1070,7 @@ function AssignmentsPage() {
   const { data: gradesData }   = useQuery({ queryKey: ["grades"],           queryFn: () => api.get("/api/v1/academics/grades").then((r) => r.data) });
   const { data: subjectsData } = useQuery({ queryKey: ["subjects"],         queryFn: () => api.get("/api/v1/academics/subjects").then((r) => r.data.data) });
   const { data: batchesData }  = useQuery({ queryKey: ["batches-all", teacherId ?? "all"],  queryFn: () => api.get(batchesUrl).then((r) => r.data) });
-  const { data: empData }      = useQuery({ queryKey: ["employees-select"], queryFn: () => api.get("/api/v1/employees?limit=500").then((r) => r.data) });
+  const { data: empData }      = useQuery({ queryKey: ["employees-lookup"], queryFn: () => api.get("/api/v1/employees/lookup").then((r) => r.data) });
 
   const years     = (yearsData          ?? []) as any[];
   const grades    = (gradesData?.data   ?? []) as any[];
