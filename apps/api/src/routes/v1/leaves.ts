@@ -40,14 +40,19 @@ function isLeaveAdmin(role: string): boolean {
 }
 
 /**
- * May the caller force-cancel or delete anyone's leave? Super Admin and HR hold
- * this outright; a custom role needs an explicit EMP_LEAVES delete grant.
+ * May the caller force-cancel or delete anyone's leave? Super Admin and HR only.
+ *
  * Deliberately narrower than `hasLeaveAuthorityOver` — supervisors approve and
- * reject, they don't erase records.
+ * reject, they don't erase records. It also deliberately does NOT consult the
+ * permission matrix: custom roles already carry a `canDelete` grant on
+ * EMP_LEAVES that never did anything, so honouring it here would silently hand
+ * permanent-delete power to existing roles nobody re-reviewed. Widening this is
+ * a decision to make explicitly, not a side effect of an old checkbox.
+ * The deletion log at /api/v1/audit-logs is gated to the same two roles, so
+ * whoever can delete can always see what was deleted.
  */
 async function canOverrideLeaves(user: JwtPayload): Promise<boolean> {
-  if (isLeaveAdmin(user.role)) return true;
-  return isCustomRole(user.role) && await hasPermission(user, "EMP_LEAVES", "canDelete");
+  return isLeaveAdmin(user.role);
 }
 
 /**

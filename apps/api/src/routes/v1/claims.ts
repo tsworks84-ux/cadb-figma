@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@cadb/db";
 import { authenticate, requireRole } from "../../middleware/authenticate.js";
 import { generateClaimNumber } from "../../utils/claimNumber.js";
-import { hasAnyPermission, hasPermission, isCustomRole } from "../../utils/permissions.js";
+import { hasAnyPermission, isCustomRole } from "../../utils/permissions.js";
 import { recordAudit, describeEmployee } from "../../utils/auditLog.js";
 import type { JwtPayload } from "@cadb/types";
 import { createWriteStream, mkdirSync, unlinkSync } from "fs";
@@ -32,13 +32,16 @@ const createClaimSchema = z.object({
 });
 
 /**
- * May the caller force-cancel or delete anyone's claim? Super Admin and HR hold
- * this outright; a custom role needs an explicit CLAIMS delete grant. Approving
- * claims is already SA/HR-only, so overriding one stays at least as narrow.
+ * May the caller force-cancel or delete anyone's claim? Super Admin and HR only —
+ * the same two roles that approve claims in the first place.
+ *
+ * Deliberately does NOT consult the permission matrix: custom roles already
+ * carry a `canDelete` grant on CLAIMS that never did anything, so honouring it
+ * here would silently hand permanent-delete power to existing roles nobody
+ * re-reviewed. See the matching note in leaves.ts.
  */
 async function canOverrideClaims(user: JwtPayload): Promise<boolean> {
-  if (user.role === "SUPER_ADMIN" || user.role === "HR_ADMIN") return true;
-  return isCustomRole(user.role) && await hasPermission(user, "CLAIMS", "canDelete");
+  return user.role === "SUPER_ADMIN" || user.role === "HR_ADMIN";
 }
 
 /** Removes a claim's receipt files from disk. Best-effort — a missing file is fine. */
