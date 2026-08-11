@@ -8,6 +8,7 @@ import {
   Users, Home, CalendarOff, Receipt, Shield,
   GraduationCap, Settings, LogOut, BarChart3, Building2, User,
   CalendarDays, UsersRound, ListTodo, Megaphone, ClipboardList, School, MessageSquare, IndianRupee, X,
+  Archive,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useRouter } from "next/navigation";
@@ -52,6 +53,9 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
     || (role !== "EMPLOYEE" && (permissions["EMP_PROFILE"]?.canView ?? false));
   // Administration is restricted to SUPER_ADMIN only — not configurable via permissions
   const canViewAdmin = role === "SUPER_ADMIN";
+  // The deletion log is the counterweight to the delete/force-cancel powers, so
+  // it's visible to exactly the roles that hold them.
+  const canViewDeletionLog = role === "SUPER_ADMIN" || role === "HR_ADMIN";
   const canViewMIS = Object.keys(permissions)
     .filter((k) => k.startsWith("MIS_"))
     .some((k) => permissions[k]?.canView);
@@ -96,6 +100,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
     ...(canViewAdmin ? [{ name: "Student Feedback",   href: "/dashboard/feedback",  icon: MessageSquare, badge: openFeedbackCount }] : []),
     ...(canViewAdmin ? [{ name: "Revenue",            href: "/dashboard/revenue",   icon: IndianRupee  }] : []),
     ...(canViewMIS   ? [{ name: "MIS Reports",        href: "/dashboard/mis",       icon: BarChart3    }] : []),
+    ...(canViewDeletionLog ? [{ name: "Deletion Log", href: "/dashboard/deletion-log", icon: Archive   }] : []),
   ];
 
   // Fire API prefetches when the user hovers a link — data is ready by the time they click

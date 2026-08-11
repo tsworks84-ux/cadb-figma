@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "@cadb/db";
 import { authenticate, requireRole } from "../../middleware/authenticate.js";
+import { IN_FORCE_LEAVE_STATUSES } from "../../utils/leave.js";
 
 async function getMemberStatus(memberId: string) {
   const today = new Date();
@@ -12,7 +13,7 @@ async function getMemberStatus(memberId: string) {
   const activeLeave = await prisma.leaveApplication.findFirst({
     where: {
       employeeId: memberId,
-      status: "APPROVED",
+      status: { in: IN_FORCE_LEAVE_STATUSES },
       fromDate: { lte: tomorrow },
       toDate: { gte: today },
     },
@@ -78,7 +79,7 @@ export async function teamRoutes(fastify: FastifyInstance) {
       prisma.leaveApplication.findMany({
         where: {
           employeeId: { in: memberIds },
-          status: "APPROVED",
+          status: { in: IN_FORCE_LEAVE_STATUSES },
           fromDate: { lte: tomorrow },
           toDate: { gte: today },
         },

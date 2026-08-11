@@ -94,6 +94,8 @@ enum LeaveStatus {
   APPROVED
   REJECTED
   CANCELLED
+  // Employee asked to withdraw an already-approved leave; awaiting the approver's sign-off.
+  CANCELLATION_PENDING
 }
 
 
@@ -103,6 +105,9 @@ enum ClaimStatus {
   APPROVED
   REJECTED
   PAID
+  CANCELLED
+  // Employee asked to withdraw an already-approved claim; awaiting the approver's sign-off.
+  CANCELLATION_PENDING
 }
 
 enum TrainingStatus {
@@ -393,6 +398,8 @@ model Employee {
   policyAcks        PolicyAcknowledgement[]
   trainingEnrollments TrainingEnrollment[]
   leavesApproved    LeaveApplication[]   @relation("LeaveApprover")
+  leaveCancelsDecided LeaveApplication[] @relation("LeaveCancelApprover")
+  claimCancelsDecided ReimbursementClaim[] @relation("ClaimCancelApprover")
   auditLogs         AuditLog[]
   bonusPlansReceived BonusPlan[]         @relation("BonusReceiver")
   bonusPlansGiven   BonusPlan[]         @relation("BonusAppraiser")
@@ -600,11 +607,19 @@ model LeaveApplication {
   rejectionNote String?
   documentUrl  String?
   lopDays      Float       @default(0)
+  // Withdrawal trail. A PENDING leave cancels outright; an APPROVED one parks in
+  // CANCELLATION_PENDING until the approver decides.
+  cancelReason        String?
+  cancelRequestedAt   DateTime?
+  cancelledAt         DateTime?
+  cancelApproverId    String?
+  cancelRejectionNote String?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 
   employee     Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   approver     Employee?   @relation("LeaveApprover", fields: [approverId], references: [id])
+  cancelApprover Employee? @relation("LeaveCancelApprover", fields: [cancelApproverId], references: [id])
 
   @@index([employeeId])
   @@index([status])
@@ -662,11 +677,19 @@ model ReimbursementClaim {
   rejectionNote String?
   paidAt       DateTime?
   receipts     ClaimReceipt[]
+  // Withdrawal trail — mirrors LeaveApplication. A SUBMITTED claim cancels outright;
+  // an APPROVED one parks in CANCELLATION_PENDING until the approver decides.
+  cancelReason        String?
+  cancelRequestedAt   DateTime?
+  cancelledAt         DateTime?
+  cancelApproverId    String?
+  cancelRejectionNote String?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 
   employee     Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   approver     Employee?   @relation("ClaimApprover", fields: [approverId], references: [id])
+  cancelApprover Employee? @relation("ClaimCancelApprover", fields: [cancelApproverId], references: [id])
 
   @@index([employeeId])
   @@index([status])
@@ -969,6 +992,9 @@ model AuditLog {
   action     String
   entity     String
   entityId   String
+  /// Human-readable one-liner ("Casual leave, 2 days, 5 Aug – 6 Aug") so the log
+  /// stays readable even after the underlying row is gone.
+  summary    String?
   oldValues  Json?
   newValues  Json?
   ipAddress  String?
@@ -980,6 +1006,7 @@ model AuditLog {
   @@index([employeeId])
   @@index([entity, entityId])
   @@index([createdAt])
+  @@index([action])
 }
 
 // ─── USER SESSIONS ───────────────────────────────────────────────────────────

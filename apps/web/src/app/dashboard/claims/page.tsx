@@ -33,6 +33,8 @@ const STATUS_COLOR: Record<string, string> = {
   APPROVED: "bg-green-100 text-green-700",
   REJECTED: "bg-red-100 text-red-700",
   PAID: "bg-purple-100 text-purple-700",
+  CANCELLED: "bg-gray-100 text-gray-400",
+  CANCELLATION_PENDING: "bg-amber-100 text-amber-700",
 };
 
 const STATUS_ICON: Record<string, React.ElementType> = {
@@ -41,7 +43,17 @@ const STATUS_ICON: Record<string, React.ElementType> = {
   APPROVED: CheckCircle,
   REJECTED: XCircle,
   PAID: Banknote,
+  CANCELLED: XCircle,
+  CANCELLATION_PENDING: Clock,
 };
+
+const STATUS_LABEL: Record<string, string> = {
+  CANCELLATION_PENDING: "CANCELLATION PENDING",
+};
+
+function statusLabel(status: string) {
+  return STATUS_LABEL[status] ?? status;
+}
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
 
@@ -100,10 +112,83 @@ function Modal({ title, onClose, children, wide }: {
 function Badge({ status }: { status: string }) {
   const Icon = STATUS_ICON[status] ?? Clock;
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_COLOR[status] ?? "bg-gray-100 text-gray-600"}`}>
-      <Icon className="h-3 w-3" />
-      {status}
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap ${STATUS_COLOR[status] ?? "bg-gray-100 text-gray-600"}`}>
+      <Icon className="h-3 w-3 shrink-0" />
+      {statusLabel(status)}
     </span>
+  );
+}
+
+// ─── Reason prompt ────────────────────────────────────────────────────────────
+
+/**
+ * Confirm dialog that collects a written reason. Required for anything that
+ * ends a claim: a withdrawal an approver has to rule on, or an admin override
+ * whose only lasting trace is the audit log.
+ */
+function ReasonPromptModal({
+  title, description, label, placeholder, confirmLabel, tone = "danger",
+  required = true, isPending, onConfirm, onClose,
+}: {
+  title: string;
+  description: string;
+  label: string;
+  placeholder: string;
+  confirmLabel: string;
+  tone?: "danger" | "warning";
+  required?: boolean;
+  isPending?: boolean;
+  onConfirm: (reason: string) => void;
+  onClose: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const disabled = (required && !reason.trim()) || !!isPending;
+  const accent = tone === "danger"
+    ? { box: "border-red-200 bg-red-50", icon: "text-red-500", btn: "bg-red-600 hover:bg-red-700" }
+    : { box: "border-amber-200 bg-amber-50", icon: "text-amber-500", btn: "bg-amber-600 hover:bg-amber-700" };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between px-5 sm:px-6 py-4 border-b border-gray-100">
+          <h2 className="font-semibold text-gray-900">{title}</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 shrink-0 ml-3">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="px-5 sm:px-6 py-5 space-y-4">
+          <div className={`flex items-start gap-2.5 rounded-lg border px-4 py-3 ${accent.box}`}>
+            <AlertTriangle className={`h-4 w-4 shrink-0 mt-0.5 ${accent.icon}`} />
+            <p className="text-sm text-gray-700">{description}</p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">
+              {label} {required && <span className="text-red-500">*</span>}
+            </label>
+            <textarea
+              rows={3}
+              autoFocus
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder={placeholder}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        </div>
+        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 px-5 sm:px-6 pb-5">
+          <button onClick={onClose} className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">
+            Keep it
+          </button>
+          <button
+            onClick={() => onConfirm(reason.trim())}
+            disabled={disabled}
+            className={`px-4 py-2 text-sm font-semibold text-white rounded-lg disabled:opacity-50 ${accent.btn}`}
+          >
+            {isPending ? "Working…" : confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -216,6 +301,7 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
   const [approvalAction, setApprovalAction] = useState<"APPROVED" | "REJECTED">("APPROVED");
   const [approvedAmount, setApprovedAmount] = useState("");
   const [note, setNote] = useState("");
+  const [pendingAction, setPendingAction] = useState<"withdraw" | "admin-cancel" | "delete" | null>(null);
 
   const { data: claim, isLoading } = useQuery({
     queryKey: ["claim", claimId],
@@ -269,14 +355,43 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: () => api.delete(`/api/v1/claims/${claimId}`),
+    mutationFn: (reason?: string) => api.delete(`/api/v1/claims/${claimId}`, reason ? { data: { reason } } : undefined),
     onSuccess: () => {
-      toast.success("Draft claim deleted");
-      qc.invalidateQueries({ queryKey: ["my-claims"] });
+      toast.success("Claim deleted — recorded in the deletion log");
+      invalidateClaimLists();
       onClose();
     },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to delete"),
   });
+
+  // Employee withdrawal. A submitted claim drops out on the spot; an approved
+  // one goes back to whoever approved it.
+  const cancelMutation = useMutation({
+    mutationFn: (reason: string) => api.patch(`/api/v1/claims/${claimId}/cancel`, { reason }),
+    onSuccess: (res) => {
+      toast.success(res.data?.message ?? "Claim cancelled");
+      invalidateClaimLists();
+      onClose();
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to cancel"),
+  });
+
+  const adminCancelMutation = useMutation({
+    mutationFn: (reason: string) => api.patch(`/api/v1/claims/${claimId}/admin-cancel`, { reason }),
+    onSuccess: () => {
+      toast.success("Claim cancelled");
+      invalidateClaimLists();
+      onClose();
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to cancel"),
+  });
+
+  function invalidateClaimLists() {
+    for (const key of ["my-claims", "pending-claims", "admin-all-claims", "claim-cancellation-requests", "audit-logs"]) {
+      qc.invalidateQueries({ queryKey: [key] });
+    }
+    qc.invalidateQueries({ queryKey: ["claim", claimId] });
+  }
 
   if (isLoading) {
     return (
@@ -294,8 +409,16 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
   const isSubmitted = claim.status === "SUBMITTED";
   const isApproved = claim.status === "APPROVED";
   const needsReceipt = claim.claimedAmount > threshold && claim.receipts?.length === 0;
-  const isOwnClaim = claim?.employee?.id === currentUser?.id;
+  // `/claims/my` omits the employee join, so a claim with no employee is one of
+  // the caller's own by definition.
+  const isOwnClaim = !claim.employee || claim.employee.id === currentUser?.id;
   const canEdit = isDraft && isOwnClaim;
+  // Approved withdrawals need the approver's sign-off; submitted ones don't.
+  // Admins get the override buttons instead — no point offering both on their
+  // own claim, since they'd be asking themselves for permission.
+  const canWithdraw = isOwnClaim && !isAdmin && (isSubmitted || isApproved);
+  const isApprovedWithdrawal = canWithdraw && isApproved;
+  const canOverride = isAdmin && claim.status !== "CANCELLED";
 
   function openApproval(action: "APPROVED" | "REJECTED") {
     setApprovalAction(action);
@@ -304,8 +427,57 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
     setShowApprovalForm(true);
   }
 
+  const prompt = pendingAction === "withdraw"
+    ? {
+        title: isApprovedWithdrawal ? "Request cancellation" : "Cancel claim",
+        description: isApprovedWithdrawal
+          ? "This claim is already approved, so the approver has to sign off on cancelling it. It stays approved until they decide."
+          : "This claim hasn't been reviewed yet, so it will be withdrawn straight away.",
+        label: isApprovedWithdrawal ? "Why are you cancelling?" : "Reason (optional)",
+        placeholder: isApprovedWithdrawal ? "e.g. Expense was refunded by the vendor" : "e.g. Submitted by mistake",
+        confirmLabel: isApprovedWithdrawal ? "Send request" : "Cancel claim",
+        tone: (isApprovedWithdrawal ? "warning" : "danger") as "warning" | "danger",
+        required: isApprovedWithdrawal,
+        isPending: cancelMutation.isPending,
+        onConfirm: (reason: string) => cancelMutation.mutate(reason),
+      }
+    : pendingAction === "admin-cancel"
+    ? {
+        title: "Cancel this claim",
+        description: "The claim will be voided at whatever stage it is in. The record stays visible to the employee.",
+        label: "Reason",
+        placeholder: "e.g. Duplicate of an earlier claim",
+        confirmLabel: "Cancel claim",
+        tone: "danger" as const,
+        required: true,
+        isPending: adminCancelMutation.isPending,
+        onConfirm: (reason: string) => adminCancelMutation.mutate(reason),
+      }
+    : pendingAction === "delete"
+    ? {
+        title: "Delete this claim",
+        description: isAdmin
+          ? "The claim and its receipts will be erased for good. A full copy goes to the deletion log, which is the only trace that will remain — cancel instead if you just want to void it."
+          : "This draft and its receipts will be erased for good.",
+        label: "Reason",
+        placeholder: isAdmin ? "e.g. Filed against the wrong employee" : "e.g. No longer needed",
+        confirmLabel: "Delete permanently",
+        tone: "danger" as const,
+        required: isAdmin,
+        isPending: deleteMutation.isPending,
+        onConfirm: (reason: string) => deleteMutation.mutate(reason || undefined),
+      }
+    : null;
+
   return (
     <Modal title={`Claim ${claim.claimNumber}`} onClose={onClose} wide>
+      {prompt && (
+        <ReasonPromptModal
+          {...prompt}
+          onConfirm={(reason) => { prompt.onConfirm(reason); setPendingAction(null); }}
+          onClose={() => setPendingAction(null)}
+        />
+      )}
       <div className="space-y-5">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -341,6 +513,33 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
             <div>
               <p className="text-xs font-semibold text-red-700 mb-0.5">Rejection Reason</p>
               <p className="text-sm text-red-700">{claim.rejectionNote}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Cancellation trail */}
+        {claim.status === "CANCELLATION_PENDING" && (
+          <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3">
+            <Clock className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-xs font-semibold text-amber-800 mb-0.5">Cancellation awaiting approval</p>
+              <p className="text-sm text-amber-700">{claim.cancelReason}</p>
+              <p className="text-xs text-amber-600 mt-1">The claim stays approved until the approver decides.</p>
+            </div>
+          </div>
+        )}
+        {claim.status === "CANCELLED" && claim.cancelReason && (
+          <div className="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3">
+            <p className="text-xs font-semibold text-gray-600 mb-0.5">Cancellation Reason</p>
+            <p className="text-sm text-gray-700">{claim.cancelReason}</p>
+          </div>
+        )}
+        {claim.status === "APPROVED" && claim.cancelRejectionNote && (
+          <div className="flex items-start gap-2 rounded-lg bg-orange-50 border border-orange-200 px-4 py-3">
+            <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-xs font-semibold text-orange-800 mb-0.5">Cancellation declined</p>
+              <p className="text-sm text-orange-700">{claim.cancelRejectionNote}</p>
             </div>
           </div>
         )}
@@ -439,13 +638,11 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
           </div>
         )}
 
-        <div className="flex gap-2 justify-end pt-1 border-t border-gray-100">
-          {isDraft && (isOwnClaim || !isAdmin) && (
+        <div className="flex flex-wrap gap-2 justify-end pt-1 border-t border-gray-100">
+          {isDraft && isOwnClaim && !isAdmin && (
             <button
               type="button"
-              onClick={() => {
-                if (confirm("Delete this draft claim? This cannot be undone.")) deleteMutation.mutate();
-              }}
+              onClick={() => setPendingAction("delete")}
               disabled={deleteMutation.isPending}
               className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50 mr-auto"
             >
@@ -453,7 +650,35 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
               {deleteMutation.isPending ? "Deleting…" : "Delete Draft"}
             </button>
           )}
-          {isDraft && (isOwnClaim || !isAdmin) && (
+          {/* Admin overrides — reach any claim at any stage. Deleting is logged. */}
+          {canOverride && (
+            <div className="flex flex-wrap gap-2 mr-auto">
+              <button
+                type="button"
+                onClick={() => setPendingAction("admin-cancel")}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-100"
+              >
+                <XCircle className="h-4 w-4" /> Cancel Claim
+              </button>
+              <button
+                type="button"
+                onClick={() => setPendingAction("delete")}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100"
+              >
+                <Trash2 className="h-4 w-4" /> Delete
+              </button>
+            </div>
+          )}
+          {canWithdraw && (
+            <button
+              type="button"
+              onClick={() => setPendingAction("withdraw")}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50"
+            >
+              {isApprovedWithdrawal ? "Request Cancellation" : "Cancel Claim"}
+            </button>
+          )}
+          {isDraft && isOwnClaim && (
             <button
               type="button"
               onClick={() => submitMutation.mutate()}
@@ -1025,6 +1250,115 @@ function MonthGroup({ monthKey, claims, onOpen, prefetch, showEmployee = false }
   );
 }
 
+// ─── Cancellation requests (admin) ───────────────────────────────────────────
+
+/**
+ * Withdrawals of claims that were already approved. The decision here isn't
+ * "is this expense valid" but "do I undo the approval I already gave", so it
+ * lives apart from the normal pending queue.
+ */
+function CancellationRequestsPanel({ onOpen }: { onOpen: (id: string) => void }) {
+  const qc = useQueryClient();
+  const [deciding, setDeciding] = useState<{ claim: any; action: "APPROVED" | "REJECTED" } | null>(null);
+
+  const { data: requests = [], isLoading } = useQuery({
+    queryKey: ["claim-cancellation-requests"],
+    queryFn: () => api.get("/api/v1/claims/cancellation-requests").then((r) => r.data.data),
+  });
+
+  const decideMutation = useMutation({
+    mutationFn: ({ id, action, note }: { id: string; action: string; note?: string }) =>
+      api.patch(`/api/v1/claims/${id}/cancellation-decision`, { action, note }),
+    onSuccess: (_d, vars) => {
+      toast.success(vars.action === "APPROVED" ? "Claim cancelled" : "Cancellation declined");
+      for (const key of ["claim-cancellation-requests", "admin-all-claims", "my-claims", "pending-claims"]) {
+        qc.invalidateQueries({ queryKey: [key] });
+      }
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Decision failed"),
+  });
+
+  if (isLoading) {
+    return <p className="px-6 py-10 text-sm text-center text-gray-400">Loading…</p>;
+  }
+  if (!requests.length) {
+    return <p className="px-6 py-10 text-sm text-center text-gray-400">No cancellation requests awaiting a decision.</p>;
+  }
+
+  return (
+    <>
+      {deciding && (
+        <ReasonPromptModal
+          title={deciding.action === "APPROVED" ? "Approve cancellation" : "Decline cancellation"}
+          description={deciding.action === "APPROVED"
+            ? `Claim ${deciding.claim.claimNumber} will be cancelled and will not be paid out.`
+            : "The claim stays approved. The employee will see your note explaining why."}
+          label={deciding.action === "APPROVED" ? "Note (optional)" : "Why are you declining?"}
+          placeholder={deciding.action === "APPROVED" ? "e.g. Confirmed with finance" : "e.g. Already included in this month's payout run"}
+          confirmLabel={deciding.action === "APPROVED" ? "Approve cancellation" : "Decline"}
+          tone={deciding.action === "APPROVED" ? "warning" : "danger"}
+          required={deciding.action === "REJECTED"}
+          isPending={decideMutation.isPending}
+          onConfirm={(note) => {
+            decideMutation.mutate({ id: deciding.claim.id, action: deciding.action, note: note || undefined });
+            setDeciding(null);
+          }}
+          onClose={() => setDeciding(null)}
+        />
+      )}
+
+      <div className="divide-y divide-gray-50">
+        {requests.map((claim: any) => (
+          <div key={claim.id} className="px-5 py-4 flex flex-col sm:flex-row sm:items-start gap-4 hover:bg-gray-50">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-semibold text-gray-900">
+                  {claim.employee?.firstName} {claim.employee?.lastName}
+                </span>
+                <span className="text-xs text-gray-400">{claim.employee?.department?.name}</span>
+                <button
+                  onClick={() => onOpen(claim.id)}
+                  className="text-xs font-mono text-gray-400 hover:underline"
+                >
+                  {claim.claimNumber}
+                </button>
+              </div>
+              <p className="text-sm text-gray-600 mt-0.5">{claim.title}</p>
+              <div className="flex items-center gap-3 mt-1 flex-wrap">
+                <span className="text-xs text-gray-500">{claim.claimType}</span>
+                <span className="text-sm font-semibold text-gray-900">
+                  {formatCurrency(claim.approvedAmount ?? claim.claimedAmount)}
+                </span>
+                <span className="text-xs text-gray-400">
+                  Approved {claim.approvedAt ? formatDate(claim.approvedAt) : "—"}
+                </span>
+              </div>
+              <div className="mt-2 rounded-lg bg-amber-50 border border-amber-100 px-3 py-2">
+                <p className="text-xs font-semibold text-amber-800 mb-0.5">Reason for cancelling</p>
+                <p className="text-sm text-amber-700">{claim.cancelReason ?? "—"}</p>
+              </div>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <button
+                onClick={() => setDeciding({ claim, action: "REJECTED" })}
+                className="flex-1 sm:flex-initial rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100 whitespace-nowrap"
+              >
+                Decline
+              </button>
+              <button
+                onClick={() => setDeciding({ claim, action: "APPROVED" })}
+                className="flex-1 sm:flex-initial rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 whitespace-nowrap"
+              >
+                Approve
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 // ─── Threshold setting pill (admin) ──────────────────────────────────────────
 
 function ThresholdSetting() {
@@ -1093,7 +1427,7 @@ export default function ClaimsPage() {
   const [showNewClaim, setShowNewClaim] = useState(false);
   const [selectedClaimId, setSelectedClaimId] = useState<string | null>(null);
   const [reviewClaimId, setReviewClaimId] = useState<string | null>(null);
-  const [teamSubTab, setTeamSubTab] = useState<"pending" | "all">("pending");
+  const [teamSubTab, setTeamSubTab] = useState<"pending" | "cancellations" | "all">("pending");
 
   function prefetchClaim(id: string) {
     qc.prefetchQuery({
@@ -1119,6 +1453,13 @@ export default function ClaimsPage() {
     enabled: isAdmin && activeTab === "team" && teamSubTab === "all",
   });
 
+  // Fetched alongside the pending count so the sub-tab can carry its own badge.
+  const { data: cancellationRequests } = useQuery({
+    queryKey: ["claim-cancellation-requests"],
+    queryFn: () => api.get("/api/v1/claims/cancellation-requests").then((r) => r.data.data),
+    enabled: isAdmin,
+  });
+
   function openClaim(id: string) {
     setShowNewClaim(false);
     setReviewClaimId(null);
@@ -1126,6 +1467,7 @@ export default function ClaimsPage() {
   }
 
   const pendingCount = pendingClaims?.length ?? 0;
+  const cancellationCount = cancellationRequests?.length ?? 0;
 
   // Stats for My Claims
   const curKey  = currentMonthKeyFn();
@@ -1357,29 +1699,33 @@ export default function ClaimsPage() {
         <div className="space-y-4">
           {/* Sub-tabs */}
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="flex items-center gap-1 px-5 py-0 border-b border-gray-100">
-              {(["pending", "all"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setTeamSubTab(tab)}
-                  className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                    teamSubTab === tab
-                      ? "border-[#2C3E7C] text-[#2C3E7C]"
-                      : "border-transparent text-gray-500 hover:text-gray-800"
-                  }`}
-                >
-                  {tab === "pending" ? (
+            <div className="flex items-center gap-1 px-5 py-0 border-b border-gray-100 overflow-x-auto">
+              {(["pending", "cancellations", "all"] as const).map((tab) => {
+                const badge = tab === "pending" ? pendingCount : tab === "cancellations" ? cancellationCount : 0;
+                const label = tab === "pending" ? "Pending Approvals"
+                  : tab === "cancellations" ? "Cancellations"
+                  : "All Claims";
+                return (
+                  <button
+                    key={tab}
+                    onClick={() => setTeamSubTab(tab)}
+                    className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                      teamSubTab === tab
+                        ? "border-[#2C3E7C] text-[#2C3E7C]"
+                        : "border-transparent text-gray-500 hover:text-gray-800"
+                    }`}
+                  >
                     <span className="flex items-center gap-1.5">
-                      Pending Approvals
-                      {pendingCount > 0 && (
-                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold text-white" style={{ backgroundColor: "#F2994A" }}>
-                          {pendingCount}
+                      {label}
+                      {badge > 0 && (
+                        <span className="inline-flex h-5 min-w-[20px] px-1 items-center justify-center rounded-full text-xs font-bold text-white" style={{ backgroundColor: "#F2994A" }}>
+                          {badge}
                         </span>
                       )}
                     </span>
-                  ) : "All Claims"}
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
 
             {/* Pending sub-tab */}
@@ -1429,6 +1775,9 @@ export default function ClaimsPage() {
                 )}
               </div>
             )}
+
+            {/* Cancellations sub-tab */}
+            {teamSubTab === "cancellations" && <CancellationRequestsPanel onOpen={openClaim} />}
 
             {/* All Claims sub-tab */}
             {teamSubTab === "all" && (

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { prisma } from "@cadb/db";
 import { authenticate, requireRole } from "../../middleware/authenticate.js";
 import ExcelJS from "exceljs";
+import { IN_FORCE_LEAVE_STATUSES } from "../../utils/leave.js";
 
 const ADMIN_ROLES = ["SUPER_ADMIN", "HR_ADMIN"] as const;
 
@@ -628,7 +629,7 @@ export async function reportRoutes(fastify: FastifyInstance) {
       prisma.leaveApplication.findMany({
         where: {
           leaveType: "UNPAID",
-          status: "APPROVED",
+          status: { in: IN_FORCE_LEAVE_STATUSES },
           fromDate: { lte: monthEnd },
           toDate:   { gte: monthStart },
         },

@@ -4,8 +4,9 @@ import { prisma } from "@cadb/db";
 import { authenticate } from "../../middleware/authenticate.js";
 import type { JwtPayload } from "@cadb/types";
 import { sendMail } from "../../utils/mailer.js";
-import { getFiscalYear, computeAccrued, computeCarryForward } from "../../utils/leave.js";
+import { getFiscalYear, computeAccrued, computeCarryForward, IN_FORCE_LEAVE_STATUSES } from "../../utils/leave.js";
 import { hasPermission, isCustomRole } from "../../utils/permissions.js";
+import { recordAudit, describeEmployee } from "../../utils/auditLog.js";
 import {
   buildReportingScopeFilter,
   getHeadedDepartmentIds,
@@ -36,6 +37,55 @@ function workingDaysBetween(from: Date, to: Date): number {
 /** SUPER_ADMIN / HR_ADMIN see and decide every leave, as before. */
 function isLeaveAdmin(role: string): boolean {
   return role === "SUPER_ADMIN" || role === "HR_ADMIN";
+}
+
+/**
+ * May the caller force-cancel or delete anyone's leave? Super Admin and HR hold
+ * this outright; a custom role needs an explicit EMP_LEAVES delete grant.
+ * Deliberately narrower than `hasLeaveAuthorityOver` — supervisors approve and
+ * reject, they don't erase records.
+ */
+async function canOverrideLeaves(user: JwtPayload): Promise<boolean> {
+  if (isLeaveAdmin(user.role)) return true;
+  return isCustomRole(user.role) && await hasPermission(user, "EMP_LEAVES", "canDelete");
+}
+
+/**
+ * Which balance bucket currently holds this leave's days.
+ * PENDING parks them in `pending`; APPROVED (and an approved leave awaiting a
+ * cancellation decision) has already moved them into `used`. Anything else has
+ * released them already.
+ */
+function heldBucket(status: string): "pending" | "used" | null {
+  if (status === "PENDING") return "pending";
+  if (status === "APPROVED" || status === "CANCELLATION_PENDING") return "used";
+  return null;
+}
+
+/**
+ * Prisma op that hands the days back to the employee's balance. `updateMany` —
+ * not `update` — because leaves can be applied for before a balance row exists
+ * for that type/year, and a missing row must not blow up the cancellation.
+ */
+function releaseBalanceOp(application: { employeeId: string; leaveType: any; fromDate: Date; totalDays: number; status: string }) {
+  const bucket = heldBucket(application.status);
+  if (!bucket) return null;
+  return prisma.leaveBalance.updateMany({
+    where: {
+      employeeId: application.employeeId,
+      leaveType: application.leaveType,
+      year: getFiscalYear(application.fromDate),
+    },
+    data: { [bucket]: { decrement: application.totalDays } },
+  });
+}
+
+/** One-liner for the audit trail — readable after the row itself is gone. */
+function summariseLeave(application: any): string {
+  const from = new Date(application.fromDate).toISOString().slice(0, 10);
+  const to = new Date(application.toDate).toISOString().slice(0, 10);
+  const range = from === to ? from : `${from} → ${to}`;
+  return `${describeEmployee(application.employee)} · ${application.leaveType} leave · ${application.totalDays} day(s) · ${range} · was ${application.status}`;
 }
 
 /**
@@ -117,10 +167,15 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     return reply.status(201).send({ success: true, data: application, message: "Leave application submitted" });
   });
 
-  // Cancel own PENDING leave
+  // Withdraw own leave.
+  //   PENDING  → cancelled outright; nobody has acted on it yet.
+  //   APPROVED → parks in CANCELLATION_PENDING; the approver has to sign off on
+  //              undoing their own approval, so the days stay booked until they do.
   fastify.patch("/:id/cancel", async (request, reply) => {
     const user = request.user as JwtPayload;
     const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as { reason?: string };
+    const reason = body.reason?.trim() || null;
 
     const application = await prisma.leaveApplication.findUnique({ where: { id } });
     if (!application) {
@@ -129,27 +184,230 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     if (application.employeeId !== user.sub) {
       return reply.status(403).send({ success: false, error: "Forbidden", statusCode: 403 });
     }
-    if (application.status !== "PENDING") {
-      return reply.status(400).send({
-        success: false,
-        error: `Cannot cancel a leave that is already ${application.status.toLowerCase()}`,
-        statusCode: 400,
+
+    if (application.status === "PENDING") {
+      const ops: any[] = [
+        prisma.leaveApplication.update({
+          where: { id },
+          data: { status: "CANCELLED", cancelReason: reason, cancelledAt: new Date() },
+        }),
+      ];
+      const release = releaseBalanceOp(application);
+      if (release) ops.push(release);
+
+      const [updated] = await prisma.$transaction(ops);
+      return reply.send({ success: true, data: updated, message: "Leave cancelled" });
+    }
+
+    if (application.status === "APPROVED") {
+      if (!reason) {
+        return reply.status(400).send({
+          success: false,
+          error: "Please give a reason — your approver has to sign off on cancelling an approved leave",
+          statusCode: 400,
+        });
+      }
+      const updated = await prisma.leaveApplication.update({
+        where: { id },
+        data: {
+          status: "CANCELLATION_PENDING",
+          cancelReason: reason,
+          cancelRequestedAt: new Date(),
+          cancelRejectionNote: null,
+        },
+      });
+      sendEmailForLeave(user.sub, updated, "CANCEL_REQUESTED").catch(() => {});
+      return reply.send({
+        success: true,
+        data: updated,
+        message: "Cancellation requested — awaiting your approver's decision",
       });
     }
 
-    const year = getFiscalYear(application.fromDate);
-    const [updated] = await prisma.$transaction([
+    return reply.status(400).send({
+      success: false,
+      error: application.status === "CANCELLATION_PENDING"
+        ? "A cancellation request is already awaiting approval"
+        : `Cannot cancel a leave that is already ${application.status.toLowerCase()}`,
+      statusCode: 400,
+    });
+  });
+
+  // Approver decides on a withdrawal request for a leave they already approved.
+  fastify.patch("/:id/cancellation-decision", async (request, reply) => {
+    const user = request.user as JwtPayload;
+    const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as { action?: string; note?: string };
+
+    if (body.action !== "APPROVED" && body.action !== "REJECTED") {
+      return reply.status(400).send({ success: false, error: "action must be APPROVED or REJECTED", statusCode: 400 });
+    }
+
+    const application = await prisma.leaveApplication.findUnique({ where: { id } });
+    if (!application || application.status !== "CANCELLATION_PENDING") {
+      return reply.status(404).send({
+        success: false,
+        error: "No cancellation request awaiting a decision on this leave",
+        statusCode: 404,
+      });
+    }
+    if (!await hasLeaveAuthorityOver(user, application.employeeId, "canApprove")) {
+      return reply.status(403).send({
+        success: false,
+        error: "Forbidden: you are not this employee's supervisor or department head",
+        statusCode: 403,
+      });
+    }
+
+    if (body.action === "REJECTED") {
+      if (!body.note?.trim()) {
+        return reply.status(400).send({ success: false, error: "A note is required when declining a cancellation", statusCode: 400 });
+      }
+      // Declined — the leave stands exactly as approved and the days stay booked.
+      const updated = await prisma.leaveApplication.update({
+        where: { id },
+        data: {
+          status: "APPROVED",
+          cancelApproverId: user.sub,
+          cancelRejectionNote: body.note.trim(),
+          cancelRequestedAt: null,
+        },
+      });
+      return reply.send({ success: true, data: updated, message: "Cancellation declined — leave stands" });
+    }
+
+    const ops: any[] = [
       prisma.leaveApplication.update({
         where: { id },
-        data: { status: "CANCELLED" },
+        data: {
+          status: "CANCELLED",
+          cancelApproverId: user.sub,
+          cancelledAt: new Date(),
+          cancelRejectionNote: null,
+        },
       }),
-      prisma.leaveBalance.update({
-        where: { employeeId_leaveType_year: { employeeId: user.sub, leaveType: application.leaveType, year } },
-        data: { pending: { decrement: application.totalDays } },
+    ];
+    const release = releaseBalanceOp(application);
+    if (release) ops.push(release);
+
+    const [updated] = await prisma.$transaction(ops);
+    return reply.send({ success: true, data: updated, message: "Leave cancelled and days returned to balance" });
+  });
+
+  // Withdrawal requests waiting on the caller — same scope rules as /pending.
+  fastify.get("/cancellation-requests", async (request, reply) => {
+    const user = request.user as JwtPayload;
+
+    const seesAll = isLeaveAdmin(user.role)
+      || (isCustomRole(user.role) && await hasPermission(user, "EMP_LEAVES", "canApprove"));
+    const employeeFilter = seesAll ? undefined : await buildReportingScopeFilter(user.sub);
+
+    const data = await prisma.leaveApplication.findMany({
+      where: { status: "CANCELLATION_PENDING", ...(employeeFilter && { employee: employeeFilter }) },
+      include: {
+        employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, department: { select: { name: true } } } },
+        approver: { select: { firstName: true, lastName: true } },
+      },
+      orderBy: { cancelRequestedAt: "asc" },
+    });
+    return reply.send({ success: true, data });
+  });
+
+  // Admin override: cancel someone else's leave outright, whatever its state.
+  // Logged, because it overrides a decision somebody else made.
+  fastify.patch("/:id/admin-cancel", async (request, reply) => {
+    const user = request.user as JwtPayload;
+    const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as { reason?: string };
+    const reason = body.reason?.trim();
+
+    if (!await canOverrideLeaves(user)) {
+      return reply.status(403).send({ success: false, error: "Forbidden", statusCode: 403 });
+    }
+    if (!reason) {
+      return reply.status(400).send({ success: false, error: "A reason is required", statusCode: 400 });
+    }
+
+    const application = await prisma.leaveApplication.findUnique({
+      where: { id },
+      include: { employee: { select: { firstName: true, lastName: true, employeeCode: true } } },
+    });
+    if (!application) {
+      return reply.status(404).send({ success: false, error: "Application not found", statusCode: 404 });
+    }
+    if (application.status === "CANCELLED") {
+      return reply.status(400).send({ success: false, error: "This leave is already cancelled", statusCode: 400 });
+    }
+
+    const ops: any[] = [
+      prisma.leaveApplication.update({
+        where: { id },
+        data: {
+          status: "CANCELLED",
+          cancelReason: reason,
+          cancelApproverId: user.sub,
+          cancelledAt: new Date(),
+          cancelRequestedAt: null,
+        },
       }),
-    ]);
+    ];
+    const release = releaseBalanceOp(application);
+    if (release) ops.push(release);
+
+    const [updated] = await prisma.$transaction(ops);
+
+    await recordAudit({
+      request,
+      action: "FORCE_CANCEL",
+      entity: "LeaveApplication",
+      entityId: id,
+      summary: summariseLeave(application),
+      oldValues: application,
+      newValues: { reason },
+    });
 
     return reply.send({ success: true, data: updated, message: "Leave cancelled" });
+  });
+
+  // Admin override: delete the record entirely. The full snapshot goes to the
+  // audit log first — this is the only trace that survives.
+  fastify.delete("/:id", async (request, reply) => {
+    const user = request.user as JwtPayload;
+    const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as { reason?: string };
+    const reason = body.reason?.trim();
+
+    if (!await canOverrideLeaves(user)) {
+      return reply.status(403).send({ success: false, error: "Forbidden", statusCode: 403 });
+    }
+    if (!reason) {
+      return reply.status(400).send({ success: false, error: "A reason is required", statusCode: 400 });
+    }
+
+    const application = await prisma.leaveApplication.findUnique({
+      where: { id },
+      include: { employee: { select: { firstName: true, lastName: true, employeeCode: true } } },
+    });
+    if (!application) {
+      return reply.status(404).send({ success: false, error: "Application not found", statusCode: 404 });
+    }
+
+    const ops: any[] = [prisma.leaveApplication.delete({ where: { id } })];
+    const release = releaseBalanceOp(application);
+    if (release) ops.push(release);
+    await prisma.$transaction(ops);
+
+    await recordAudit({
+      request,
+      action: "DELETE",
+      entity: "LeaveApplication",
+      entityId: id,
+      summary: summariseLeave(application),
+      oldValues: application,
+      newValues: { reason },
+    });
+
+    return reply.send({ success: true, data: null, message: "Leave application deleted" });
   });
 
   // Get my leave balances with accrual breakdown (auto-provisions from policy on first access)
@@ -218,7 +476,7 @@ export async function leaveRoutes(fastify: FastifyInstance) {
         where: {
           employeeId: user.sub,
           leaveType: "UNPAID",
-          status: "APPROVED",
+          status: { in: IN_FORCE_LEAVE_STATUSES },
           fromDate: { gte: fyStart, lt: fyEnd },
         },
         select: { totalDays: true },
@@ -227,7 +485,7 @@ export async function leaveRoutes(fastify: FastifyInstance) {
         where: {
           employeeId: user.sub,
           leaveType: { not: "UNPAID" },
-          status: "APPROVED",
+          status: { in: IN_FORCE_LEAVE_STATUSES },
           lopDays: { gt: 0 },
           fromDate: { gte: fyStart, lt: fyEnd },
         },
@@ -267,6 +525,7 @@ export async function leaveRoutes(fastify: FastifyInstance) {
       orderBy: { createdAt: "desc" },
       include: {
         approver: { select: { firstName: true, lastName: true } },
+        cancelApprover: { select: { firstName: true, lastName: true } },
       },
     });
     return reply.send({ success: true, data });
@@ -288,9 +547,13 @@ export async function leaveRoutes(fastify: FastifyInstance) {
       || directReportCount > 0
       || headedDepartmentIds.length > 0;
 
+    // Separate, stronger grant: force-cancelling and deleting other people's
+    // records is Super Admin / HR territory, not every supervisor's.
+    const canOverride = await canOverrideLeaves(user);
+
     return reply.send({
       success: true,
-      data: { canApproveAny, headedDepartmentIds, directReportCount },
+      data: { canApproveAny, canOverride, headedDepartmentIds, directReportCount },
     });
   });
 
@@ -312,6 +575,34 @@ export async function leaveRoutes(fastify: FastifyInstance) {
         employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, department: { select: { name: true } } } },
       },
       orderBy: { createdAt: "asc" },
+    });
+    return reply.send({ success: true, data });
+  });
+
+  // Every leave record, for the roles allowed to override them. This is the
+  // surface the cancel/delete controls hang off — /pending only ever shows the
+  // undecided ones, and an admin has to be able to reach an approved leave too.
+  fastify.get("/all", async (request, reply) => {
+    const user = request.user as JwtPayload;
+    if (!await canOverrideLeaves(user)) {
+      return reply.status(403).send({ success: false, error: "Forbidden", statusCode: 403 });
+    }
+
+    const q = request.query as Record<string, string>;
+    const take = Math.min(Math.max(parseInt(q.limit ?? "200", 10) || 200, 1), 500);
+
+    const data = await prisma.leaveApplication.findMany({
+      where: {
+        ...(q.status && { status: q.status as any }),
+        ...(q.employeeId && { employeeId: q.employeeId }),
+      },
+      include: {
+        employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, department: { select: { name: true } } } },
+        approver: { select: { firstName: true, lastName: true } },
+        cancelApprover: { select: { firstName: true, lastName: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take,
     });
     return reply.send({ success: true, data });
   });
@@ -339,6 +630,7 @@ export async function leaveRoutes(fastify: FastifyInstance) {
       orderBy: { createdAt: "desc" },
       include: {
         approver: { select: { firstName: true, lastName: true } },
+        cancelApprover: { select: { firstName: true, lastName: true } },
       },
     });
 
@@ -420,8 +712,12 @@ export async function leaveRoutes(fastify: FastifyInstance) {
 
     const data = await prisma.leaveApplication.findMany({
       where: {
-        approverId: user.sub,
-        status: { in: ["APPROVED", "REJECTED"] },
+        OR: [
+          { approverId: user.sub, status: { in: ["APPROVED", "REJECTED"] } },
+          // Cancellations they signed off on — the approval they undid would
+          // otherwise vanish from their history entirely.
+          { cancelApproverId: user.sub, status: "CANCELLED" },
+        ],
       },
       include: {
         employee: {
@@ -443,7 +739,7 @@ export async function leaveRoutes(fastify: FastifyInstance) {
 
 }
 
-async function sendEmailForLeave(employeeId: string, application: any, action: "APPLIED") {
+async function sendEmailForLeave(employeeId: string, application: any, action: "APPLIED" | "CANCEL_REQUESTED") {
   const employee = await prisma.employee.findUnique({
     where: { id: employeeId },
     include: {
@@ -464,22 +760,34 @@ async function sendEmailForLeave(employeeId: string, application: any, action: "
 
   const from = application.fromDate.toDateString?.() ?? application.fromDate;
   const to = application.toDate.toDateString?.() ?? application.toDate;
+  const isCancelRequest = action === "CANCEL_REQUESTED";
 
   await sendMail({
     to: supervisorEmail,
     cc: hrCc || undefined,
-    subject: `Leave Request: ${employee.firstName} ${employee.lastName} (${application.leaveType})`,
+    subject: isCancelRequest
+      ? `Leave Cancellation Request: ${employee.firstName} ${employee.lastName} (${application.leaveType})`
+      : `Leave Request: ${employee.firstName} ${employee.lastName} (${application.leaveType})`,
     html: `
       <p>Dear ${employee.reportingTo?.firstName},</p>
-      <p><strong>${employee.firstName} ${employee.lastName}</strong> (${employee.employeeCode}, ${employee.department?.name}) has applied for leave.</p>
+      <p><strong>${employee.firstName} ${employee.lastName}</strong> (${employee.employeeCode}, ${employee.department?.name}) ${
+        isCancelRequest
+          ? "wants to cancel a leave you have already approved."
+          : "has applied for leave."
+      }</p>
       <table style="border-collapse:collapse;margin:16px 0">
         <tr><td style="padding:4px 12px 4px 0;color:#666">Leave Type</td><td><strong>${application.leaveType}</strong></td></tr>
         <tr><td style="padding:4px 12px 4px 0;color:#666">From</td><td>${from}</td></tr>
         <tr><td style="padding:4px 12px 4px 0;color:#666">To</td><td>${to}</td></tr>
         <tr><td style="padding:4px 12px 4px 0;color:#666">Days</td><td>${application.totalDays}</td></tr>
         <tr><td style="padding:4px 12px 4px 0;color:#666">Reason</td><td>${application.reason}</td></tr>
+        ${isCancelRequest ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Cancellation Reason</td><td>${application.cancelReason ?? "—"}</td></tr>` : ""}
       </table>
-      <p>Please log in to the dashboard to approve or reject this request.</p>
+      <p>${
+        isCancelRequest
+          ? "Please log in to the dashboard to approve or decline this cancellation."
+          : "Please log in to the dashboard to approve or reject this request."
+      }</p>
       <p style="color:#999;font-size:12px">— Centum Academy HR System</p>
     `,
   });

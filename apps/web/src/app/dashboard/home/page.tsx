@@ -757,11 +757,13 @@ export default function HomeDashboardPage() {
                     <p className="text-sm font-medium text-gray-800">{leave.leaveType.replace("_", " ")}</p>
                     <p className="text-xs text-gray-400">{formatDate(leave.fromDate)} · {leave.totalDays} day(s)</p>
                   </div>
-                  <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                  <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ${
                     leave.status === "APPROVED" ? "bg-green-100 text-green-700" :
                     leave.status === "REJECTED" ? "bg-red-100 text-red-700" :
+                    leave.status === "CANCELLED" ? "bg-gray-100 text-gray-500" :
+                    leave.status === "CANCELLATION_PENDING" ? "bg-amber-100 text-amber-700" :
                     "bg-yellow-100 text-yellow-700"}`}>
-                    {leave.status}
+                    {leave.status === "CANCELLATION_PENDING" ? "CANCELLATION PENDING" : leave.status}
                   </span>
                 </div>
               ))}
@@ -787,12 +789,13 @@ export default function HomeDashboardPage() {
                     <p className="text-sm font-medium text-gray-800">{claim.title}</p>
                     <p className="text-xs text-gray-400">{claim.claimType} · {formatCurrency(claim.claimedAmount)}</p>
                   </div>
-                  <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                  <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ${
                     claim.status === "APPROVED" || claim.status === "PAID" ? "bg-green-100 text-green-700" :
                     claim.status === "REJECTED" ? "bg-red-100 text-red-700" :
                     claim.status === "SUBMITTED" ? "bg-blue-100 text-blue-700" :
+                    claim.status === "CANCELLATION_PENDING" ? "bg-amber-100 text-amber-700" :
                     "bg-gray-100 text-gray-700"}`}>
-                    {claim.status}
+                    {claim.status === "CANCELLATION_PENDING" ? "CANCELLATION PENDING" : claim.status}
                   </span>
                 </div>
               ))}

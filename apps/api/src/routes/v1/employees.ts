@@ -7,7 +7,7 @@ import { sendCredentialsMail } from "../../utils/mailer.js";
 import type { JwtPayload } from "@cadb/types";
 import { randomUUID } from "crypto";
 import { uploadFile } from "../../utils/s3.js";
-import { computeAccrued, computeCarryForward } from "../../utils/leave.js";
+import { computeAccrued, computeCarryForward, IN_FORCE_LEAVE_STATUSES } from "../../utils/leave.js";
 import { hasAnyPermission, ACADEMICS_MODULES } from "../../utils/permissions.js";
 import { createWriteStream, mkdirSync } from "fs";
 import { join, dirname } from "path";
@@ -191,7 +191,7 @@ export async function employeeRoutes(fastify: FastifyInstance) {
           status: { not: "TERMINATED" },
           leaveApplications: {
             some: {
-              status: "APPROVED",
+              status: { in: IN_FORCE_LEAVE_STATUSES },
               fromDate: { lte: todayEnd },
               toDate:   { gte: todayStart },
             },
@@ -974,7 +974,7 @@ export async function employeeRoutes(fastify: FastifyInstance) {
         where: {
           employeeId: id,
           leaveType: "UNPAID",
-          status: "APPROVED",
+          status: { in: IN_FORCE_LEAVE_STATUSES },
           fromDate: { lte: periodEnd },
           toDate:   { gte: periodStart },
         },
@@ -985,7 +985,7 @@ export async function employeeRoutes(fastify: FastifyInstance) {
         where: {
           employeeId: id,
           leaveType: { not: "UNPAID" },
-          status: "APPROVED",
+          status: { in: IN_FORCE_LEAVE_STATUSES },
           lopDays: { gt: 0 },
           fromDate: { lte: periodEnd },
           toDate:   { gte: periodStart },

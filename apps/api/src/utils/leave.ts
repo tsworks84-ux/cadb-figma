@@ -1,3 +1,5 @@
+import type { LeaveStatus } from "@cadb/db";
+
 /**
  * Leave accrual helpers shared across the leave endpoints.
  *
@@ -6,6 +8,17 @@
  * employee's joining date — an employee who joins mid-year only accrues from
  * their joining month onward.
  */
+
+/**
+ * Statuses in which a leave is actually in force.
+ *
+ * CANCELLATION_PENDING belongs here: the employee has asked to withdraw an
+ * approved leave, but until the approver signs off the leave stands — the days
+ * stay deducted, the employee still counts as away, and any LoP still applies.
+ * Filtering on `status: "APPROVED"` alone would quietly drop those records from
+ * payroll and presence for as long as the request sits unanswered.
+ */
+export const IN_FORCE_LEAVE_STATUSES: LeaveStatus[] = ["APPROVED", "CANCELLATION_PENDING"];
 
 /** Returns the FY start year for a date (FY runs April 1 – March 31). */
 export function getFiscalYear(date: Date): number {

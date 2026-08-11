@@ -31,4 +31,6 @@ export type {
   TrainingEnrollment,
   AuditLog,
   Session,
+  LeaveStatus,
+  ClaimStatus,
 } from "@prisma/client";

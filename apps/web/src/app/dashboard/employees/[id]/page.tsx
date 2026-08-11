@@ -3010,11 +3010,18 @@ const EMP_LEAVE_LABEL: Record<string, string> = {
   COMPENSATORY: "Comp-off", UNPAID: "Unpaid", SPECIAL: "Special",
 };
 const EMP_STATUS_STYLES: Record<string, string> = {
-  PENDING:   "bg-yellow-100 text-yellow-700",
-  APPROVED:  "bg-green-100 text-green-700",
-  REJECTED:  "bg-red-100 text-red-600",
-  CANCELLED: "bg-gray-100 text-gray-400",
+  PENDING:              "bg-yellow-100 text-yellow-700",
+  APPROVED:             "bg-green-100 text-green-700",
+  REJECTED:             "bg-red-100 text-red-600",
+  CANCELLED:            "bg-gray-100 text-gray-400",
+  CANCELLATION_PENDING: "bg-amber-100 text-amber-700",
 };
+
+/** Underscored enum names don't sentence-case cleanly — spell the odd one out. */
+function leaveStatusLabel(status: string) {
+  if (status === "CANCELLATION_PENDING") return "Cancellation pending";
+  return status.charAt(0) + status.slice(1).toLowerCase();
+}
 
 function EmpBalanceSection({ balances, lopTotal }: { balances: any[]; lopTotal: number }) {
   const [open, setOpen] = useState(true);
@@ -3199,8 +3206,8 @@ function EmpLeaveHistory({ leaves }: { leaves: any[] }) {
                           : <span className="text-gray-300">—</span>}
                       </td>
                       <td className="px-6 py-4">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${EMP_STATUS_STYLES[l.status] ?? "bg-gray-100 text-gray-500"}`}>
-                          {l.status.charAt(0) + l.status.slice(1).toLowerCase()}
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${EMP_STATUS_STYLES[l.status] ?? "bg-gray-100 text-gray-500"}`}>
+                          {leaveStatusLabel(l.status)}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600">

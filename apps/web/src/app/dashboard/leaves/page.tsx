@@ -40,11 +40,24 @@ const POLICY_NOTES: Record<string, string> = {
 };
 
 const STATUS_STYLES: Record<string, string> = {
-  PENDING:   "bg-yellow-100 text-yellow-700",
-  APPROVED:  "bg-green-100 text-green-700",
-  REJECTED:  "bg-red-100 text-red-600",
-  CANCELLED: "bg-gray-100 text-gray-400",
+  PENDING:              "bg-yellow-100 text-yellow-700",
+  APPROVED:             "bg-green-100 text-green-700",
+  REJECTED:             "bg-red-100 text-red-600",
+  CANCELLED:            "bg-gray-100 text-gray-400",
+  CANCELLATION_PENDING: "bg-amber-100 text-amber-700",
 };
+
+const STATUS_LABEL: Record<string, string> = {
+  PENDING:              "Pending",
+  APPROVED:             "Approved",
+  REJECTED:             "Rejected",
+  CANCELLED:            "Cancelled",
+  CANCELLATION_PENDING: "Cancellation pending",
+};
+
+function statusLabel(status: string) {
+  return STATUS_LABEL[status] ?? status.charAt(0) + status.slice(1).toLowerCase();
+}
 
 const LEAVE_TYPES = [
   "CASUAL", "SICK", "EARNED", "MATERNITY",
@@ -82,6 +95,10 @@ interface LeaveApplication {
   approver:     { firstName: string; lastName: string } | null;
   rejectionNote?: string | null;
   documentUrl?: string | null;
+  cancelReason?:        string | null;
+  cancelRequestedAt?:   string | null;
+  cancelRejectionNote?: string | null;
+  cancelApprover?:      { firstName: string; lastName: string } | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -113,6 +130,82 @@ function workingDaysBetween(from: Date, to: Date) {
     cur.setDate(cur.getDate() + 1);
   }
   return count;
+}
+
+// ── Reason Prompt ─────────────────────────────────────────────────────────────
+
+/**
+ * Small confirm dialog that collects a written reason. Every destructive or
+ * override action here needs one: cancellations go to an approver who wasn't in
+ * the room, and admin deletions survive only as an audit-log entry.
+ */
+function ReasonPromptModal({
+  title, description, label, placeholder, confirmLabel, tone = "danger",
+  required = true, isPending, onConfirm, onClose,
+}: {
+  title: string;
+  description: string;
+  label: string;
+  placeholder: string;
+  confirmLabel: string;
+  tone?: "danger" | "warning";
+  required?: boolean;
+  isPending?: boolean;
+  onConfirm: (reason: string) => void;
+  onClose: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const disabled = (required && !reason.trim()) || !!isPending;
+  const accent = tone === "danger"
+    ? { box: "border-red-200 bg-red-50", icon: "text-red-500", btn: "bg-red-600 hover:bg-red-700" }
+    : { box: "border-amber-200 bg-amber-50", icon: "text-amber-500", btn: "bg-amber-600 hover:bg-amber-700" };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between px-5 sm:px-6 py-4 border-b border-gray-100">
+          <h2 className="font-semibold text-gray-900">{title}</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 shrink-0 ml-3">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="px-5 sm:px-6 py-5 space-y-4">
+          <div className={`flex items-start gap-2.5 rounded-xl border px-4 py-3 ${accent.box}`}>
+            <AlertTriangle className={`h-4 w-4 shrink-0 mt-0.5 ${accent.icon}`} />
+            <p className="text-sm text-gray-700">{description}</p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">
+              {label} {required && <span className="text-red-500">*</span>}
+            </label>
+            <textarea
+              rows={3}
+              autoFocus
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder={placeholder}
+              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        </div>
+        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 px-5 sm:px-6 pb-5">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+          >
+            Keep it
+          </button>
+          <button
+            onClick={() => onConfirm(reason.trim())}
+            disabled={disabled}
+            className={`px-4 py-2 text-sm font-semibold text-white rounded-xl disabled:opacity-50 transition-colors ${accent.btn}`}
+          >
+            {isPending ? "Working…" : confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Holiday Calendar Modal ────────────────────────────────────────────────────
@@ -430,7 +523,7 @@ function ReviewLeaveModal({
             </div>
             <div>
               <p className="font-semibold text-gray-900">{leave.employee.firstName} {leave.employee.lastName}</p>
-              <p className="text-sm text-gray-500">{leave.employee.department.name}</p>
+              <p className="text-sm text-gray-500">{leave.employee.department?.name}</p>
             </div>
           </div>
 
@@ -625,7 +718,7 @@ function LOPApprovalModal({
             </div>
             <div>
               <p className="font-semibold text-gray-900">{leave.employee.firstName} {leave.employee.lastName}</p>
-              <p className="text-sm text-gray-500">{leave.employee.department.name}</p>
+              <p className="text-sm text-gray-500">{leave.employee.department?.name}</p>
             </div>
           </div>
 
@@ -1120,13 +1213,34 @@ function ApplyForm({
 function LeaveDetailModal({ leave, onClose, onCancel }: {
   leave: LeaveApplication;
   onClose: () => void;
-  onCancel: (id: string) => void;
+  onCancel: (id: string, reason: string) => void;
 }) {
   const c = LEAVE_COLORS[leave.leaveType] ?? LEAVE_COLORS.UNPAID;
   const sameDay = leave.fromDate.slice(0, 10) === leave.toDate.slice(0, 10);
+  const [confirming, setConfirming] = useState(false);
+
+  // A pending leave withdraws on the spot. An approved one has to go back to the
+  // approver, so the reason is mandatory and the leave stays live meanwhile.
+  const isApprovedWithdrawal = leave.status === "APPROVED";
+  const canWithdraw = leave.status === "PENDING" || isApprovedWithdrawal;
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      {confirming && (
+        <ReasonPromptModal
+          title={isApprovedWithdrawal ? "Request cancellation" : "Cancel leave"}
+          description={isApprovedWithdrawal
+            ? "This leave is already approved, so your approver has to sign off on cancelling it. The days stay booked until they decide."
+            : "This request hasn't been reviewed yet, so it will be withdrawn straight away and the days returned to your balance."}
+          label={isApprovedWithdrawal ? "Why are you cancelling?" : "Reason (optional)"}
+          placeholder={isApprovedWithdrawal ? "e.g. Trip called off — I'll be at work as usual" : "e.g. Plans changed"}
+          confirmLabel={isApprovedWithdrawal ? "Send request" : "Cancel leave"}
+          tone={isApprovedWithdrawal ? "warning" : "danger"}
+          required={isApprovedWithdrawal}
+          onConfirm={(reason) => { onCancel(leave.id, reason); setConfirming(false); onClose(); }}
+          onClose={() => setConfirming(false)}
+        />
+      )}
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
         {/* Header */}
         <div className={`${c.bg} ${c.border} border-b rounded-t-2xl px-6 py-4 flex items-start justify-between`}>
@@ -1153,7 +1267,7 @@ function LeaveDetailModal({ leave, onClose, onCancel }: {
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Status</span>
             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${STATUS_STYLES[leave.status] ?? "bg-gray-100 text-gray-500"}`}>
-              {leave.status.charAt(0) + leave.status.slice(1).toLowerCase()}
+              {statusLabel(leave.status)}
             </span>
           </div>
 
@@ -1170,6 +1284,40 @@ function LeaveDetailModal({ leave, onClose, onCancel }: {
               <div>
                 <p className="text-xs font-semibold text-red-700 mb-0.5">Rejection Reason</p>
                 <p className="text-sm text-red-700">{leave.rejectionNote}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Cancellation trail */}
+          {leave.status === "CANCELLATION_PENDING" && (
+            <div className="flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-100 px-4 py-3">
+              <Clock className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-amber-800 mb-0.5">Cancellation awaiting approval</p>
+                <p className="text-sm text-amber-700">{leave.cancelReason}</p>
+                <p className="text-xs text-amber-600 mt-1">
+                  The leave stays approved — and the days stay deducted — until your approver decides.
+                </p>
+              </div>
+            </div>
+          )}
+          {leave.status === "CANCELLED" && leave.cancelReason && (
+            <div className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-3">
+              <p className="text-xs font-semibold text-gray-600 mb-0.5">Cancellation Reason</p>
+              <p className="text-sm text-gray-700">{leave.cancelReason}</p>
+              {leave.cancelApprover && (
+                <p className="text-xs text-gray-400 mt-1">
+                  Actioned by {leave.cancelApprover.firstName} {leave.cancelApprover.lastName}
+                </p>
+              )}
+            </div>
+          )}
+          {leave.status === "APPROVED" && leave.cancelRejectionNote && (
+            <div className="flex items-start gap-2 rounded-xl bg-orange-50 border border-orange-100 px-4 py-3">
+              <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-orange-800 mb-0.5">Cancellation declined</p>
+                <p className="text-sm text-orange-700">{leave.cancelRejectionNote}</p>
               </div>
             </div>
           )}
@@ -1203,13 +1351,13 @@ function LeaveDetailModal({ leave, onClose, onCancel }: {
         </div>
 
         {/* Footer */}
-        <div className="px-6 pb-5 flex justify-end gap-2">
-          {leave.status === "PENDING" && (
+        <div className="px-6 pb-5 flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+          {canWithdraw && (
             <button
-              onClick={() => { onCancel(leave.id); onClose(); }}
+              onClick={() => setConfirming(true)}
               className="px-4 py-2 text-sm font-semibold text-red-600 border border-red-200 rounded-xl hover:bg-red-50 transition-colors"
             >
-              Cancel Leave
+              {isApprovedWithdrawal ? "Request Cancellation" : "Cancel Leave"}
             </button>
           )}
           <button
@@ -1231,7 +1379,7 @@ function LeaveHistory({
   onCancel,
 }: {
   leaves: LeaveApplication[];
-  onCancel: (id: string) => void;
+  onCancel: (id: string, reason: string) => void;
 }) {
   const [open, setOpen] = useState(true);
   const [filter, setFilter] = useState<"ALL" | "PENDING" | "APPROVED">("ALL");
@@ -1332,7 +1480,7 @@ function LeaveHistory({
                         <td className="px-6 py-4 text-sm text-gray-700">{l.totalDays}</td>
                         <td className="px-6 py-4">
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[l.status] ?? "bg-gray-100 text-gray-500"}`}>
-                            {l.status.charAt(0) + l.status.slice(1).toLowerCase()}
+                            {statusLabel(l.status)}
                           </span>
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-600">
@@ -1358,7 +1506,11 @@ function LeaveHistory({
 // ── Current Request Tracker ───────────────────────────────────────────────────
 
 function CurrentRequest({ leaves }: { leaves: LeaveApplication[] }) {
-  const latest = leaves.find((l) => l.status === "PENDING") ?? leaves[0];
+  // A withdrawal awaiting sign-off is the most live thing on the list — surface
+  // it ahead of a plain pending application.
+  const latest = leaves.find((l) => l.status === "CANCELLATION_PENDING")
+    ?? leaves.find((l) => l.status === "PENDING")
+    ?? leaves[0];
 
   if (!latest) {
     return (
@@ -1377,32 +1529,44 @@ function CurrentRequest({ leaves }: { leaves: LeaveApplication[] }) {
     );
   }
 
-  const steps = [
-    {
-      label: "Submitted",
-      desc: `Request created on ${fmtShort(latest.createdAt)}.`,
-      done: true,
-      active: latest.status === "PENDING",
-    },
-    {
-      label: "Manager review",
-      desc: latest.approver
-        ? `Reviewed by ${latest.approver.firstName} ${latest.approver.lastName}.`
-        : "Waiting for manager to approve.",
-      done: latest.status !== "PENDING",
-      active: latest.status === "PENDING",
-    },
-    {
-      label: "HR update",
-      desc: latest.status === "APPROVED"
-        ? "Balance updated."
-        : latest.status === "REJECTED"
-        ? "Request rejected."
-        : "Balance updates after approval.",
-      done: latest.status === "APPROVED",
-      active: false,
-    },
-  ];
+  const awaitingCancellation = latest.status === "CANCELLATION_PENDING";
+
+  const steps = awaitingCancellation
+    ? [
+        { label: "Leave approved", desc: latest.approver
+            ? `Granted by ${latest.approver.firstName} ${latest.approver.lastName}.`
+            : "Granted by your approver.", done: true, active: false },
+        { label: "Cancellation requested", desc: latest.cancelReason ?? "Withdrawal submitted.", done: true, active: false },
+        { label: "Approver decision", desc: "Days stay deducted until the cancellation is approved.", done: false, active: true },
+      ]
+    : [
+        {
+          label: "Submitted",
+          desc: `Request created on ${fmtShort(latest.createdAt)}.`,
+          done: true,
+          active: latest.status === "PENDING",
+        },
+        {
+          label: "Manager review",
+          desc: latest.approver
+            ? `Reviewed by ${latest.approver.firstName} ${latest.approver.lastName}.`
+            : "Waiting for manager to approve.",
+          done: latest.status !== "PENDING",
+          active: latest.status === "PENDING",
+        },
+        {
+          label: "HR update",
+          desc: latest.status === "APPROVED"
+            ? "Balance updated."
+            : latest.status === "REJECTED"
+            ? "Request rejected."
+            : latest.status === "CANCELLED"
+            ? "Leave cancelled — days returned."
+            : "Balance updates after approval.",
+          done: latest.status === "APPROVED",
+          active: false,
+        },
+      ];
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
@@ -1534,7 +1698,7 @@ function PendingApprovalsPanel() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <p className="font-medium text-gray-900">{leave.employee.firstName} {leave.employee.lastName}</p>
-                      <span className="text-xs text-gray-400">{leave.employee.department.name}</span>
+                      <span className="text-xs text-gray-400">{leave.employee.department?.name}</span>
                     </div>
                     <p className="text-sm text-gray-600 mb-1">
                       <span className="font-medium">{LEAVE_LABEL[leave.leaveType] ?? leave.leaveType}</span>
@@ -1576,7 +1740,7 @@ function PendingApprovalsPanel() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <p className="font-medium text-gray-900">{leave.employee.firstName} {leave.employee.lastName}</p>
-                      <span className="text-xs text-gray-400">{leave.employee.department.name}</span>
+                      <span className="text-xs text-gray-400">{leave.employee.department?.name}</span>
                     </div>
                     <p className="text-sm font-medium text-red-600 mb-1">
                       {leave.totalDays} {leave.totalDays === 1 ? "day" : "days"} Unpaid Leave
@@ -1617,6 +1781,305 @@ function PendingApprovalsPanel() {
           isPending={decisionMut.isPending}
         />
       )}
+    </>
+  );
+}
+
+// ── Cancellation Requests (approver view) ────────────────────────────────────
+
+/**
+ * Withdrawals of leaves this approver already granted. Kept separate from
+ * Pending Approvals because the decision is a different one: not "should they
+ * get this leave" but "should I undo the approval I already gave".
+ */
+function CancellationRequestsPanel() {
+  const queryClient = useQueryClient();
+  const [deciding, setDeciding] = useState<{ leave: PendingLeave; action: "APPROVED" | "REJECTED" } | null>(null);
+
+  const { data: requests = [], isLoading } = useQuery<PendingLeave[]>({
+    queryKey: ["leave-cancellation-requests"],
+    queryFn: () => api.get("/api/v1/leaves/cancellation-requests").then((r) => r.data.data),
+  });
+
+  const decideMut = useMutation({
+    mutationFn: ({ id, action, note }: { id: string; action: string; note?: string }) =>
+      api.patch(`/api/v1/leaves/${id}/cancellation-decision`, { action, note }),
+    onSuccess: (_d, vars) => {
+      toast.success(vars.action === "APPROVED" ? "Leave cancelled — days returned" : "Cancellation declined");
+      queryClient.invalidateQueries({ queryKey: ["leave-cancellation-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["decided-leaves"] });
+      queryClient.invalidateQueries({ queryKey: ["all-leaves"] });
+      queryClient.invalidateQueries({ queryKey: ["my-leaves"] });
+      queryClient.invalidateQueries({ queryKey: ["my-leave-balances"] });
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.error ?? "Failed to record decision"),
+  });
+
+  if (!isLoading && requests.length === 0) return null;
+
+  return (
+    <>
+      {deciding && (
+        <ReasonPromptModal
+          title={deciding.action === "APPROVED" ? "Approve cancellation" : "Decline cancellation"}
+          description={deciding.action === "APPROVED"
+            ? `${deciding.leave.employee.firstName}'s leave will be cancelled and the ${deciding.leave.totalDays} day(s) returned to their balance.`
+            : `The leave stays approved. ${deciding.leave.employee.firstName} will see your note explaining why.`}
+          label={deciding.action === "APPROVED" ? "Note (optional)" : "Why are you declining?"}
+          placeholder={deciding.action === "APPROVED" ? "e.g. Confirmed with the team" : "e.g. Cover has already been arranged for these dates"}
+          confirmLabel={deciding.action === "APPROVED" ? "Approve cancellation" : "Decline"}
+          tone={deciding.action === "APPROVED" ? "warning" : "danger"}
+          required={deciding.action === "REJECTED"}
+          isPending={decideMut.isPending}
+          onConfirm={(note) => {
+            decideMut.mutate({ id: deciding.leave.id, action: deciding.action, note: note || undefined });
+            setDeciding(null);
+          }}
+          onClose={() => setDeciding(null)}
+        />
+      )}
+
+      <div className="bg-white rounded-lg border border-amber-200 overflow-hidden">
+        <div className="p-5 bg-amber-50 border-b border-amber-200 flex items-center gap-2">
+          <Clock className="text-amber-600 shrink-0" size={20} />
+          <div>
+            <h3 className="text-base font-semibold text-gray-900">Cancellation Requests</h3>
+            <p className="text-xs text-gray-600 mt-0.5">
+              Approved leaves your team wants to withdraw — the days stay booked until you decide.
+            </p>
+          </div>
+          {requests.length > 0 && (
+            <span className="ml-auto text-xs bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full font-medium shrink-0">
+              {requests.length}
+            </span>
+          )}
+        </div>
+
+        {isLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin h-5 w-5 border-2 border-amber-400 border-t-transparent rounded-full" />
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {requests.map((leave) => (
+              <div key={leave.id} className="p-5 hover:bg-gray-50 transition-colors">
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <p className="font-medium text-gray-900">{leave.employee.firstName} {leave.employee.lastName}</p>
+                      <span className="text-xs text-gray-400">{leave.employee.department?.name}</span>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-1">
+                      <span className="font-medium">{LEAVE_LABEL[leave.leaveType] ?? leave.leaveType}</span>
+                      {" · "}{leave.totalDays} {leave.totalDays === 1 ? "day" : "days"}
+                      {" · "}{fmtShort(leave.fromDate)}{leave.fromDate !== leave.toDate ? ` – ${fmtShort(leave.toDate)}` : ""}
+                    </p>
+                    <div className="mt-2 rounded-lg bg-amber-50 border border-amber-100 px-3 py-2">
+                      <p className="text-xs font-semibold text-amber-800 mb-0.5">Reason for cancelling</p>
+                      <p className="text-sm text-amber-700">{leave.cancelReason ?? "—"}</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      onClick={() => setDeciding({ leave, action: "REJECTED" })}
+                      className="flex-1 sm:flex-initial px-4 py-2 rounded-md text-sm font-medium text-red-700 border border-red-200 bg-red-50 hover:bg-red-100 whitespace-nowrap"
+                    >
+                      Decline
+                    </button>
+                    <button
+                      onClick={() => setDeciding({ leave, action: "APPROVED" })}
+                      className="flex-1 sm:flex-initial px-4 py-2 rounded-md text-sm font-medium text-white bg-green-600 hover:bg-green-700 whitespace-nowrap"
+                    >
+                      Approve
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ── All Leaves (Super Admin / HR override view) ──────────────────────────────
+
+/**
+ * Every leave in the system, with the two override actions. Cancelling keeps
+ * the record and returns the days; deleting erases it and leaves only the
+ * audit-log entry, so the copy is blunt about which is which.
+ */
+function AllLeavesPanel() {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("");
+  const [search, setSearch] = useState("");
+  const [action, setAction] = useState<{ leave: AdminLeave; kind: "cancel" | "delete" } | null>(null);
+
+  const { data: leaves = [], isLoading } = useQuery<AdminLeave[]>({
+    queryKey: ["all-leaves", statusFilter],
+    queryFn: () => api
+      .get(`/api/v1/leaves/all${statusFilter ? `?status=${statusFilter}` : ""}`)
+      .then((r) => r.data.data),
+    enabled: open,
+  });
+
+  function onDone(message: string) {
+    toast.success(message);
+    queryClient.invalidateQueries({ queryKey: ["all-leaves"] });
+    queryClient.invalidateQueries({ queryKey: ["pending-leaves"] });
+    queryClient.invalidateQueries({ queryKey: ["leave-cancellation-requests"] });
+    queryClient.invalidateQueries({ queryKey: ["decided-leaves"] });
+    queryClient.invalidateQueries({ queryKey: ["audit-logs"] });
+    setAction(null);
+  }
+
+  const cancelMut = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.patch(`/api/v1/leaves/${id}/admin-cancel`, { reason }),
+    onSuccess: () => onDone("Leave cancelled"),
+    onError: (e: any) => toast.error(e?.response?.data?.error ?? "Failed to cancel leave"),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.delete(`/api/v1/leaves/${id}`, { data: { reason } }),
+    onSuccess: () => onDone("Leave deleted — recorded in the deletion log"),
+    onError: (e: any) => toast.error(e?.response?.data?.error ?? "Failed to delete leave"),
+  });
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return leaves;
+    return leaves.filter((l) =>
+      `${l.employee.firstName} ${l.employee.lastName} ${l.employee.employeeCode}`.toLowerCase().includes(q)
+    );
+  }, [leaves, search]);
+
+  return (
+    <>
+      {action && (
+        <ReasonPromptModal
+          title={action.kind === "cancel" ? "Cancel this leave" : "Delete this leave"}
+          description={action.kind === "cancel"
+            ? `${action.leave.employee.firstName} ${action.leave.employee.lastName}'s leave will be cancelled and any deducted days returned. The record stays visible to them.`
+            : `The record will be erased for good. A full copy goes to the deletion log, which is the only trace that will remain — cancel instead if you just want to void the leave.`}
+          label="Reason"
+          placeholder={action.kind === "cancel" ? "e.g. Duplicate application" : "e.g. Filed against the wrong employee"}
+          confirmLabel={action.kind === "cancel" ? "Cancel leave" : "Delete permanently"}
+          tone="danger"
+          isPending={cancelMut.isPending || deleteMut.isPending}
+          onConfirm={(reason) => {
+            if (action.kind === "cancel") cancelMut.mutate({ id: action.leave.id, reason });
+            else deleteMut.mutate({ id: action.leave.id, reason });
+          }}
+          onClose={() => setAction(null)}
+        />
+      )}
+
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="w-full flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors"
+        >
+          <div className="flex items-center gap-2 text-left">
+            <Trash2 className="h-4 w-4 text-gray-400 shrink-0" />
+            <div>
+              <h2 className="font-semibold text-gray-900">All Leaves</h2>
+              <p className="text-xs text-gray-400 mt-0.5">Cancel or delete any leave application. Deletions are logged.</p>
+            </div>
+          </div>
+          <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 shrink-0 ${open ? "rotate-180" : ""}`} />
+        </button>
+
+        {open && (
+          <>
+            <div className="px-6 pb-4 flex flex-col sm:flex-row gap-2">
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by employee name or code…"
+                className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">All statuses</option>
+                {["PENDING", "APPROVED", "CANCELLATION_PENDING", "REJECTED", "CANCELLED"].map((s) => (
+                  <option key={s} value={s}>{statusLabel(s)}</option>
+                ))}
+              </select>
+            </div>
+
+            {isLoading ? (
+              <div className="px-6 py-8 text-center text-sm text-gray-400">Loading…</div>
+            ) : filtered.length === 0 ? (
+              <div className="px-6 py-8 text-center text-sm text-gray-400">No leave applications match.</div>
+            ) : (
+              <div className="overflow-x-auto max-h-[32rem] overflow-y-auto">
+                <table className="w-full min-w-[46rem]">
+                  <thead className="sticky top-0 bg-white z-10 border-b border-gray-50">
+                    <tr>
+                      {["Employee", "Type", "Dates", "Days", "Status", "Actions"].map((h) => (
+                        <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {filtered.map((l) => {
+                      const sameDay = l.fromDate.slice(0, 10) === l.toDate.slice(0, 10);
+                      return (
+                        <tr key={l.id} className="hover:bg-gray-50/50">
+                          <td className="px-5 py-3">
+                            <p className="text-sm font-semibold text-gray-800 whitespace-nowrap">
+                              {l.employee.firstName} {l.employee.lastName}
+                            </p>
+                            <p className="text-xs text-gray-400 mt-0.5">{l.employee.employeeCode}</p>
+                          </td>
+                          <td className="px-5 py-3 text-sm text-gray-700 whitespace-nowrap">
+                            {LEAVE_LABEL[l.leaveType] ?? l.leaveType}
+                          </td>
+                          <td className="px-5 py-3 text-sm text-gray-700 whitespace-nowrap">
+                            {sameDay ? fmtShort(l.fromDate) : `${fmtShort(l.fromDate)} – ${fmtShort(l.toDate)}`}
+                          </td>
+                          <td className="px-5 py-3 text-sm text-gray-700">{l.totalDays}</td>
+                          <td className="px-5 py-3">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${STATUS_STYLES[l.status] ?? "bg-gray-100 text-gray-500"}`}>
+                              {statusLabel(l.status)}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3">
+                            <div className="flex items-center gap-1.5">
+                              {l.status !== "CANCELLED" && (
+                                <button
+                                  onClick={() => setAction({ leave: l, kind: "cancel" })}
+                                  className="px-2.5 py-1 text-xs font-medium text-amber-700 border border-amber-200 bg-amber-50 rounded-lg hover:bg-amber-100 whitespace-nowrap"
+                                >
+                                  Cancel
+                                </button>
+                              )}
+                              <button
+                                onClick={() => setAction({ leave: l, kind: "delete" })}
+                                className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50"
+                                title="Delete permanently"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </>
   );
 }
@@ -1698,7 +2161,7 @@ function DecisionHistory() {
                         <p className="text-sm font-semibold text-gray-800">
                           {leave.employee.firstName} {leave.employee.lastName}
                         </p>
-                        <p className="text-xs text-gray-400 mt-0.5">{leave.employee.department.name}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">{leave.employee.department?.name}</p>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-700">
                         {LEAVE_LABEL[leave.leaveType] ?? leave.leaveType}
@@ -1712,7 +2175,7 @@ function DecisionHistory() {
                       <td className="px-6 py-4 text-sm text-gray-700">{leave.totalDays}</td>
                       <td className="px-6 py-4">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[leave.status] ?? "bg-gray-100 text-gray-500"}`}>
-                          {leave.status.charAt(0) + leave.status.slice(1).toLowerCase()}
+                          {statusLabel(leave.status)}
                         </span>
                       </td>
                     </tr>
@@ -1735,11 +2198,23 @@ type PendingLeave = {
   totalDays: number;
   reason: string;
   documentUrl?: string;
-  employee: { id: string; firstName: string; lastName: string; department: { name: string } };
+  cancelReason?: string | null;
+  employee: { id: string; firstName: string; lastName: string; department: { name: string } | null };
+};
+
+type AdminLeave = {
+  id: string;
+  leaveType: string;
+  fromDate: string;
+  toDate: string;
+  totalDays: number;
+  status: string;
+  employee: { id: string; employeeCode: string; firstName: string; lastName: string; department: { name: string } | null };
 };
 
 type LeaveAuthority = {
   canApproveAny: boolean;
+  canOverride: boolean;
   headedDepartmentIds: string[];
   directReportCount: number;
 };
@@ -1780,13 +2255,15 @@ export default function LeavesPage() {
   });
 
   const cancelMut = useMutation({
-    mutationFn: (id: string) => api.patch(`/api/v1/leaves/${id}/cancel`),
-    onSuccess: () => {
-      toast.success("Leave cancelled");
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.patch(`/api/v1/leaves/${id}/cancel`, { reason }),
+    onSuccess: (res) => {
+      toast.success(res.data?.message ?? "Leave cancelled");
       queryClient.invalidateQueries({ queryKey: ["my-leaves"] });
       queryClient.invalidateQueries({ queryKey: ["my-leave-balances"] });
+      queryClient.invalidateQueries({ queryKey: ["leave-cancellation-requests"] });
     },
-    onError: () => toast.error("Failed to cancel leave"),
+    onError: (e: any) => toast.error(e?.response?.data?.error ?? "Failed to cancel leave"),
   });
 
   function invalidateLeaves() {
@@ -1878,7 +2355,7 @@ export default function LeavesPage() {
               </button>
             </div>
 
-            <LeaveHistory leaves={leaves} onCancel={(id) => cancelMut.mutate(id)} />
+            <LeaveHistory leaves={leaves} onCancel={(id, reason) => cancelMut.mutate({ id, reason })} />
           </div>
 
           {/* Sidebar */}
@@ -1902,7 +2379,9 @@ export default function LeavesPage() {
           </div>
 
           <PendingApprovalsPanel />
+          <CancellationRequestsPanel />
           <DecisionHistory />
+          {authority?.canOverride && <AllLeavesPanel />}
         </div>
       )}
 
