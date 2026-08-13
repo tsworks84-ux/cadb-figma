@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "@cadb/db";
-import { authenticate, requireRole } from "../../middleware/authenticate.js";
+import { authenticate } from "../../middleware/authenticate.js";
+import { requirePermission } from "../../utils/permissions.js";
 import type { JwtPayload } from "@cadb/types";
 
 export async function claimTypeRoutes(fastify: FastifyInstance) {
@@ -15,14 +16,14 @@ export async function claimTypeRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true, data });
   });
 
-  // Get all claim types including inactive (admin only)
-  fastify.get("/all", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN") }, async (_request, reply) => {
+  // Get all claim types including inactive — Administration > Claim Types
+  fastify.get("/all", { preHandler: requirePermission("ADM_CLAIM_TYPES", "canView") }, async (_request, reply) => {
     const data = await prisma.claimTypeConfig.findMany({ orderBy: { label: "asc" } });
     return reply.send({ success: true, data });
   });
 
-  // Create a new claim type (SUPER_ADMIN only)
-  fastify.post("/", { preHandler: requireRole("SUPER_ADMIN") }, async (request, reply) => {
+  // Create a new claim type
+  fastify.post("/", { preHandler: requirePermission("ADM_CLAIM_TYPES", "canCreate") }, async (request, reply) => {
     const body = request.body as { label?: string; requiresDocument?: boolean; isSettleable?: boolean };
     if (!body.label?.trim()) {
       return reply.status(400).send({ success: false, error: "label is required", statusCode: 400 });
@@ -44,7 +45,7 @@ export async function claimTypeRoutes(fastify: FastifyInstance) {
   });
 
   // Update a claim type (SUPER_ADMIN only)
-  fastify.patch("/:id", { preHandler: requireRole("SUPER_ADMIN") }, async (request, reply) => {
+  fastify.patch("/:id", { preHandler: requirePermission("ADM_CLAIM_TYPES", "canEdit") }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as { label?: string; requiresDocument?: boolean; isSettleable?: boolean; isActive?: boolean };
     const data = await prisma.claimTypeConfig.update({
@@ -60,7 +61,7 @@ export async function claimTypeRoutes(fastify: FastifyInstance) {
   });
 
   // Delete a claim type (SUPER_ADMIN only) — only if no claims use it
-  fastify.delete("/:id", { preHandler: requireRole("SUPER_ADMIN") }, async (request, reply) => {
+  fastify.delete("/:id", { preHandler: requirePermission("ADM_CLAIM_TYPES", "canDelete") }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const ct = await prisma.claimTypeConfig.findUnique({ where: { id } });
     if (!ct) return reply.status(404).send({ success: false, error: "Not found", statusCode: 404 });

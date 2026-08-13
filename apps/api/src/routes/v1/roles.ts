@@ -10,7 +10,11 @@ const MODULES = [
   "MIS_EMP_DIRECTORY", "MIS_SALARY_STRUCT", "MIS_SALARY_DISB", "MIS_LEAVE_RECORDS", "MIS_HOLIDAYS", "MIS_CLAIMS",
   "ACA_BATCH", "ACA_SUBJECT", "ACA_SETTINGS",
   "STU_PROFILE", "STU_ADMISSION", "STU_ATTENDANCE", "STU_ASSIGNMENT", "STU_ASSESSMENT", "STU_TIMETABLE",
-  "ADMIN",
+  // Administration — one module per tab, so the Super Admin can hand out a single
+  // tab (e.g. Claim Types) without opening the rest of the section.
+  // Custom Roles and Roles & Permissions are deliberately NOT here: granting either
+  // would let the holder grant themselves everything, so they stay SUPER_ADMIN-only.
+  "ADM_DEPARTMENTS", "ADM_DESIGNATIONS", "ADM_LEAVE_POLICIES", "ADM_WORK_LOCATIONS", "ADM_CLAIM_TYPES",
 ] as const;
 
 const DEFAULT_PERMISSIONS: Record<string, Record<string, Partial<Record<"canView"|"canCreate"|"canEdit"|"canDelete"|"canApprove"|"canAppraise", boolean>>>> = {
@@ -31,7 +35,6 @@ const DEFAULT_PERMISSIONS: Record<string, Record<string, Partial<Record<"canView
     MIS_LEAVE_RECORDS: { canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true, canAppraise: false },
     MIS_HOLIDAYS:      { canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true, canAppraise: false },
     MIS_CLAIMS:        { canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true, canAppraise: false },
-    ADMIN:             { canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true, canAppraise: false },
   },
   HR_ADMIN: {
     EMP_PROFILE:   { canView: true, canCreate: true, canEdit: true, canDelete: false, canApprove: false, canAppraise: false },
@@ -50,7 +53,6 @@ const DEFAULT_PERMISSIONS: Record<string, Record<string, Partial<Record<"canView
     MIS_LEAVE_RECORDS: { canView: true,  canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
     MIS_HOLIDAYS:      { canView: true,  canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
     MIS_CLAIMS:        { canView: true,  canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
-    ADMIN:             { canView: true,  canCreate: true,  canEdit: true,  canDelete: false, canApprove: false, canAppraise: false },
   },
   DEPT_HEAD: {
     EMP_PROFILE:   { canView: true,  canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
@@ -69,7 +71,6 @@ const DEFAULT_PERMISSIONS: Record<string, Record<string, Partial<Record<"canView
     MIS_LEAVE_RECORDS: { canView: true,  canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
     MIS_HOLIDAYS:      { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
     MIS_CLAIMS:        { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
-    ADMIN:             { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
   },
   EMPLOYEE: {
     EMP_PROFILE:   { canView: true,  canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
@@ -88,7 +89,6 @@ const DEFAULT_PERMISSIONS: Record<string, Record<string, Partial<Record<"canView
     MIS_LEAVE_RECORDS: { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
     MIS_HOLIDAYS:      { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
     MIS_CLAIMS:        { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
-    ADMIN:             { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
   },
 };
 
@@ -111,24 +111,64 @@ for (const role of ROLES) {
   }
 }
 
+// Administration tabs. HR_ADMIN's defaults mirror the access it had under the old
+// hard-coded `requireRole("SUPER_ADMIN", "HR_ADMIN")` checks — configure, but never
+// delete. Everyone else starts denied and is opened up from the permission matrix.
+const ADMIN_MODULES = [
+  "ADM_DEPARTMENTS", "ADM_DESIGNATIONS", "ADM_LEAVE_POLICIES", "ADM_WORK_LOCATIONS", "ADM_CLAIM_TYPES",
+] as const;
+const ADMIN_DEFAULTS: Record<string, Record<"canView"|"canCreate"|"canEdit"|"canDelete"|"canApprove"|"canAppraise", boolean>> = {
+  SUPER_ADMIN: { canView: true,  canCreate: true,  canEdit: true,  canDelete: true,  canApprove: true,  canAppraise: false },
+  HR_ADMIN:    { canView: true,  canCreate: true,  canEdit: true,  canDelete: false, canApprove: false, canAppraise: false },
+  DEPT_HEAD:   { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
+  EMPLOYEE:    { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
+};
+for (const role of ROLES) {
+  for (const m of ADMIN_MODULES) {
+    DEFAULT_PERMISSIONS[role][m] = { ...ADMIN_DEFAULTS[role] };
+  }
+}
+
+/**
+ * Adds rows for any (role, module) pair that has no row yet, so modules introduced
+ * after a deployment appear in the matrix instead of silently reading as denied.
+ * The old all-or-nothing `if (rows.length === 0)` seed never fired on an existing
+ * install, which left every new module invisible until permissions were reset.
+ *
+ * Custom roles get deny-all (the column defaults), matching how they are created.
+ */
+async function backfillMissingModules(roles: string[]) {
+  const existing = await prisma.rolePermission.findMany({
+    where: { role: { in: roles } },
+    select: { role: true, module: true },
+  });
+  const have = new Set(existing.map((r) => `${r.role}::${r.module}`));
+
+  const seeds: { role: string; module: string }[] = [];
+  for (const role of roles) {
+    for (const module of MODULES) {
+      if (!have.has(`${role}::${module}`)) {
+        seeds.push({ role, module, ...DEFAULT_PERMISSIONS[role]?.[module] });
+      }
+    }
+  }
+  if (seeds.length) await prisma.rolePermission.createMany({ data: seeds, skipDuplicates: true });
+
+  // Drop the retired catch-all row so it can't linger in the matrix response.
+  await prisma.rolePermission.deleteMany({ where: { role: { in: roles }, module: "ADMIN" } });
+
+  return seeds.length > 0;
+}
+
 export async function roleRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", authenticate);
 
   // GET current user's permissions as a module -> flags map
   fastify.get("/my-permissions", async (request, reply) => {
     const user = request.user as { role: string };
-    let rows = await prisma.rolePermission.findMany({ where: { role: user.role } });
-
-    if (rows.length === 0) {
-      // Seed defaults for this role on first access
-      const seeds = MODULES.map((module) => ({
-        role: user.role,
-        module,
-        ...DEFAULT_PERMISSIONS[user.role]?.[module],
-      }));
-      await prisma.rolePermission.createMany({ data: seeds, skipDuplicates: true });
-      rows = await prisma.rolePermission.findMany({ where: { role: user.role } });
-    }
+    // Backfills any module missing for this role (including ones added after deploy)
+    await backfillMissingModules([user.role]);
+    const rows = await prisma.rolePermission.findMany({ where: { role: user.role } });
 
     const map: Record<string, object> = {};
     for (const row of rows) {
@@ -147,20 +187,10 @@ export async function roleRoutes(fastify: FastifyInstance) {
 
   // GET all role permissions — seed defaults if none exist
   fastify.get("/", async (_request, reply) => {
-    let rows = await prisma.rolePermission.findMany({ orderBy: [{ role: "asc" }, { module: "asc" }] });
+    const custom = await prisma.customRole.findMany({ select: { name: true } });
+    await backfillMissingModules([...ROLES, ...custom.map((c) => c.name)]);
 
-    if (rows.length === 0) {
-      const seeds = [];
-      for (const role of ROLES) {
-        for (const module of MODULES) {
-          const p = DEFAULT_PERMISSIONS[role][module];
-          seeds.push({ role, module, ...p });
-        }
-      }
-      await prisma.rolePermission.createMany({ data: seeds });
-      rows = await prisma.rolePermission.findMany({ orderBy: [{ role: "asc" }, { module: "asc" }] });
-    }
-
+    const rows = await prisma.rolePermission.findMany({ orderBy: [{ role: "asc" }, { module: "asc" }] });
     return reply.send({ success: true, data: rows });
   });
 

@@ -48,6 +48,43 @@ export async function hasAnyPermission(
   return perms.some((p) => p[action]);
 }
 
+/**
+ * Fastify preHandler gating a route on one explicit module + action.
+ * Use where the HTTP verb doesn't describe the intent — e.g. "apply a leave policy
+ * to employees" is a POST but is really an edit of the configuration's reach.
+ * SUPER_ADMIN always passes; its grants are implicit and not editable.
+ */
+export function requirePermission(module: string, action: PermAction) {
+  return async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = request.user as JwtPayload | undefined;
+    if (!user) {
+      return reply.status(401).send({ success: false, error: "Unauthorized", statusCode: 401 });
+    }
+    if (user.role === "SUPER_ADMIN") return;
+    if (await hasPermission(user, module, action)) return;
+
+    return reply.status(403).send({
+      success: false,
+      error: "Insufficient permissions",
+      statusCode: 403,
+    });
+  };
+}
+
+// ─── ADMINISTRATION MODULE GATING ───────────────────────────────────────────
+
+/**
+ * One module per Administration tab, so a role can be handed a single tab.
+ *
+ * Custom Roles and Roles & Permissions are absent on purpose: whoever can edit the
+ * permission matrix can grant themselves every other permission, so those two tabs
+ * stay hard-coded to SUPER_ADMIN (see roles.ts, which requires the role directly).
+ */
+export const ADMIN_MODULES = [
+  "ADM_DEPARTMENTS", "ADM_DESIGNATIONS", "ADM_LEAVE_POLICIES",
+  "ADM_WORK_LOCATIONS", "ADM_CLAIM_TYPES",
+] as const;
+
 // ─── ACADEMICS MODULE GATING ────────────────────────────────────────────────
 
 /** Every module that maps to a tab / section of the Academics area. */
@@ -96,7 +133,8 @@ export function requireModulePermission(spec: string | string[] | ModuleResolver
     if (!user) {
       return reply.status(401).send({ success: false, error: "Unauthorized", statusCode: 401 });
     }
-    if (isAcademicsAdmin(user.role)) return;
+    // SUPER_ADMIN bypasses the matrix everywhere — its grants are implicit
+    if (user.role === "SUPER_ADMIN") return;
 
     const resolved = typeof spec === "function" ? spec(request) : spec;
     if (resolved === null) return;

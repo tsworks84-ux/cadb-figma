@@ -13,13 +13,25 @@ export interface ModulePerms {
 
 export type PermMap = Record<string, ModulePerms>;
 
+/**
+ * One module per Administration tab, so the Super Admin can hand out a single tab.
+ *
+ * Custom Roles and Roles & Permissions are absent on purpose: whoever can edit the
+ * permission matrix can grant themselves everything else, so those two tabs stay
+ * Super Admin only and are shown as locked rows in the matrix.
+ */
+export const ADMIN_MODULES = [
+  "ADM_DEPARTMENTS", "ADM_DESIGNATIONS", "ADM_LEAVE_POLICIES",
+  "ADM_WORK_LOCATIONS", "ADM_CLAIM_TYPES",
+] as const;
+
 const ALL_MODULES = [
   "EMP_PROFILE", "EMP_DOCUMENTS", "EMP_SALARY", "EMP_BANK", "EMP_LEAVES", "EMP_PAYOUT",
   "LEAVES", "CLAIMS", "POLICIES", "TRAINING",
   "MIS_EMP_DIRECTORY", "MIS_SALARY_STRUCT", "MIS_SALARY_DISB", "MIS_LEAVE_RECORDS", "MIS_HOLIDAYS", "MIS_CLAIMS",
   "ACA_BATCH", "ACA_SUBJECT", "ACA_SETTINGS",
   "STU_PROFILE", "STU_ADMISSION", "STU_ATTENDANCE", "STU_ASSIGNMENT", "STU_ASSESSMENT", "STU_TIMETABLE",
-  "ADMIN",
+  ...ADMIN_MODULES,
 ] as const;
 
 const DENY_ALL: PermMap = Object.fromEntries(

@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "@cadb/db";
-import { authenticate, requireRole } from "../../middleware/authenticate.js";
+import { authenticate } from "../../middleware/authenticate.js";
+import { requirePermission } from "../../utils/permissions.js";
 import { computeCarryForward } from "../../utils/leave.js";
 
 const LEAVE_TYPES = ["CASUAL", "SICK", "EARNED", "MATERNITY", "PATERNITY", "COMPENSATORY", "UNPAID", "SPECIAL"] as const;
@@ -25,7 +26,7 @@ export async function leavePolicyRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", authenticate);
 
   // ── List all policies ──────────────────────────────────────────────────────
-  fastify.get("/", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN") }, async (_request, reply) => {
+  fastify.get("/", { preHandler: requirePermission("ADM_LEAVE_POLICIES", "canView") }, async (_request, reply) => {
     const policies = await prisma.leavePolicy.findMany({
       include: {
         rules: { orderBy: { leaveType: "asc" } },
@@ -49,7 +50,7 @@ export async function leavePolicyRoutes(fastify: FastifyInstance) {
   });
 
   // ── Get distinct grades from designations ──────────────────────────────────
-  fastify.get("/grades", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN") }, async (_request, reply) => {
+  fastify.get("/grades", { preHandler: requirePermission("ADM_LEAVE_POLICIES", "canView") }, async (_request, reply) => {
     const designations = await prisma.designation.findMany({
       where: { grade: { not: null } },
       select: { grade: true },
@@ -61,7 +62,7 @@ export async function leavePolicyRoutes(fastify: FastifyInstance) {
   });
 
   // ── Create policy ──────────────────────────────────────────────────────────
-  fastify.post("/", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN") }, async (request, reply) => {
+  fastify.post("/", { preHandler: requirePermission("ADM_LEAVE_POLICIES", "canCreate") }, async (request, reply) => {
     const parsed = policySchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({ success: false, error: "Validation failed", statusCode: 400 });
@@ -87,7 +88,7 @@ export async function leavePolicyRoutes(fastify: FastifyInstance) {
   });
 
   // ── Update policy ──────────────────────────────────────────────────────────
-  fastify.put("/:id", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN") }, async (request, reply) => {
+  fastify.put("/:id", { preHandler: requirePermission("ADM_LEAVE_POLICIES", "canEdit") }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const parsed = policySchema.safeParse(request.body);
     if (!parsed.success) {
@@ -121,7 +122,7 @@ export async function leavePolicyRoutes(fastify: FastifyInstance) {
   });
 
   // ── Toggle active ──────────────────────────────────────────────────────────
-  fastify.patch("/:id/toggle", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN") }, async (request, reply) => {
+  fastify.patch("/:id/toggle", { preHandler: requirePermission("ADM_LEAVE_POLICIES", "canEdit") }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const policy = await prisma.leavePolicy.findUnique({ where: { id } });
     if (!policy) return reply.status(404).send({ success: false, error: "Policy not found", statusCode: 404 });
@@ -134,14 +135,14 @@ export async function leavePolicyRoutes(fastify: FastifyInstance) {
   });
 
   // ── Delete policy ──────────────────────────────────────────────────────────
-  fastify.delete("/:id", { preHandler: requireRole("SUPER_ADMIN") }, async (request, reply) => {
+  fastify.delete("/:id", { preHandler: requirePermission("ADM_LEAVE_POLICIES", "canDelete") }, async (request, reply) => {
     const { id } = request.params as { id: string };
     await prisma.leavePolicy.delete({ where: { id } });
     return reply.send({ success: true, data: null });
   });
 
   // ── Apply policy to matching employees for a given year ───────────────────
-  fastify.post("/:id/apply", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN") }, async (request, reply) => {
+  fastify.post("/:id/apply", { preHandler: requirePermission("ADM_LEAVE_POLICIES", "canEdit") }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as { year?: number };
     const _now = new Date();

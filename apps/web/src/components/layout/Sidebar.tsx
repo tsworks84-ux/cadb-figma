@@ -15,7 +15,7 @@ import { useRouter } from "next/navigation";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import Image from "next/image";
-import { usePermissions } from "@/hooks/usePermissions";
+import { usePermissions, ADMIN_MODULES } from "@/hooks/usePermissions";
 import { canViewAcademics } from "@/lib/academicsAccess";
 
 // How long cached data stays fresh — must match each page's staleTime
@@ -51,8 +51,13 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
   const SYSTEM_DIR_ROLES = ["SUPER_ADMIN", "HR_ADMIN", "DEPT_HEAD"];
   const canViewDirectory = SYSTEM_DIR_ROLES.includes(role)
     || (role !== "EMPLOYEE" && (permissions["EMP_PROFILE"]?.canView ?? false));
-  // Administration is restricted to SUPER_ADMIN only — not configurable via permissions
+  // Super-admin-only surfaces (Student Feedback, Revenue, the unfiltered Academics
+  // view). These are deliberately NOT permission-configurable.
   const canViewAdmin = role === "SUPER_ADMIN";
+  // The Administration section itself is per-tab configurable: the link shows if the
+  // role can view at least one tab. Which tabs appear is decided inside the page.
+  const canViewAdminSection = canViewAdmin
+    || ADMIN_MODULES.some((m) => permissions[m]?.canView);
   // The deletion log is the counterweight to the delete/force-cancel powers, so
   // it's visible to exactly the roles that hold them.
   const canViewDeletionLog = role === "SUPER_ADMIN" || role === "HR_ADMIN";
@@ -95,7 +100,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
 
   const mgmtNav: { name: string; href: string; icon: React.ElementType; badge?: number }[] = [
     profileEntry,
-    ...(canViewAdmin ? [{ name: "Administration",     href: "/dashboard/admin",     icon: Building2    }] : []),
+    ...(canViewAdminSection ? [{ name: "Administration", href: "/dashboard/admin",  icon: Building2    }] : []),
     ...(canViewAcademicsNav ? [{ name: "Academics",   href: academicsHref,          icon: School       }] : []),
     ...(canViewAdmin ? [{ name: "Student Feedback",   href: "/dashboard/feedback",  icon: MessageSquare, badge: openFeedbackCount }] : []),
     ...(canViewAdmin ? [{ name: "Revenue",            href: "/dashboard/revenue",   icon: IndianRupee  }] : []),

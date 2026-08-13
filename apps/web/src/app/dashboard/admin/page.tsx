@@ -4,8 +4,9 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Check, X, RotateCcw, ChevronDown, Users, Play, CalendarDays, ToggleLeft, ToggleRight } from "lucide-react";
+import { Plus, Pencil, Trash2, Check, X, RotateCcw, ChevronDown, Users, Play, CalendarDays, ToggleLeft, ToggleRight, Lock } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
+import { usePermissionsState, type ModulePerms } from "@/hooks/usePermissions";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 function Input({ className = "", ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
@@ -20,7 +21,14 @@ function Input({ className = "", ...props }: React.InputHTMLAttributes<HTMLInput
 const PERMS = ["canView", "canCreate", "canEdit", "canDelete", "canApprove"] as const;
 const PERM_LABEL: Record<string, string> = { canView: "View", canCreate: "Create", canEdit: "Edit", canDelete: "Delete", canApprove: "Approve" };
 
-type ModuleRow = { key: string; label: string; isHeader?: boolean; indent?: boolean };
+type ModuleRow = {
+  key: string;
+  label: string;
+  isHeader?: boolean;
+  indent?: boolean;
+  /** Super-Admin-only row: shown for completeness, never assignable. */
+  locked?: boolean;
+};
 const MODULE_ROWS: ModuleRow[] = [
   { key: "_EMP_HEADER",  label: "Employees",      isHeader: true },
   { key: "EMP_PROFILE",   label: "Profile",        indent: true },
@@ -50,8 +58,20 @@ const MODULE_ROWS: ModuleRow[] = [
   { key: "STU_ASSESSMENT",    label: "Assessments",              indent: true },
   { key: "STU_TIMETABLE",     label: "Timetable",                indent: true },
   { key: "ACA_SETTINGS",      label: "Academics Settings",       indent: true },
-  { key: "ADMIN",     label: "Admin" },
+  { key: "_ADM_HEADER",       label: "Administration",           isHeader: true },
+  { key: "ADM_DEPARTMENTS",   label: "Departments",              indent: true },
+  { key: "ADM_DESIGNATIONS",  label: "Designations",             indent: true },
+  { key: "ADM_LEAVE_POLICIES",label: "Leave Policies",           indent: true },
+  { key: "ADM_WORK_LOCATIONS",label: "Work Locations",           indent: true },
+  { key: "ADM_CLAIM_TYPES",   label: "Claim Types",              indent: true },
+  // Both edit the permission system itself — granting either would let the holder
+  // grant themselves everything else, so they stay Super Admin only.
+  { key: "_ADM_CUSTOM_ROLES", label: "Custom Roles",             indent: true, locked: true },
+  { key: "_ADM_ROLES",        label: "Roles & Permissions",      indent: true, locked: true },
 ];
+
+/** Rows that map to a real RolePermission record — the only ones that can be toggled. */
+const ASSIGNABLE_ROWS = MODULE_ROWS.filter((r) => !r.isHeader && !r.locked);
 const ROLE_META: Record<string, { label: string; color: string; description: string }> = {
   SUPER_ADMIN: { label: "Super Admin",   color: "bg-red-100 text-red-700",    description: "Full system access. Cannot be restricted." },
   HR_ADMIN:    { label: "HR Admin",      color: "bg-purple-100 text-purple-700", description: "Manages employees, leaves, claims, and policies." },
@@ -60,7 +80,7 @@ const ROLE_META: Record<string, { label: string; color: string; description: str
 };
 
 // ── Departments Tab ──────────────────────────────────────────────────────────
-function DepartmentsTab() {
+function DepartmentsTab({ perms }: { perms: ModulePerms }) {
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -96,12 +116,14 @@ function DepartmentsTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-gray-500">{departments?.length ?? 0} departments</p>
-        <button
-          onClick={() => setAdding(true)}
-          className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90" style={{ backgroundColor: "#2C3E7C" }}
-        >
-          <Plus className="h-4 w-4" /> Add Department
-        </button>
+        {perms.canCreate && (
+          <button
+            onClick={() => setAdding(true)}
+            className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90" style={{ backgroundColor: "#2C3E7C" }}
+          >
+            <Plus className="h-4 w-4" /> Add Department
+          </button>
+        )}
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
@@ -165,7 +187,10 @@ function DepartmentsTab() {
                           </>
                         ) : (
                           <>
-                            <button onClick={() => startEdit(d)} className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700"><Pencil className="h-3.5 w-3.5" /></button>
+                            {perms.canEdit && (
+                              <button onClick={() => startEdit(d)} className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700"><Pencil className="h-3.5 w-3.5" /></button>
+                            )}
+                            {perms.canDelete && (
                             <button
                               onClick={() => { if (confirm(`Delete "${d.name}"? This cannot be undone.`)) deleteMut.mutate(d.id); }}
                               disabled={deleteMut.isPending || (d._count?.employees ?? 0) > 0}
@@ -174,6 +199,7 @@ function DepartmentsTab() {
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
+                            )}
                           </>
                         )}
                       </div>
@@ -189,7 +215,7 @@ function DepartmentsTab() {
 }
 
 // ── Designations Tab ─────────────────────────────────────────────────────────
-function DesignationsTab() {
+function DesignationsTab({ perms }: { perms: ModulePerms }) {
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -225,12 +251,14 @@ function DesignationsTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-gray-500">{designations?.length ?? 0} designations</p>
-        <button
-          onClick={() => setAdding(true)}
-          className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90" style={{ backgroundColor: "#2C3E7C" }}
-        >
-          <Plus className="h-4 w-4" /> Add Designation
-        </button>
+        {perms.canCreate && (
+          <button
+            onClick={() => setAdding(true)}
+            className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90" style={{ backgroundColor: "#2C3E7C" }}
+          >
+            <Plus className="h-4 w-4" /> Add Designation
+          </button>
+        )}
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
@@ -293,7 +321,10 @@ function DesignationsTab() {
                           </>
                         ) : (
                           <>
-                            <button onClick={() => startEdit(d)} className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700"><Pencil className="h-3.5 w-3.5" /></button>
+                            {perms.canEdit && (
+                              <button onClick={() => startEdit(d)} className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700"><Pencil className="h-3.5 w-3.5" /></button>
+                            )}
+                            {perms.canDelete && (
                             <button
                               onClick={() => { if (confirm(`Delete "${d.title}"?`)) deleteMut.mutate(d.id); }}
                               disabled={deleteMut.isPending || (d._count?.employees ?? 0) > 0}
@@ -302,6 +333,7 @@ function DesignationsTab() {
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
+                            )}
                           </>
                         )}
                       </div>
@@ -369,7 +401,7 @@ function RolesTab({ isSA }: { isSA: boolean }) {
 
   async function toggleColumn(role: string, perm: string) {
     if (!isSA || role === "SUPER_ADMIN" || bulkPending) return;
-    const dataRows = MODULE_ROWS.filter((r) => !r.isHeader);
+    const dataRows = ASSIGNABLE_ROWS;
     const allChecked = dataRows.every((row) => permMap[role]?.[row.key]?.[perm] ?? false);
     const setTo = !allChecked;
     setBulkPending(true);
@@ -410,7 +442,7 @@ function RolesTab({ isSA }: { isSA: boolean }) {
 
   async function toggleAll(role: string) {
     if (!isSA || role === "SUPER_ADMIN" || bulkPending) return;
-    const dataRows = MODULE_ROWS.filter((r) => !r.isHeader);
+    const dataRows = ASSIGNABLE_ROWS;
     const allChecked = dataRows.every((row) => PERMS.every((p) => permMap[role]?.[row.key]?.[p] ?? false));
     const setTo = !allChecked;
     setBulkPending(true);
@@ -429,16 +461,16 @@ function RolesTab({ isSA }: { isSA: boolean }) {
   }
 
   function colAllChecked(role: string, perm: string) {
-    return MODULE_ROWS.filter((r) => !r.isHeader).every((row) => permMap[role]?.[row.key]?.[perm] ?? false);
+    return ASSIGNABLE_ROWS.every((row) => permMap[role]?.[row.key]?.[perm] ?? false);
   }
   function colSomeChecked(role: string, perm: string) {
-    return MODULE_ROWS.filter((r) => !r.isHeader).some((row) => permMap[role]?.[row.key]?.[perm] ?? false);
+    return ASSIGNABLE_ROWS.some((row) => permMap[role]?.[row.key]?.[perm] ?? false);
   }
   function masterAllChecked(role: string) {
-    return MODULE_ROWS.filter((r) => !r.isHeader).every((row) => PERMS.every((p) => permMap[role]?.[row.key]?.[p] ?? false));
+    return ASSIGNABLE_ROWS.every((row) => PERMS.every((p) => permMap[role]?.[row.key]?.[p] ?? false));
   }
   function masterSomeChecked(role: string) {
-    return MODULE_ROWS.filter((r) => !r.isHeader).some((row) => PERMS.some((p) => permMap[role]?.[row.key]?.[p] ?? false));
+    return ASSIGNABLE_ROWS.some((row) => PERMS.some((p) => permMap[role]?.[row.key]?.[p] ?? false));
   }
 
   const SYSTEM_ROLE_ORDER = ["SUPER_ADMIN", "HR_ADMIN", "DEPT_HEAD", "EMPLOYEE"];
@@ -556,6 +588,28 @@ function RolesTab({ isSA }: { isSA: boolean }) {
                               </tr>
                             );
                           }
+                          if (row.locked) {
+                            // Editing the permission system is escalation-equivalent:
+                            // whoever holds it can grant themselves everything else.
+                            return (
+                              <tr key={row.key} className="bg-gray-50/50">
+                                <td className={`py-3 text-sm font-medium text-gray-400 ${row.indent ? "pl-8 pr-3" : "px-5"}`}>
+                                  {row.indent && <span className="text-gray-300 mr-1.5">└</span>}
+                                  {row.label}
+                                </td>
+                                <td colSpan={COLS + (isSA && !isLocked ? 1 : 0)} className="px-4 py-3">
+                                  <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                                    <Lock className="h-3 w-3 shrink-0" />
+                                    <span>
+                                      {isLocked
+                                        ? "Always available to Super Admin"
+                                        : "Super Admin only — grants here would allow granting every other permission"}
+                                    </span>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          }
                           const mp = permMap[role]?.[row.key] ?? {};
                           const rowAllChecked = PERMS.every((p) => mp[p] ?? false);
                           const rowSomeChecked = PERMS.some((p) => mp[p] ?? false);
@@ -635,7 +689,7 @@ const BLANK_FORM: PolicyForm = {
   grades: [],
 };
 
-function LeavePoliciesTab() {
+function LeavePoliciesTab({ perms }: { perms: ModulePerms }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState<string | null>(null); // policy id or "new"
   const [form, setForm] = useState<PolicyForm>(BLANK_FORM);
@@ -867,7 +921,8 @@ function LeavePoliciesTab() {
         <div className="flex gap-3">
           <button
             onClick={() => saveMut.mutate()}
-            disabled={saveMut.isPending || !form.name || activeRules.length === 0 || form.grades.length === 0}
+            disabled={saveMut.isPending || !form.name || activeRules.length === 0 || form.grades.length === 0
+              || (editing === "new" ? !perms.canCreate : !perms.canEdit)}
             className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60" style={{ backgroundColor: "#2C3E7C" }}
           >
             {saveMut.isPending ? "Saving…" : editing === "new" ? "Create Policy" : "Save Changes"}
@@ -885,12 +940,14 @@ function LeavePoliciesTab() {
         <p className="text-sm text-gray-500">
           {policies?.length ?? 0} polic{policies?.length === 1 ? "y" : "ies"} — define leave entitlements per grade and apply to employees.
         </p>
-        <button
-          onClick={startNew}
-          className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90" style={{ backgroundColor: "#2C3E7C" }}
-        >
-          <Plus className="h-4 w-4" /> New Policy
-        </button>
+        {perms.canCreate && (
+          <button
+            onClick={startNew}
+            className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90" style={{ backgroundColor: "#2C3E7C" }}
+          >
+            <Plus className="h-4 w-4" /> New Policy
+          </button>
+        )}
       </div>
 
       {isLoading ? (
@@ -935,8 +992,8 @@ function LeavePoliciesTab() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {/* Apply button */}
-                  {applyingId === policy.id ? (
+                  {/* Applying a policy rewrites employee balances — an edit, not a create */}
+                  {!perms.canEdit ? null : applyingId === policy.id ? (
                     <div className="flex items-center gap-2">
                       <select
                         value={applyYear}
@@ -964,26 +1021,32 @@ function LeavePoliciesTab() {
                       <Play className="h-3.5 w-3.5" /> Apply to Employees
                     </button>
                   )}
-                  <button
-                    onClick={() => toggleMut.mutate(policy.id)}
-                    disabled={toggleMut.isPending}
-                    title={policy.isActive ? "Deactivate" : "Activate"}
-                    className="p-1.5 rounded-lg border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-300 disabled:opacity-50"
-                  >
-                    {policy.isActive ? <ToggleRight className="h-4 w-4 text-green-600" /> : <ToggleLeft className="h-4 w-4" />}
-                  </button>
-                  <button
-                    onClick={() => startEdit(policy)}
-                    className="p-1.5 rounded-lg border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-300"
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={() => { if (confirm(`Delete "${policy.name}"?`)) deleteMut.mutate(policy.id); }}
-                    className="p-1.5 rounded-lg border border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-200"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  {perms.canEdit && (
+                    <button
+                      onClick={() => toggleMut.mutate(policy.id)}
+                      disabled={toggleMut.isPending}
+                      title={policy.isActive ? "Deactivate" : "Activate"}
+                      className="p-1.5 rounded-lg border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-300 disabled:opacity-50"
+                    >
+                      {policy.isActive ? <ToggleRight className="h-4 w-4 text-green-600" /> : <ToggleLeft className="h-4 w-4" />}
+                    </button>
+                  )}
+                  {perms.canEdit && (
+                    <button
+                      onClick={() => startEdit(policy)}
+                      className="p-1.5 rounded-lg border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-300"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                  )}
+                  {perms.canDelete && (
+                    <button
+                      onClick={() => { if (confirm(`Delete "${policy.name}"?`)) deleteMut.mutate(policy.id); }}
+                      className="p-1.5 rounded-lg border border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-200"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1257,7 +1320,7 @@ function CustomRolesTab() {
 }
 
 // ── Work Locations Tab ────────────────────────────────────────────────────────
-function WorkLocationsTab() {
+function WorkLocationsTab({ perms }: { perms: ModulePerms }) {
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
@@ -1294,12 +1357,14 @@ function WorkLocationsTab() {
           <h2 className="text-sm font-semibold text-gray-800">Work Locations</h2>
           <p className="text-xs text-gray-400 mt-0.5">Locations available in the employee creation form.</p>
         </div>
-        <button
-          onClick={() => setAdding(true)}
-          className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white hover:opacity-90" style={{ backgroundColor: "#2C3E7C" }}
-        >
-          <Plus className="h-3.5 w-3.5" /> Add Location
-        </button>
+        {perms.canCreate && (
+          <button
+            onClick={() => setAdding(true)}
+            className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white hover:opacity-90" style={{ backgroundColor: "#2C3E7C" }}
+          >
+            <Plus className="h-3.5 w-3.5" /> Add Location
+          </button>
+        )}
       </div>
 
       {adding && (
@@ -1337,13 +1402,15 @@ function WorkLocationsTab() {
           {locations.map((loc) => (
             <li key={loc.id} className="flex items-center justify-between px-5 py-3">
               <span className="text-sm text-gray-700">{loc.name}</span>
-              <button
-                onClick={() => deleteMutation.mutate(loc.id)}
-                disabled={deleteMutation.isPending}
-                className="text-gray-300 hover:text-red-500 transition-colors disabled:opacity-50"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
+              {perms.canDelete && (
+                <button
+                  onClick={() => deleteMutation.mutate(loc.id)}
+                  disabled={deleteMutation.isPending}
+                  className="text-gray-300 hover:text-red-500 transition-colors disabled:opacity-50"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              )}
             </li>
           ))}
         </ul>
@@ -1354,7 +1421,7 @@ function WorkLocationsTab() {
 
 // ── Claim Types Tab ───────────────────────────────────────────────────────────
 
-function ClaimTypesTab() {
+function ClaimTypesTab({ perms }: { perms: ModulePerms }) {
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ label: "" });
@@ -1413,9 +1480,11 @@ function ClaimTypesTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-gray-500">{types.length} claim type{types.length !== 1 ? "s" : ""}</p>
-        <button onClick={() => setAdding(true)} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-white hover:opacity-90" style={{ backgroundColor: "#2C3E7C" }}>
-          <Plus className="h-4 w-4" /> Add Claim Type
-        </button>
+        {perms.canCreate && (
+          <button onClick={() => setAdding(true)} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-white hover:opacity-90" style={{ backgroundColor: "#2C3E7C" }}>
+            <Plus className="h-4 w-4" /> Add Claim Type
+          </button>
+        )}
       </div>
 
       {adding && (
@@ -1467,7 +1536,8 @@ function ClaimTypesTab() {
                   <td className="px-4 py-3 text-center">
                     <button
                       onClick={() => toggleMut.mutate({ id: ct.id, isActive: !ct.isActive })}
-                      className={`text-xs font-medium px-2 py-0.5 rounded-full transition-colors ${ct.isActive ? "bg-green-100 text-green-700 hover:bg-green-200" : "bg-gray-100 text-gray-500 hover:bg-gray-200"}`}
+                      disabled={!perms.canEdit}
+                      className={`text-xs font-medium px-2 py-0.5 rounded-full transition-colors ${ct.isActive ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"} ${perms.canEdit ? (ct.isActive ? "hover:bg-green-200" : "hover:bg-gray-200") : "cursor-default"}`}
                     >
                       {ct.isActive ? "Active" : "Inactive"}
                     </button>
@@ -1480,8 +1550,12 @@ function ClaimTypesTab() {
                       </div>
                     ) : (
                       <div className="flex gap-1 justify-end">
-                        <button onClick={() => { setEditId(ct.id); setEditForm({ label: ct.label }); }} className="p-1 text-gray-400 hover:text-blue-600"><Pencil className="h-3.5 w-3.5" /></button>
-                        <button onClick={() => { if (confirm(`Delete "${ct.label}"?`)) deleteMut.mutate(ct.id); }} className="p-1 text-gray-400 hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
+                        {perms.canEdit && (
+                          <button onClick={() => { setEditId(ct.id); setEditForm({ label: ct.label }); }} className="p-1 text-gray-400 hover:text-blue-600"><Pencil className="h-3.5 w-3.5" /></button>
+                        )}
+                        {perms.canDelete && (
+                          <button onClick={() => { if (confirm(`Delete "${ct.label}"?`)) deleteMut.mutate(ct.id); }} className="p-1 text-gray-400 hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
+                        )}
                       </div>
                     )}
                   </td>
@@ -1496,28 +1570,59 @@ function ClaimTypesTab() {
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
+/**
+ * Each tab maps to its own permission module, so the Super Admin can hand out one
+ * tab at a time. The two role-management tabs carry no module: editing the matrix
+ * is escalation-equivalent, so they stay Super Admin only.
+ */
 const TABS = [
-  { id: "departments",    label: "Departments" },
-  { id: "designations",   label: "Designations" },
-  { id: "leaves",         label: "Leave Policies" },
-  { id: "work-locations", label: "Work Locations" },
-  { id: "claim-types",    label: "Claim Types" },
-  { id: "custom-roles",   label: "Custom Roles" },
-  { id: "roles",          label: "Roles & Permissions" },
+  { id: "departments",    label: "Departments",         module: "ADM_DEPARTMENTS" },
+  { id: "designations",   label: "Designations",        module: "ADM_DESIGNATIONS" },
+  { id: "leaves",         label: "Leave Policies",      module: "ADM_LEAVE_POLICIES" },
+  { id: "work-locations", label: "Work Locations",      module: "ADM_WORK_LOCATIONS" },
+  { id: "claim-types",    label: "Claim Types",         module: "ADM_CLAIM_TYPES" },
+  { id: "custom-roles",   label: "Custom Roles",        superAdminOnly: true },
+  { id: "roles",          label: "Roles & Permissions", superAdminOnly: true },
 ] as const;
 
 type Tab = typeof TABS[number]["id"];
 
+const NO_PERMS: ModulePerms = {
+  canView: false, canCreate: false, canEdit: false,
+  canDelete: false, canApprove: false, canAppraise: false,
+};
+
 export default function AdminPage() {
   const { user } = useAuthStore();
+  const { permissions, ready } = usePermissionsState();
   const [tab, setTab] = useState<Tab>("departments");
   const isSA = user?.role === "SUPER_ADMIN";
 
-  if (user?.role !== "SUPER_ADMIN" && user?.role !== "HR_ADMIN") {
+  const permsFor = (module: string) => permissions[module] ?? NO_PERMS;
+  const visibleTabs = TABS.filter((t) =>
+    "superAdminOnly" in t ? isSA : isSA || permsFor(t.module).canView
+  );
+  // Fall back to the first tab they can actually see, so a role granted only e.g.
+  // Claim Types doesn't land on an empty Departments tab.
+  const activeTab = visibleTabs.some((t) => t.id === tab) ? tab : visibleTabs[0]?.id;
+
+  // Wait for the permission fetch before deciding — otherwise a legitimate user
+  // sees a flash of "Access Denied" on every page load.
+  if (!ready) {
+    return (
+      <div className="space-y-6">
+        <div className="h-8 w-48 rounded bg-gray-100 animate-pulse" />
+        <div className="h-10 w-full max-w-lg rounded-xl bg-gray-100 animate-pulse" />
+        <div className="h-64 rounded-xl bg-gray-100 animate-pulse" />
+      </div>
+    );
+  }
+
+  if (!visibleTabs.length) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[40vh] text-gray-400">
         <p className="text-lg font-medium">Access Denied</p>
-        <p className="text-sm mt-1">This section is restricted to admins.</p>
+        <p className="text-sm mt-1">You don&apos;t have access to any Administration settings.</p>
       </div>
     );
   }
@@ -1529,14 +1634,14 @@ export default function AdminPage() {
         <p className="text-sm text-gray-400 mt-0.5">Manage departments, designations, leave policies, and role permissions.</p>
       </div>
 
-      {/* Tabs */}
-      <div className="flex flex-wrap gap-1 rounded-xl bg-gray-100 p-1 w-fit">
-        {TABS.map((t) => (
+      {/* Tabs — only the ones this role can view */}
+      <div className="flex flex-wrap gap-1 rounded-xl bg-gray-100 p-1 w-full sm:w-fit">
+        {visibleTabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
             className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-              tab === t.id ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
+              activeTab === t.id ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
             }`}
           >
             {t.label}
@@ -1544,13 +1649,13 @@ export default function AdminPage() {
         ))}
       </div>
 
-      {tab === "departments"    && <DepartmentsTab />}
-      {tab === "designations"   && <DesignationsTab />}
-      {tab === "leaves"         && <LeavePoliciesTab />}
-      {tab === "work-locations" && <WorkLocationsTab />}
-      {tab === "claim-types"    && <ClaimTypesTab />}
-      {tab === "custom-roles"   && <CustomRolesTab />}
-      {tab === "roles"          && <RolesTab isSA={isSA} />}
+      {activeTab === "departments"    && <DepartmentsTab   perms={permsFor("ADM_DEPARTMENTS")} />}
+      {activeTab === "designations"   && <DesignationsTab  perms={permsFor("ADM_DESIGNATIONS")} />}
+      {activeTab === "leaves"         && <LeavePoliciesTab perms={permsFor("ADM_LEAVE_POLICIES")} />}
+      {activeTab === "work-locations" && <WorkLocationsTab perms={permsFor("ADM_WORK_LOCATIONS")} />}
+      {activeTab === "claim-types"    && <ClaimTypesTab    perms={permsFor("ADM_CLAIM_TYPES")} />}
+      {activeTab === "custom-roles"   && <CustomRolesTab />}
+      {activeTab === "roles"          && <RolesTab isSA={isSA} />}
     </div>
   );
 }

@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "@cadb/db";
-import { authenticate, requireRole } from "../../middleware/authenticate.js";
+import { authenticate } from "../../middleware/authenticate.js";
+import { requirePermission } from "../../utils/permissions.js";
 
 const upsertSchema = z.object({
   title: z.string().min(1),
@@ -19,7 +20,7 @@ export async function designationRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true, data });
   });
 
-  fastify.post("/", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN") }, async (request, reply) => {
+  fastify.post("/", { preHandler: requirePermission("ADM_DESIGNATIONS", "canCreate") }, async (request, reply) => {
     const parsed = upsertSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: "Validation failed", statusCode: 400 });
     try {
@@ -31,7 +32,7 @@ export async function designationRoutes(fastify: FastifyInstance) {
     }
   });
 
-  fastify.patch("/:id", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN") }, async (request, reply) => {
+  fastify.patch("/:id", { preHandler: requirePermission("ADM_DESIGNATIONS", "canEdit") }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const parsed = upsertSchema.partial().safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: "Validation failed", statusCode: 400 });
@@ -45,7 +46,7 @@ export async function designationRoutes(fastify: FastifyInstance) {
     }
   });
 
-  fastify.delete("/:id", { preHandler: requireRole("SUPER_ADMIN") }, async (request, reply) => {
+  fastify.delete("/:id", { preHandler: requirePermission("ADM_DESIGNATIONS", "canDelete") }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const count = await prisma.employee.count({ where: { designationId: id, deletedAt: null } });
     if (count > 0) {

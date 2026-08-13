@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "@cadb/db";
-import { authenticate, requireRole } from "../../middleware/authenticate.js";
+import { authenticate } from "../../middleware/authenticate.js";
+import { requirePermission } from "../../utils/permissions.js";
 
 const DEFAULT_LOCATIONS = ["Bangalore", "Pune", "Mumbai", "Remote"];
 
@@ -22,7 +23,7 @@ export async function workLocationRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true, data: locations });
   });
 
-  fastify.post("/", { preHandler: requireRole("SUPER_ADMIN") }, async (request, reply) => {
+  fastify.post("/", { preHandler: requirePermission("ADM_WORK_LOCATIONS", "canCreate") }, async (request, reply) => {
     const schema = z.object({ name: z.string().min(1).max(60) });
     const parsed = schema.safeParse(request.body);
     if (!parsed.success) {
@@ -36,7 +37,7 @@ export async function workLocationRoutes(fastify: FastifyInstance) {
     }
   });
 
-  fastify.delete("/:id", { preHandler: requireRole("SUPER_ADMIN") }, async (request, reply) => {
+  fastify.delete("/:id", { preHandler: requirePermission("ADM_WORK_LOCATIONS", "canDelete") }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const loc = await prisma.workLocation.findUnique({ where: { id } });
     if (!loc) return reply.status(404).send({ success: false, error: "Not found", statusCode: 404 });
