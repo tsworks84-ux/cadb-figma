@@ -119,7 +119,7 @@ function ReportingToCombobox({ employees, value, onChange }: {
   const filtered = useMemo(() => {
     if (!employees) return [];
     const q = query.toLowerCase();
-    return employees.filter((e) => !q || `${e.firstName} ${e.lastName} ${e.employeeCode}`.toLowerCase().includes(q)).slice(0, 8);
+    return employees.filter((e) => !q || `${e.firstName} ${e.lastName} ${e.employeeCode}`.toLowerCase().includes(q));
   }, [employees, query]);
 
   return (
@@ -133,7 +133,7 @@ function ReportingToCombobox({ employees, value, onChange }: {
         autoComplete="off"
       />
       {open && (
-        <div className="absolute z-20 mt-1 w-full rounded-xl border border-gray-200 bg-white shadow-lg overflow-hidden">
+        <div className="absolute z-20 mt-1 w-full rounded-xl border border-gray-200 bg-white shadow-lg overflow-hidden max-h-64 overflow-y-auto">
           {filtered.length === 0 && query && <p className="px-4 py-3 text-sm text-gray-400">No match for &ldquo;{query}&rdquo;</p>}
           {filtered.map((e) => (
             <button key={e.id} type="button" onMouseDown={() => { onChange(e.id); setQuery(""); setOpen(false); }}
@@ -633,7 +633,9 @@ export default function NewEmployeePage() {
 
   const { data: departments } = useQuery({ queryKey: ["departments"], queryFn: () => api.get("/api/v1/departments").then((r) => r.data.data), staleTime: Infinity });
   const { data: designations } = useQuery({ queryKey: ["designations"], queryFn: () => api.get("/api/v1/designations").then((r) => r.data.data), staleTime: Infinity });
-  const { data: employees }    = useQuery({ queryKey: ["employees-list"], queryFn: () => api.get("/api/v1/employees", { params: { limit: 500 } }).then((r) => r.data.data), staleTime: Infinity });
+  // Name-only lookup, not the directory: the manager picker must offer every
+  // colleague, and the directory caps at 100 rows scoped to the viewer's departments.
+  const { data: employees }    = useQuery({ queryKey: ["employees-lookup"], queryFn: () => api.get("/api/v1/employees/lookup").then((r) => r.data.data), staleTime: Infinity });
   const { data: workLocations } = useQuery({ queryKey: ["work-locations"], queryFn: () => api.get("/api/v1/work-locations").then((r) => r.data.data as { id: string; name: string }[]), staleTime: Infinity });
   const { data: customRoles = [] } = useQuery<{ name: string; label: string }[]>({ queryKey: ["custom-roles"], queryFn: () => api.get("/api/v1/roles/custom").then((r) => r.data.data), staleTime: 5 * 60 * 1000 });
 

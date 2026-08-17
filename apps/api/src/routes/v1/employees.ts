@@ -226,16 +226,20 @@ export async function employeeRoutes(fastify: FastifyInstance) {
   });
 
   // Name-only staff list for pickers (faculty mentor, subject teacher, PTM
-  // attendees). Deliberately separate from the directory below: it carries no
-  // contact, salary or personal fields, so it can be opened to roles that hold
-  // an Academics grant but no department access — e.g. an Academic Coordinator
-  // custom role created with no departments.
+  // attendees, reporting manager). Deliberately separate from the directory
+  // below: it carries no contact, salary or personal fields, so it can be opened
+  // to roles that hold an Academics grant but no department access — e.g. an
+  // Academic Coordinator custom role created with no departments. It is also
+  // unpaginated and unscoped by department, because a picker has to be able to
+  // offer every colleague (a manager often sits outside the subject's own
+  // department) — the paginated directory below cannot.
   fastify.get("/lookup", async (request, reply) => {
     const user = request.user as JwtPayload;
     const q = request.query as Record<string, string>;
 
     const privileged = user.role === "SUPER_ADMIN" || user.role === "HR_ADMIN" || user.role === "DEPT_HEAD";
-    if (!privileged && !(await hasAnyPermission(user, [...ACADEMICS_MODULES], "canView"))) {
+    const allowedModules = [...ACADEMICS_MODULES, "EMP_PROFILE"];
+    if (!privileged && !(await hasAnyPermission(user, allowedModules, "canView"))) {
       return reply.status(403).send({ success: false, error: "Forbidden", statusCode: 403 });
     }
 

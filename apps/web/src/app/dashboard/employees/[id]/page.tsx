@@ -3494,7 +3494,7 @@ function SearchableEmployee({
         />
       </div>
       {open && (
-        <div className="absolute z-50 top-full left-0 right-0 mt-0.5 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+        <div className="absolute z-50 top-full left-0 right-0 mt-0.5 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
           <button
             type="button"
             onMouseDown={() => { onChange(""); setOpen(false); setSearch(""); }}
@@ -3902,9 +3902,12 @@ export default function EmployeeDetailPage() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Reporting-manager picker needs EVERY colleague, so it uses the name-only
+  // lookup: the paginated directory caps at 100 rows and hides employees outside
+  // the viewer's department access, which silently truncated the list.
   const { data: allEmployeesList = [] } = useQuery({
-    queryKey: ["employees-list"],
-    queryFn: () => api.get("/api/v1/employees", { params: { limit: 500 } }).then((r) => r.data.data),
+    queryKey: ["employees-lookup"],
+    queryFn: () => api.get("/api/v1/employees/lookup").then((r) => r.data.data),
     enabled: (activeTab === "personal" || activeTab === "position") && isAdmin && editingEmployment,
     staleTime: 5 * 60 * 1000,
   });
