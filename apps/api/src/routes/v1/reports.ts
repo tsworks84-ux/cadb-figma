@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { prisma } from "@cadb/db";
 import { authenticate, requireRole } from "../../middleware/authenticate.js";
 import ExcelJS from "exceljs";
-import { IN_FORCE_LEAVE_STATUSES } from "../../utils/leave.js";
+import { IN_FORCE_LEAVE_STATUSES, daysInMonth, lopDaysInMonth } from "../../utils/leave.js";
 
 const ADMIN_ROLES = ["SUPER_ADMIN", "HR_ADMIN"] as const;
 
@@ -567,32 +567,11 @@ export async function reportRoutes(fastify: FastifyInstance) {
   // MONTHLY SALARY DISBURSEMENT REPORT
   // ════════════════════════════════════════════════════════════════════════════
 
-  function workingDaysInMonth(year: number, month: number): number {
-    const days = new Date(year, month, 0).getDate();
-    let count = 0;
-    for (let d = 1; d <= days; d++) {
-      const w = new Date(year, month - 1, d).getDay();
-      if (w !== 0 && w !== 6) count++;
-    }
-    return count;
-  }
-
-  function workingDaysBetweenDates(from: Date, to: Date): number {
-    let count = 0;
-    const cur = new Date(from);
-    while (cur <= to) {
-      const w = cur.getDay();
-      if (w !== 0 && w !== 6) count++;
-      cur.setDate(cur.getDate() + 1);
-    }
-    return count;
-  }
-
   async function fetchDisbursementData(year: number, month: number) {
     const monthStart = new Date(year, month - 1, 1);
     const monthEnd   = new Date(year, month, 0, 23, 59, 59, 999);
 
-    const [employees, unpaidLeaves, claims, bonusPayouts, timesheetEntries] = await Promise.all([
+    const [employees, lopLeaves, claims, bonusPayouts, timesheetEntries] = await Promise.all([
       // All active employees with salary structure + primary bank
       prisma.employee.findMany({
         where: { deletedAt: null },
@@ -625,15 +604,22 @@ export async function reportRoutes(fastify: FastifyInstance) {
         },
       }),
 
-      // UNPAID leaves approved that overlap with this month
+      // Every in-force leave overlapping this month that costs the employee pay.
+      // `lopDays` carries that for all leave types — the whole leave for an
+      // unpaid one, whatever the approver declared for the rest, and 0 when the
+      // approver waived it — so this needs no per-type special case.
+      //
+      // Leave dates are stored at UTC midnight, so the window is bounded in UTC —
+      // a local-time month start would drop a leave ending on the 1st on any
+      // server west of Greenwich, and `lopDaysInMonth` would never see it.
       prisma.leaveApplication.findMany({
         where: {
-          leaveType: "UNPAID",
           status: { in: IN_FORCE_LEAVE_STATUSES },
-          fromDate: { lte: monthEnd },
-          toDate:   { gte: monthStart },
+          lopDays: { gt: 0 },
+          fromDate: { lte: new Date(Date.UTC(year, month, 0)) },
+          toDate:   { gte: new Date(Date.UTC(year, month - 1, 1)) },
         },
-        select: { employeeId: true, fromDate: true, toDate: true, totalDays: true },
+        select: { employeeId: true, fromDate: true, toDate: true, lopDays: true },
       }),
 
       // Approved / paid claims in this month
@@ -661,19 +647,21 @@ export async function reportRoutes(fastify: FastifyInstance) {
       }),
     ]);
 
-    const workingDays = workingDaysInMonth(year, month);
+    // A day of pay is 1/(length of the month), so the divisor is the calendar
+    // length of this month — 31 in January, 28 or 29 in February.
+    const monthDays = daysInMonth(year, month);
 
     // Build lookup maps
+    //
+    // A leave's LoP days are charged to the month they fall in, so one spanning
+    // the month boundary is split: 28 Jan – 5 Feb fully unpaid is 4 days off
+    // January's 31 and 5 off February's 28. Partial LoP is counted back from the
+    // leave's last day — 29 Jan – 2 Feb with 3 LoP days charges 2 Feb, 1 Feb and
+    // 31 Jan, leaving the first two days of the leave paid.
     const lopByEmp: Record<string, number> = {};
-    for (const lv of unpaidLeaves) {
-      const overlapStart = lv.fromDate > monthStart ? lv.fromDate : monthStart;
-      const overlapEnd   = lv.toDate   < monthEnd   ? lv.toDate   : monthEnd;
-      if (overlapStart <= overlapEnd) {
-        const days = lv.totalDays === 0.5
-          ? 0.5
-          : workingDaysBetweenDates(overlapStart, overlapEnd);
-        lopByEmp[lv.employeeId] = (lopByEmp[lv.employeeId] ?? 0) + days;
-      }
+    for (const lv of lopLeaves) {
+      const days = lopDaysInMonth(lv.fromDate, lv.toDate, lv.lopDays, year, month);
+      if (days > 0) lopByEmp[lv.employeeId] = (lopByEmp[lv.employeeId] ?? 0) + days;
     }
 
     const claimsByEmp: Record<string, number> = {};
@@ -722,7 +710,7 @@ export async function reportRoutes(fastify: FastifyInstance) {
       const advanceDeduction  = comp["ADVANCE_DEDUCTION"] ?? 0;
 
       const lopDays           = lopByEmp[emp.id] ?? 0;
-      const lopAmount         = workingDays > 0 ? Math.round((basic / workingDays) * lopDays) : 0;
+      const lopAmount         = monthDays > 0 ? Math.round((basic / monthDays) * lopDays) : 0;
       const claimsAmount      = claimsByEmp[emp.id] ?? 0;
       const bonusAmount       = bonusByEmp[emp.id] ?? 0;
 

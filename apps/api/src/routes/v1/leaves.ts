@@ -4,7 +4,7 @@ import { prisma } from "@cadb/db";
 import { authenticate } from "../../middleware/authenticate.js";
 import type { JwtPayload } from "@cadb/types";
 import { sendMail } from "../../utils/mailer.js";
-import { getFiscalYear, computeAccrued, computeCarryForward, IN_FORCE_LEAVE_STATUSES } from "../../utils/leave.js";
+import { getFiscalYear, computeAccrued, computeCarryForward, countLeaveDays, IN_FORCE_LEAVE_STATUSES } from "../../utils/leave.js";
 import { hasPermission, isCustomRole } from "../../utils/permissions.js";
 import { recordAudit, describeEmployee } from "../../utils/auditLog.js";
 import {
@@ -22,17 +22,6 @@ const applyLeaveSchema = z.object({
   duration: z.enum(["FULL", "FIRST_HALF", "SECOND_HALF"]).default("FULL"),
   documentUrl: z.string().optional(),
 });
-
-function workingDaysBetween(from: Date, to: Date): number {
-  let count = 0;
-  const cur = new Date(from);
-  while (cur <= to) {
-    const day = cur.getDay();
-    if (day !== 0 && day !== 6) count++;
-    cur.setDate(cur.getDate() + 1);
-  }
-  return count;
-}
 
 /** SUPER_ADMIN / HR_ADMIN see and decide every leave, as before. */
 function isLeaveAdmin(role: string): boolean {
@@ -138,7 +127,18 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     if (isHalfDay && fromDate !== toDate) {
       return reply.status(400).send({ success: false, error: "Half-day leave must be for a single day", statusCode: 400 });
     }
-    const totalDays = isHalfDay ? 0.5 : (fromDate === toDate ? 1 : workingDaysBetween(from, to));
+    // Sandwich policy: every calendar day in the span is charged, so a Friday
+    // leave with a Tuesday return costs four days. 0 means the span is nothing
+    // but Sundays — there is no leave to book.
+    const spanDays = countLeaveDays(from, to);
+    if (spanDays === 0) {
+      return reply.status(400).send({
+        success: false,
+        error: "Sunday is not a working day — pick a range that includes at least one working day",
+        statusCode: 400,
+      });
+    }
+    const totalDays = isHalfDay ? 0.5 : spanDays;
     const year = getFiscalYear(from);
 
     const balance = await prisma.leaveBalance.findUnique({
@@ -313,7 +313,7 @@ export async function leaveRoutes(fastify: FastifyInstance) {
         employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, department: { select: { name: true } } } },
         approver: { select: { firstName: true, lastName: true } },
       },
-      orderBy: { cancelRequestedAt: "asc" },
+      orderBy: { cancelRequestedAt: "desc" }, // newest request first, as in /pending
     });
     return reply.send({ success: true, data });
   });
@@ -475,31 +475,19 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     const fyStart = new Date(year, 3, 1);
     const fyEnd   = new Date(year + 1, 3, 1);
 
-    // Sum LoP days: UNPAID leaves + lopDays from other leave types
-    const [unpaidLeaves, lopMarkedLeaves] = await Promise.all([
-      prisma.leaveApplication.findMany({
-        where: {
-          employeeId: user.sub,
-          leaveType: "UNPAID",
-          status: { in: IN_FORCE_LEAVE_STATUSES },
-          fromDate: { gte: fyStart, lt: fyEnd },
-        },
-        select: { totalDays: true },
-      }),
-      prisma.leaveApplication.findMany({
-        where: {
-          employeeId: user.sub,
-          leaveType: { not: "UNPAID" },
-          status: { in: IN_FORCE_LEAVE_STATUSES },
-          lopDays: { gt: 0 },
-          fromDate: { gte: fyStart, lt: fyEnd },
-        },
-        select: { lopDays: true },
-      }),
-    ]);
-    const totalLopDays =
-      unpaidLeaves.reduce((s, l) => s + l.totalDays, 0) +
-      lopMarkedLeaves.reduce((s, l) => s + l.lopDays, 0);
+    // LoP days for the year. `lopDays` holds the figure for every leave type —
+    // the whole leave for an unpaid one, the declared days for the rest — so this
+    // is the same number payroll deducts, including 0 for a waived leave.
+    const lopLeaves = await prisma.leaveApplication.findMany({
+      where: {
+        employeeId: user.sub,
+        status: { in: IN_FORCE_LEAVE_STATUSES },
+        lopDays: { gt: 0 },
+        fromDate: { gte: fyStart, lt: fyEnd },
+      },
+      select: { lopDays: true },
+    });
+    const totalLopDays = lopLeaves.reduce((s, l) => s + l.lopDays, 0);
 
     const data = balances.map((b) => {
       const accrued = computeAccrued(b.allocated, year, joiningDate);
@@ -579,9 +567,57 @@ export async function leaveRoutes(fastify: FastifyInstance) {
       include: {
         employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, department: { select: { name: true } } } },
       },
-      orderBy: { createdAt: "asc" },
+      // Newest application first — HR works the top of the list, and an approver
+      // coming back to the queue wants what landed since they last looked.
+      orderBy: { createdAt: "desc" },
     });
     return reply.send({ success: true, data });
+  });
+
+  // Who is away on one particular day — "is anyone off on Thursday?" rather than
+  // "what needs approving?". Same visibility rule as /pending: admins and custom
+  // roles with the approve grant see everyone, everyone else sees their reports
+  // and the departments they head.
+  fastify.get("/on-date", async (request, reply) => {
+    const user = request.user as JwtPayload;
+    const q = request.query as { date?: string };
+
+    if (q.date && !/^\d{4}-\d{2}-\d{2}$/.test(q.date)) {
+      return reply.status(400).send({ success: false, error: "date must be YYYY-MM-DD", statusCode: 400 });
+    }
+    // Default to today in the server's own timezone, then pin it to UTC midnight
+    // to match how leave dates are stored.
+    const today = new Date();
+    const date = q.date
+      ? new Date(`${q.date}T00:00:00.000Z`)
+      : new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+
+    const seesAll = isLeaveAdmin(user.role)
+      || (isCustomRole(user.role) && await hasPermission(user, "EMP_LEAVES", "canApprove"));
+    const employeeFilter = seesAll ? undefined : await buildReportingScopeFilter(user.sub);
+
+    // The applied range, not the charged span: this answers who is absent, so a
+    // Sunday the payroll rule trims off is still a day they are away.
+    const data = await prisma.leaveApplication.findMany({
+      where: {
+        status: { in: IN_FORCE_LEAVE_STATUSES },
+        fromDate: { lte: date },
+        toDate:   { gte: date },
+        ...(employeeFilter && { employee: employeeFilter }),
+      },
+      include: {
+        employee: {
+          select: {
+            id: true, employeeCode: true, firstName: true, lastName: true,
+            department: { select: { name: true } },
+            designation: { select: { title: true } },
+          },
+        },
+      },
+      orderBy: [{ employee: { firstName: "asc" } }, { employee: { lastName: "asc" } }],
+    });
+
+    return reply.send({ success: true, data, date: date.toISOString().slice(0, 10) });
   });
 
   // Every leave record, for the roles allowed to override them. This is the
@@ -670,10 +706,21 @@ export async function leaveRoutes(fastify: FastifyInstance) {
       });
     }
 
-    // Validate lopDays: must be between 0 and totalDays (inclusive)
-    const lopDays = body.action === "APPROVED" && body.lopDays != null
-      ? Math.min(Math.max(0, body.lopDays), application.totalDays)
-      : 0;
+    // `lopDays` is the record's whole truth about loss of pay: payroll deducts it
+    // and nothing else, whatever the leave type. So an approval always writes an
+    // explicit figure rather than leaving the field at its 0 default.
+    //
+    // An unpaid leave is unpaid by definition, so it defaults to the whole leave.
+    // A caller may still send 0 to waive it — that is what the Waive LOP button
+    // does, and it now means "do not deduct" instead of being indistinguishable
+    // from a field nobody filled in. Paid types default to no LoP.
+    // Either way the figure is clamped to the days the leave actually covers.
+    const defaultLopDays = application.leaveType === "UNPAID" ? application.totalDays : 0;
+    const lopDays = body.action !== "APPROVED"
+      ? 0
+      : body.lopDays != null
+        ? Math.min(Math.max(0, body.lopDays), application.totalDays)
+        : defaultLopDays;
 
     const year = getFiscalYear(application.fromDate);
     const updates: any[] = [

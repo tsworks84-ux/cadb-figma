@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuthStore } from "@/store/auth";
-import { CalendarDays, Plus, Paperclip, XCircle, ChevronRight, ChevronDown, Clock, AlertTriangle, X, FileText, CheckCircle2, Users, Trash2, Heart, Calendar } from "lucide-react";
+import { CalendarDays, Plus, Paperclip, XCircle, ChevronRight, ChevronDown, Clock, AlertTriangle, X, FileText, CheckCircle2, Users, Trash2, Heart, Calendar, CalendarOff, Info, Search } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -121,15 +121,93 @@ function fmtDayName(iso: string) {
   return new Date(iso).toLocaleDateString("en-IN", { weekday: "short" });
 }
 
-function workingDaysBetween(from: Date, to: Date) {
-  let count = 0;
-  const cur = new Date(from);
-  while (cur <= to) {
-    const d = cur.getDay();
-    if (d !== 0 && d !== 6) count++;
-    cur.setDate(cur.getDate() + 1);
+const MS_PER_DAY = 86_400_000;
+
+/**
+ * The span charged for a leave running `from` … `to`, both ends inclusive: total
+ * days, plus how many of them are Sundays the sandwich rule pulled in (the
+ * apply form explains that second number). Mirrors `countLeaveDays` in the API
+ * (apps/api/src/utils/leave.ts) — this only previews what the server will store.
+ *
+ * The office works Monday–Saturday and the sandwich rule charges non-working
+ * days that fall inside a leave span, so every calendar day in the range counts.
+ * Sundays at the ends are trimmed — nobody works a Sunday, so a range that
+ * opens or closes on one isn't charged for it.
+ *
+ * Date inputs give `YYYY-MM-DD`, which parses to UTC midnight, hence the UTC
+ * accessors: `getDay()` would report the previous day in a negative-offset zone.
+ */
+function chargedSpan(from: Date, to: Date) {
+  let start = Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate());
+  let end   = Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate());
+  while (start <= end && new Date(start).getUTCDay() === 0) start += MS_PER_DAY;
+  while (end >= start && new Date(end).getUTCDay() === 0) end -= MS_PER_DAY;
+  if (start > end) return { start: 0, end: 0, days: 0, sundays: 0 };
+
+  let sundays = 0;
+  for (let cur = start; cur <= end; cur += MS_PER_DAY) {
+    if (new Date(cur).getUTCDay() === 0) sundays++;
   }
-  return count;
+  return { start, end, days: Math.round((end - start) / MS_PER_DAY) + 1, sundays };
+}
+
+/**
+ * The dates a partial LoP lands on, latest first — payroll counts LoP days back
+ * from the last day of the leave, so an approver marking 3 of 5 days needs to see
+ * *which* three. Mirrors `lopDaysInMonth` in apps/api/src/utils/leave.ts.
+ */
+function lopDayLabels(fromIso: string, toIso: string, lopDays: number): string[] {
+  const span = chargedSpan(new Date(fromIso), new Date(toIso));
+  if (!span.days || lopDays <= 0) return [];
+
+  const labels: string[] = [];
+  let remaining = lopDays;
+  for (let day = span.end; day >= span.start && remaining > 0; day -= MS_PER_DAY) {
+    const charge = Math.min(1, remaining);
+    labels.push(`${fmtShort(new Date(day).toISOString())}${charge < 1 ? " (half)" : ""}`);
+    remaining -= charge;
+  }
+  return labels;
+}
+
+/**
+ * Free-text match for the HR leave lists. Every whitespace-separated term has to
+ * appear somewhere in the row, so "priya casual" narrows instead of widening.
+ */
+function matchesLeaveSearch(query: string, fields: (string | null | undefined)[]) {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const haystack = fields.filter(Boolean).join(" ").toLowerCase();
+  return q.split(/\s+/).every((term) => haystack.includes(term));
+}
+
+/** Search box for the HR leave lists — full width on mobile, fixed inline on desktop. */
+function LeaveSearchInput({ value, onChange, placeholder }: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <div className="relative w-full sm:w-72">
+      <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full border border-gray-200 rounded-xl pl-9 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500"
+          aria-label="Clear search"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
 }
 
 // ── Reason Prompt ─────────────────────────────────────────────────────────────
@@ -488,8 +566,16 @@ function ReviewLeaveModal({
 }) {
   const [decision, setDecision] = useState<"approve" | "reject" | null>(null);
   const [comments, setComments] = useState("");
-  const [lopEnabled, setLopEnabled] = useState(false);
+  // An unpaid leave carries loss of pay by definition, so the toggle starts on
+  // for it. Approving with it off sends an explicit 0, which the API reads as a
+  // waiver — that must be a deliberate click, not the default.
+  const [lopEnabled, setLopEnabled] = useState(leave.leaveType === "UNPAID");
   const [lopDays, setLopDays] = useState(leave.totalDays);
+
+  const lopDates = useMemo(
+    () => lopDayLabels(leave.fromDate, leave.toDate, lopDays),
+    [leave.fromDate, leave.toDate, lopDays],
+  );
 
   function handleSubmit() {
     if (!decision) return;
@@ -603,15 +689,25 @@ function ReviewLeaveModal({
                 <span className="text-sm text-gray-700">Approve with <span className="font-semibold text-rose-600">Loss of Pay</span></span>
               </label>
               {lopEnabled && (
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-gray-600">LoP days:</span>
-                  <input
-                    type="number" min={0.5} max={leave.totalDays} step={0.5}
-                    value={lopDays}
-                    onChange={(e) => setLopDays(Math.min(leave.totalDays, Math.max(0, parseFloat(e.target.value) || 0)))}
-                    className="w-20 border border-rose-200 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-rose-400 bg-white"
-                  />
-                  <span className="text-xs text-gray-400">of {leave.totalDays} total days</span>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="text-xs text-gray-600">LoP days:</span>
+                    <input
+                      type="number" min={0.5} max={leave.totalDays} step={0.5}
+                      value={lopDays}
+                      onChange={(e) => setLopDays(Math.min(leave.totalDays, Math.max(0, parseFloat(e.target.value) || 0)))}
+                      className="w-20 border border-rose-200 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-rose-400 bg-white"
+                    />
+                    <span className="text-xs text-gray-400">of {leave.totalDays} total days</span>
+                  </div>
+                  {/* Payroll counts LoP back from the last day — name the dates so
+                      the approver isn't guessing which end gets docked. */}
+                  {lopDates.length > 0 && (
+                    <p className="text-xs text-rose-700">
+                      Deducted from <span className="font-medium">{lopDates.join(", ")}</span>
+                      {" — "}counted back from the last day of the leave.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -980,14 +1076,22 @@ function ApplyForm({
   const isHalfDay = form.duration !== "FULL";
   const effectiveTo = isHalfDay ? form.fromDate : form.toDate;
 
-  const previewDays = useMemo(() => {
-    if (!form.fromDate) return 0;
-    if (isHalfDay) return 0.5;
-    if (!form.toDate) return 0;
-    if (form.fromDate === form.toDate) return 1;
+  // Sandwich policy: every day in the span is charged, Sundays included, so this
+  // preview is a plain calendar count. 0 days means the range is all Sundays —
+  // the server rejects that, and `onlySundays` says so before they submit.
+  const { previewDays, sundayCount, onlySundays } = useMemo(() => {
+    const empty = { previewDays: 0, sundayCount: 0, onlySundays: false };
+    if (!form.fromDate) return empty;
     const from = new Date(form.fromDate);
+    if (isHalfDay) {
+      const ok = chargedSpan(from, from).days > 0;
+      return { previewDays: ok ? 0.5 : 0, sundayCount: 0, onlySundays: !ok };
+    }
+    if (!form.toDate) return empty;
     const to = new Date(form.toDate);
-    return from > to ? 0 : workingDaysBetween(from, to);
+    if (from > to) return empty;
+    const span = chargedSpan(from, to);
+    return { previewDays: span.days, sundayCount: span.sundays, onlySundays: span.days === 0 };
   }, [form.fromDate, form.toDate, form.duration]);
 
   const selectedBalance = balances.find((b) => b.leaveType === form.leaveType);
@@ -1160,24 +1264,43 @@ function ApplyForm({
           onChange={(e) => { const f = e.target.files?.[0]; if (f) setAttachedFile(f); e.target.value = ""; }}
         />
 
+        {/* A range of nothing but Sundays has no leave in it — the server says no too */}
+        {onlySundays && (
+          <div className="flex items-start gap-2.5 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3">
+            <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0 mt-0.5" />
+            <p className="text-xs text-orange-700">
+              Sunday is not a working day. Pick a range that includes at least one working day (Monday–Saturday).
+            </p>
+          </div>
+        )}
+
         {/* Request summary bar */}
         {previewDays > 0 && (
           <div className="space-y-2">
-            <div className="flex items-center justify-between bg-gray-50 border border-gray-100 rounded-xl px-4 py-3">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 bg-gray-50 border border-gray-100 rounded-xl px-4 py-3">
               <div>
                 <p className="text-xs text-gray-500 mb-0.5">Request summary</p>
                 <p className="text-sm font-bold text-gray-900">
-                  {previewDays} working {previewDays === 1 ? "day" : "days"} · {LEAVE_LABEL[form.leaveType]}
+                  {previewDays} {previewDays === 1 ? "day" : "days"} · {LEAVE_LABEL[form.leaveType]}
                   {isHalfDay ? ` (${form.duration === "FIRST_HALF" ? "First" : "Second"} half)` : ""}
                 </p>
               </div>
-              <div className="text-right">
+              <div className="sm:text-right">
                 <p className="text-xs text-gray-400">Balance after approval</p>
                 <p className={`text-sm font-bold ${balanceAfter < 0 ? "text-red-500" : balanceAfter === 0 ? "text-orange-500" : "text-gray-800"}`}>
                   {balanceAfter} {Math.abs(balanceAfter) === 1 ? "day" : "days"}
                 </p>
               </div>
             </div>
+            {sundayCount > 0 && (
+              <div className="flex items-start gap-2.5 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+                <Info className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />
+                <p className="text-xs text-blue-700">
+                  Includes {sundayCount} Sunday{sundayCount === 1 ? "" : "s"} under the sandwich policy — a
+                  non-working day that falls inside a leave span is counted. Working days are Monday–Saturday.
+                </p>
+              </div>
+            )}
             {isInsufficient && (
               <div className="flex items-start gap-2.5 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3">
                 <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0 mt-0.5" />
@@ -1624,6 +1747,145 @@ function PolicySnapshot({ balances }: { balances: LeaveBalance[] }) {
       {shown.length === 0 && (
         <p className="text-xs text-gray-400 text-center py-4">No leave policy assigned yet.</p>
       )}
+
+      {/* The sandwich rule surprises people the first time — state it up front. */}
+      <div className="mt-4 pt-4 border-t border-gray-100 flex items-start gap-2">
+        <Info className="h-3.5 w-3.5 text-blue-500 shrink-0 mt-0.5" />
+        <p className="text-xs text-gray-500">
+          Working days are Monday–Saturday. Sandwich policy: every day between the first and last
+          day of your leave is counted, so Friday to Monday is four days.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Who's On Leave (Team Leaves tab) ─────────────────────────────────────────
+
+type OnLeaveEntry = {
+  id: string;
+  leaveType: string;
+  fromDate: string;
+  toDate: string;
+  totalDays: number;
+  status: string;
+  employee: {
+    id: string;
+    employeeCode: string;
+    firstName: string;
+    lastName: string;
+    department: { name: string } | null;
+    designation: { title: string } | null;
+  };
+};
+
+/** Today in the viewer's own timezone — `toISOString` would roll back a day in IST. */
+function todayIso() {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function relativeDayLabel(iso: string) {
+  const today = todayIso();
+  if (iso === today) return "today";
+  const diff = Math.round((new Date(iso).getTime() - new Date(today).getTime()) / MS_PER_DAY);
+  if (diff === 1)  return "tomorrow";
+  if (diff === -1) return "yesterday";
+  return new Date(iso).toLocaleDateString("en-IN", { weekday: "long" });
+}
+
+/**
+ * Who is away on a given day, defaulting to today. Answers the question a manager
+ * actually walks in with — "who's out today?" — which the approvals queue can't,
+ * since a leave approved last month no longer appears there.
+ */
+function WhoIsOnLeavePanel() {
+  const [date, setDate] = useState(todayIso());
+
+  const { data: entries = [], isLoading } = useQuery<OnLeaveEntry[]>({
+    queryKey: ["leaves-on-date", date],
+    queryFn: () => api.get(`/api/v1/leaves/on-date?date=${date}`).then((r) => r.data.data),
+  });
+
+  const isToday = date === todayIso();
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="flex flex-col gap-3 p-5 border-b border-gray-200 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2">
+          <CalendarOff className="text-teal-600 shrink-0" size={20} />
+          <div>
+            <h3 className="text-base font-semibold text-gray-900">On Leave</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {isLoading
+                ? "Checking…"
+                : `${entries.length} ${entries.length === 1 ? "person is" : "people are"} away ${relativeDayLabel(date)}`}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="date" max="2099-12-31" min="1900-01-01"
+            value={date}
+            onChange={(e) => setDate(e.target.value || todayIso())}
+            className="flex-1 sm:flex-initial border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {!isToday && (
+            <button
+              onClick={() => setDate(todayIso())}
+              className="px-3 py-2 text-xs font-medium text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50 whitespace-nowrap"
+            >
+              Today
+            </button>
+          )}
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-10">
+          <div className="animate-spin h-5 w-5 border-2 border-teal-400 border-t-transparent rounded-full" />
+        </div>
+      ) : entries.length === 0 ? (
+        <div className="px-6 py-10 text-center">
+          <CheckCircle2 className="mx-auto text-gray-300 mb-3" size={36} />
+          <p className="text-sm text-gray-500">Nobody is on leave {relativeDayLabel(date)}.</p>
+        </div>
+      ) : (
+        <div className="divide-y divide-gray-100">
+          {entries.map((e) => {
+            const sameDay = e.fromDate.slice(0, 10) === e.toDate.slice(0, 10);
+            const colors = LEAVE_COLORS[e.leaveType] ?? LEAVE_COLORS.CASUAL;
+            return (
+              <div key={e.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-5 py-3.5 hover:bg-gray-50 transition-colors">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-medium text-gray-900">{e.employee.firstName} {e.employee.lastName}</p>
+                    <span className="text-xs text-gray-400">{e.employee.employeeCode}</span>
+                    {e.status === "CANCELLATION_PENDING" && (
+                      <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
+                        Withdrawal pending
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {[e.employee.designation?.title, e.employee.department?.name].filter(Boolean).join(" · ")}
+                  </p>
+                </div>
+                <div className="sm:text-right shrink-0">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${colors.bg} ${colors.text}`}>
+                    {LEAVE_LABEL[e.leaveType] ?? e.leaveType}
+                    {e.totalDays === 0.5 ? " · half day" : ""}
+                  </span>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {sameDay ? fmtShort(e.fromDate) : `${fmtShort(e.fromDate)} – ${fmtShort(e.toDate)}`}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1636,6 +1898,7 @@ function PendingApprovalsPanel() {
   const isApprover = user?.role !== "EMPLOYEE";
   const [reviewLeave, setReviewLeave] = useState<PendingLeave | null>(null);
   const [lopLeave, setLopLeave] = useState<PendingLeave | null>(null);
+  const [search, setSearch] = useState("");
 
   const { data: pending = [], isLoading } = useQuery<PendingLeave[]>({
     queryKey: ["pending-leaves"],
@@ -1663,15 +1926,28 @@ function PendingApprovalsPanel() {
     decisionMut.mutate({ id, action, lopDays, note });
   }
 
+  // The list arrives newest-application-first from the API; search narrows it in
+  // place so the ordering HR relies on survives filtering.
+  const matching = pending.filter((l) =>
+    matchesLeaveSearch(search, [
+      l.employee.firstName,
+      l.employee.lastName,
+      l.employee.employeeCode,
+      l.employee.department?.name,
+      LEAVE_LABEL[l.leaveType] ?? l.leaveType,
+      l.reason,
+    ]),
+  );
+
   // Separate unpaid/overdrawn leaves for LOP section
-  const regularLeaves = pending.filter((l) => l.leaveType !== "UNPAID");
-  const lopLeaves = pending.filter((l) => l.leaveType === "UNPAID");
+  const regularLeaves = matching.filter((l) => l.leaveType !== "UNPAID");
+  const lopLeaves = matching.filter((l) => l.leaveType === "UNPAID");
 
   return (
     <>
       {/* Pending Approvals */}
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-        <div className="flex items-center justify-between p-5 border-b border-gray-200">
+        <div className="flex flex-col gap-3 p-5 border-b border-gray-200 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
             <Clock className="text-orange-500" size={20} />
             <h3 className="text-base font-semibold text-gray-900">Pending Approvals</h3>
@@ -1679,6 +1955,13 @@ function PendingApprovalsPanel() {
               <span className="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full font-medium">{pending.length}</span>
             )}
           </div>
+          {pending.length > 0 && (
+            <LeaveSearchInput
+              value={search}
+              onChange={setSearch}
+              placeholder="Search name, code, department, type…"
+            />
+          )}
         </div>
 
         {isLoading ? (
@@ -1688,16 +1971,21 @@ function PendingApprovalsPanel() {
         ) : regularLeaves.length === 0 ? (
           <div className="p-12 text-center">
             <Clock className="mx-auto text-gray-300 mb-4" size={48} />
-            <p className="text-sm text-gray-500">No pending approvals at this time.</p>
+            <p className="text-sm text-gray-500">
+              {search.trim() && pending.length > 0
+                ? "No pending applications match your search."
+                : "No pending approvals at this time."}
+            </p>
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
             {regularLeaves.map((leave) => (
               <div key={leave.id} className="p-5 hover:bg-gray-50 transition-colors">
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <p className="font-medium text-gray-900">{leave.employee.firstName} {leave.employee.lastName}</p>
+                      <span className="text-xs text-gray-400">{leave.employee.employeeCode}</span>
                       <span className="text-xs text-gray-400">{leave.employee.department?.name}</span>
                     </div>
                     <p className="text-sm text-gray-600 mb-1">
@@ -1706,12 +1994,13 @@ function PendingApprovalsPanel() {
                     </p>
                     <p className="text-sm text-gray-500">
                       {fmtShort(leave.fromDate)}{leave.fromDate !== leave.toDate ? ` – ${fmtShort(leave.toDate)}` : ""}
+                      {leave.createdAt && <span className="text-xs text-gray-400"> · applied {fmtShort(leave.createdAt)}</span>}
                     </p>
                     <p className="text-xs text-gray-400 mt-1 truncate">{leave.reason}</p>
                   </div>
                   <button
                     onClick={() => setReviewLeave(leave)}
-                    className="px-4 py-2 rounded-md text-sm font-medium text-white whitespace-nowrap shrink-0"
+                    className="w-full sm:w-auto px-4 py-2 rounded-md text-sm font-medium text-white whitespace-nowrap shrink-0"
                     style={{ backgroundColor: "#2C3E7C" }}
                   >
                     Review
@@ -1736,9 +2025,9 @@ function PendingApprovalsPanel() {
           <div className="divide-y divide-gray-100">
             {lopLeaves.map((leave) => (
               <div key={leave.id} className="p-5 hover:bg-gray-50 transition-colors">
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <p className="font-medium text-gray-900">{leave.employee.firstName} {leave.employee.lastName}</p>
                       <span className="text-xs text-gray-400">{leave.employee.department?.name}</span>
                     </div>
@@ -1752,7 +2041,7 @@ function PendingApprovalsPanel() {
                   </div>
                   <button
                     onClick={() => setLopLeave(leave)}
-                    className="px-4 py-2 rounded-md text-sm font-medium text-white whitespace-nowrap shrink-0"
+                    className="w-full sm:w-auto px-4 py-2 rounded-md text-sm font-medium text-white whitespace-nowrap shrink-0"
                     style={{ backgroundColor: "#2C3E7C" }}
                   >
                     Take Action
@@ -1949,13 +2238,17 @@ function AllLeavesPanel() {
     onError: (e: any) => toast.error(e?.response?.data?.error ?? "Failed to delete leave"),
   });
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return leaves;
-    return leaves.filter((l) =>
-      `${l.employee.firstName} ${l.employee.lastName} ${l.employee.employeeCode}`.toLowerCase().includes(q)
-    );
-  }, [leaves, search]);
+  const filtered = useMemo(() =>
+    leaves.filter((l) =>
+      matchesLeaveSearch(search, [
+        l.employee.firstName,
+        l.employee.lastName,
+        l.employee.employeeCode,
+        l.employee.department?.name,
+        LEAVE_LABEL[l.leaveType] ?? l.leaveType,
+        statusLabel(l.status),
+      ]),
+    ), [leaves, search]);
 
   return (
     <>
@@ -1996,11 +2289,10 @@ function AllLeavesPanel() {
         {open && (
           <>
             <div className="px-6 pb-4 flex flex-col sm:flex-row gap-2">
-              <input
+              <LeaveSearchInput
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by employee name or code…"
-                className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onChange={setSearch}
+                placeholder="Search name, code, department, type…"
               />
               <select
                 value={statusFilter}
@@ -2095,11 +2387,12 @@ interface DecidedLeave {
   status: string;
   approvedAt: string | null;
   rejectedAt: string | null;
-  employee: { firstName: string; lastName: string; department: { name: string } };
+  employee: { employeeCode?: string; firstName: string; lastName: string; department: { name: string } };
 }
 
 function DecisionHistory() {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
 
   // Same reporting-line authority as the tab itself — served from cache
   const { data: authority } = useQuery<LeaveAuthority>({
@@ -2117,18 +2410,30 @@ function DecisionHistory() {
 
   if (!isApprover) return null;
 
+  // Newest decision first from the API; searching keeps that order.
+  const filtered = decided.filter((l) =>
+    matchesLeaveSearch(search, [
+      l.employee.firstName,
+      l.employee.lastName,
+      l.employee.employeeCode,
+      l.employee.department?.name,
+      LEAVE_LABEL[l.leaveType] ?? l.leaveType,
+      statusLabel(l.status),
+    ]),
+  );
+
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
         className="w-full flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors"
       >
-        <div className="flex items-center gap-2">
-          <CheckCircle2 className="h-4 w-4 text-green-500" />
+        <div className="flex items-center gap-2 text-left">
+          <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
           <h2 className="font-semibold text-gray-900">Decision History</h2>
-          <span className="text-xs text-gray-400 font-normal ml-1">Leaves you've approved or rejected</span>
+          <span className="hidden sm:inline text-xs text-gray-400 font-normal ml-1">Leaves you've approved or rejected</span>
         </div>
-        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 shrink-0 ${open ? "rotate-180" : ""}`} />
       </button>
 
       {open && (
@@ -2137,8 +2442,19 @@ function DecisionHistory() {
         ) : decided.length === 0 ? (
           <div className="px-6 py-8 text-center text-sm text-gray-400">No decisions recorded yet.</div>
         ) : (
-          <div className="overflow-y-auto max-h-96">
-            <table className="w-full">
+          <>
+          <div className="px-6 pb-4">
+            <LeaveSearchInput
+              value={search}
+              onChange={setSearch}
+              placeholder="Search name, code, department, type…"
+            />
+          </div>
+          {filtered.length === 0 ? (
+            <div className="px-6 py-8 text-center text-sm text-gray-400">No decisions match your search.</div>
+          ) : (
+          <div className="overflow-x-auto overflow-y-auto max-h-96">
+            <table className="w-full min-w-[40rem]">
               <thead className="sticky top-0 bg-white z-10 border-b border-gray-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Employee</th>
@@ -2149,7 +2465,7 @@ function DecisionHistory() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {decided.map((leave) => {
+                {filtered.map((leave) => {
                   const sameDay = leave.fromDate.slice(0, 10) === leave.toDate.slice(0, 10);
                   const dateStr = sameDay
                     ? fmtShort(leave.fromDate)
@@ -2161,7 +2477,9 @@ function DecisionHistory() {
                         <p className="text-sm font-semibold text-gray-800">
                           {leave.employee.firstName} {leave.employee.lastName}
                         </p>
-                        <p className="text-xs text-gray-400 mt-0.5">{leave.employee.department?.name}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {[leave.employee.employeeCode, leave.employee.department?.name].filter(Boolean).join(" · ")}
+                        </p>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-700">
                         {LEAVE_LABEL[leave.leaveType] ?? leave.leaveType}
@@ -2184,6 +2502,8 @@ function DecisionHistory() {
               </tbody>
             </table>
           </div>
+          )}
+          </>
         )
       )}
     </div>
@@ -2197,9 +2517,10 @@ type PendingLeave = {
   toDate: string;
   totalDays: number;
   reason: string;
+  createdAt?: string;
   documentUrl?: string;
   cancelReason?: string | null;
-  employee: { id: string; firstName: string; lastName: string; department: { name: string } | null };
+  employee: { id: string; employeeCode?: string; firstName: string; lastName: string; department: { name: string } | null };
 };
 
 type AdminLeave = {
@@ -2378,6 +2699,7 @@ export default function LeavesPage() {
             </div>
           </div>
 
+          <WhoIsOnLeavePanel />
           <PendingApprovalsPanel />
           <CancellationRequestsPanel />
           <DecisionHistory />

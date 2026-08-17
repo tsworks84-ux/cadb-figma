@@ -7,7 +7,7 @@ import { sendCredentialsMail } from "../../utils/mailer.js";
 import type { JwtPayload } from "@cadb/types";
 import { randomUUID } from "crypto";
 import { uploadFile } from "../../utils/s3.js";
-import { computeAccrued, computeCarryForward, IN_FORCE_LEAVE_STATUSES } from "../../utils/leave.js";
+import { computeAccrued, computeCarryForward, lopDaysInMonth, IN_FORCE_LEAVE_STATUSES } from "../../utils/leave.js";
 import { hasAnyPermission, ACADEMICS_MODULES } from "../../utils/permissions.js";
 import { createWriteStream, mkdirSync } from "fs";
 import { join, dirname } from "path";
@@ -972,45 +972,29 @@ export async function employeeRoutes(fastify: FastifyInstance) {
       orderBy: { approvedAt: "asc" },
     });
 
-    // UNPAID (LOP) leaves approved with any day in this period
-    const [unpaidLeaves, lopMarkedLeaves] = await Promise.all([
-      prisma.leaveApplication.findMany({
-        where: {
-          employeeId: id,
-          leaveType: "UNPAID",
-          status: { in: IN_FORCE_LEAVE_STATUSES },
-          fromDate: { lte: periodEnd },
-          toDate:   { gte: periodStart },
-        },
-        select: { id: true, fromDate: true, toDate: true, totalDays: true, leaveType: true, lopDays: true },
-        orderBy: { fromDate: "asc" },
-      }),
-      prisma.leaveApplication.findMany({
-        where: {
-          employeeId: id,
-          leaveType: { not: "UNPAID" },
-          status: { in: IN_FORCE_LEAVE_STATUSES },
-          lopDays: { gt: 0 },
-          fromDate: { lte: periodEnd },
-          toDate:   { gte: periodStart },
-        },
-        select: { id: true, fromDate: true, toDate: true, totalDays: true, leaveType: true, lopDays: true },
-        orderBy: { fromDate: "asc" },
-      }),
-    ]);
+    // Leaves that cost this employee pay in this period. `lopDays` carries the
+    // figure for every leave type — the whole leave for an unpaid one, the days
+    // the approver declared for the rest — and `lopDaysInMonth` keeps only the
+    // part falling inside this month, counting partial LoP back from the leave's
+    // last day. Same split the salary disbursement report deducts, so the profile
+    // and payroll can't disagree. Dates are bounded in UTC to match how they are
+    // stored.
+    const lopCandidates = await prisma.leaveApplication.findMany({
+      where: {
+        employeeId: id,
+        status: { in: IN_FORCE_LEAVE_STATUSES },
+        lopDays: { gt: 0 },
+        fromDate: { lte: new Date(Date.UTC(year, month, 0)) },
+        toDate:   { gte: new Date(Date.UTC(year, month - 1, 1)) },
+      },
+      select: { id: true, fromDate: true, toDate: true, totalDays: true, leaveType: true, lopDays: true },
+      orderBy: { fromDate: "asc" },
+    });
 
-    // Clamp UNPAID leave days to the period
-    const unpaidLopDays = unpaidLeaves.reduce((sum, l) => {
-      const from = l.fromDate < periodStart ? periodStart : l.fromDate;
-      const to   = l.toDate   > periodEnd   ? periodEnd   : l.toDate;
-      const diff = Math.round((to.getTime() - from.getTime()) / 86_400_000) + 1;
-      return sum + Math.min(diff, l.totalDays);
-    }, 0);
-
-    // Explicitly marked LoP days from other leave types
-    const markedLopDays = lopMarkedLeaves.reduce((sum, l) => sum + l.lopDays, 0);
-    const lopDays = unpaidLopDays + markedLopDays;
-    const lopLeaves = [...unpaidLeaves, ...lopMarkedLeaves];
+    const lopLeaves = lopCandidates
+      .map((l) => ({ ...l, periodLopDays: lopDaysInMonth(l.fromDate, l.toDate, l.lopDays, year, month) }))
+      .filter((l) => l.periodLopDays > 0);
+    const lopDays = lopLeaves.reduce((sum, l) => sum + l.periodLopDays, 0);
 
     // Salary config
     const salaryConfig = await prisma.employeeSalaryConfig.findUnique({ where: { employeeId: id } });

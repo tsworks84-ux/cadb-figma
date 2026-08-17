@@ -647,7 +647,7 @@ function MonthlySalaryDisbursementReport() {
               <div>
                 <p className="text-xs font-medium text-gray-600 mb-1.5">Adjustments &amp; Deductions</p>
                 <ul className="text-xs text-gray-500 space-y-1">
-                  <li>• LoP days and LoP amount (basic/working days × days)</li>
+                  <li>• LoP days and LoP amount (basic ÷ days in month × LoP days)</li>
                   <li>• Approved reimbursement claims for the month</li>
                   <li>• Bonus payouts scheduled for the month</li>
                   <li>• TDS, PF, ESI (Employee), Prof. Tax, Advance</li>
@@ -763,7 +763,9 @@ function MonthlySalaryDisbursementReport() {
           {/* Export */}
           <div className="flex items-center justify-between mt-5 pt-4 border-t border-gray-100">
             <p className="text-xs text-gray-400">
-              LoP = basic ÷ working days in month × unpaid leave days.
+              LoP = basic ÷ calendar days in the month × LoP days falling in it. Unpaid leaves
+              count in full, other types count the days the approver marked as LoP, counted back
+              from the last day of the leave; a leave crossing month-end is split between months.
               Claims and bonus payouts are for the selected month only.
             </p>
             <button
