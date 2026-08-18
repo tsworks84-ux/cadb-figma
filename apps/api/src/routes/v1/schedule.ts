@@ -4,7 +4,7 @@ import { prisma } from "@cadb/db";
 import { authenticate } from "../../middleware/authenticate.js";
 import { maybeAutoConcludes } from "./scheduleHelpers.js";
 import { requireModulePermission } from "../../utils/permissions.js";
-import { expandRecurrence, MAX_OCCURRENCES } from "../../utils/recurrence.js";
+import { expandWeekdayPlan, MAX_OCCURRENCES } from "../../utils/recurrence.js";
 import { randomUUID } from "crypto";
 
 const scheduleSchema = z.object({
@@ -21,15 +21,34 @@ const scheduleSchema = z.object({
   notes:        z.string().optional(),
 });
 
-const recurringSchema = scheduleSchema.extend({
-  recurrence: z.object({
-    frequency: z.enum(["DAILY", "WEEKLY", "FORTNIGHTLY", "MONTHLY", "CUSTOM"]),
-    // 0 = Sunday … 6 = Saturday.
-    weekdays:  z.array(z.number().int().min(0).max(6)).optional(),
-    until:     z.string().min(1),
-  }),
-  /** Leave out the occurrences where this faculty is already booked elsewhere. */
+// "Add Multiple Schedules": one date range, and the chosen weekdays each with
+// their own times. Deliberately does NOT extend scheduleSchema — there is no
+// single date/startTime/endTime here, the per-day rows carry them.
+const recurringSchema = z.object({
+  academicYear: z.string().min(1),
+  batchIds:     z.array(z.string()).min(1, "At least one batch required"),
+  subjectId:    z.string().optional().nullable(),
+  employeeId:   z.string().optional().nullable(),
+  locationId:   z.string().optional().nullable(),
+  mode:         z.enum(["ONLINE", "OFFLINE"]).optional().default("OFFLINE"),
+  topics:       z.string().optional(),
+  notes:        z.string().optional(),
+  startDate:    z.string().min(1),
+  endDate:      z.string().min(1),
+  days: z.array(z.object({
+    weekday:   z.number().int().min(0).max(6),
+    startTime: z.string().min(1),
+    endTime:   z.string().min(1),
+  })).min(1, "Select at least one day"),
+  /** Leave out occurrences where this faculty is already booked elsewhere. */
   skipConflicts: z.boolean().optional().default(false),
+  /**
+   * The submitter's UTC offset, as `Date.prototype.getTimezoneOffset()` reports
+   * it (IST = -330). Without it the server would read "09:00" in its own zone —
+   * prod runs UTC, so every class would land 5.5 hours late for Indian users.
+   * Defaults to 0, i.e. treat the wall-clock time as UTC.
+   */
+  tzOffsetMinutes: z.number().int().min(-900).max(900).optional().default(0),
 });
 
 const scheduleInclude = {
@@ -258,53 +277,55 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
     return reply.status(201).send({ success: true, data: schedule });
   });
 
-  // ── RECURRING SERIES ───────────────────────────────────────────────────────
-  // Materialises one Schedule row per occurrence rather than storing the rule
-  // and expanding on read: attendance, assignments and status are all per-class,
-  // so every occurrence needs somewhere to hang them. Rows are tied together by
-  // recurrenceId so the series can be deleted as one.
+  // ── MULTIPLE SCHEDULES ─────────────────────────────────────────────────────
+  // Materialises one Schedule row per occurrence rather than storing a rule and
+  // expanding on read: attendance, assignments and status are all per-class, so
+  // every occurrence needs its own row. Rows are grouped by recurrenceId so the
+  // set can be deleted as one.
 
   /**
-   * Shared by /recurring and /recurring/preview so the dates and clashes the
-   * user is shown are computed by exactly the code that will create them.
+   * Shared by /recurring and /recurring/preview so the classes and clashes the
+   * user is shown come from exactly the code that will create them.
    */
   async function planSeries(d: z.infer<typeof recurringSchema>) {
-    const { batchIds, date, startTime, endTime, recurrence, employeeId } = d;
-
-    if (recurrence.frequency === "CUSTOM" && !recurrence.weekdays?.length) {
-      throw new Error("Select at least one weekday");
+    const occurrences = expandWeekdayPlan(d.startDate.slice(0, 10), d.endDate.slice(0, 10), d.days);
+    if (occurrences.length === 0) {
+      throw new Error("No classes fall in that date range — check the days you picked");
     }
-    const days = expandRecurrence(date.slice(0, 10), recurrence);
-    if (days.length === 0) throw new Error("That pattern produces no classes");
 
-    // Times arrive as full ISO instants on the first date; carry that wall-clock
-    // time across to every occurrence.
-    const startClock = new Date(startTime);
-    const endClock   = new Date(endTime);
-    const at = (day: string, clock: Date) =>
-      new Date(`${day}T${String(clock.getHours()).padStart(2, "0")}:${String(clock.getMinutes()).padStart(2, "0")}:00`);
+    // Build stored instants from wall-clock strings in the SUBMITTER's zone, not
+    // the server's — see tzOffsetMinutes above.
+    const instant = (day: string, hhmm: string) => {
+      const [y, mo, dd] = day.split("-").map(Number);
+      const [hh, mi] = hhmm.split(":").map(Number);
+      return new Date(Date.UTC(y, mo - 1, dd, hh, mi) + d.tzOffsetMinutes * 60_000);
+    };
 
     // Faculty double-booking: same teacher, overlapping window, against a batch
-    // they are not already teaching in that slot. Mirrors the modal's live check.
-    const conflicts: { date: string; batches: string }[] = [];
-    if (employeeId) {
+    // they are not already teaching in that slot. Mirrors the single-class check.
+    const conflicts: { date: string; startTime: string; batches: string }[] = [];
+    if (d.employeeId) {
       const existing = await prisma.schedule.findMany({
         where: {
-          employeeId,
+          employeeId: d.employeeId,
           status: { not: "CANCELLED" },
-          date: { gte: new Date(days[0]), lte: new Date(days[days.length - 1]) },
+          date: {
+            gte: new Date(occurrences[0].date),
+            lte: new Date(occurrences[occurrences.length - 1].date),
+          },
         },
         include: { batches: { include: { batch: { select: { name: true } } } } },
       });
-      for (const day of days) {
-        const s0 = at(day, startClock).getTime();
-        const e0 = at(day, endClock).getTime();
+      for (const o of occurrences) {
+        const s0 = instant(o.date, o.startTime).getTime();
+        const e0 = instant(o.date, o.endTime).getTime();
         for (const ex of existing) {
-          if (ex.date.toISOString().slice(0, 10) !== day) continue;
-          if (ex.batches.some((b) => batchIds.includes(b.batchId))) continue;
+          if (ex.date.toISOString().slice(0, 10) !== o.date) continue;
+          if (ex.batches.some((b) => d.batchIds.includes(b.batchId))) continue;
           if (s0 < ex.endTime.getTime() && e0 > ex.startTime.getTime()) {
             conflicts.push({
-              date: day,
+              date: o.date,
+              startTime: o.startTime,
               batches: ex.batches.map((b) => b.batch?.name).filter(Boolean).join(", ") || "another batch",
             });
             break;
@@ -312,15 +333,19 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
         }
       }
     }
-    return { days, conflicts, at, startClock, endClock, capped: days.length >= MAX_OCCURRENCES };
+
+    return { occurrences, conflicts, instant, capped: occurrences.length >= MAX_OCCURRENCES };
   }
 
   fastify.post("/recurring/preview", async (request, reply) => {
     const parsed = recurringSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
     try {
-      const { days, conflicts, capped } = await planSeries(parsed.data);
-      return reply.send({ success: true, data: { dates: days, count: days.length, conflicts, capped } });
+      const { occurrences, conflicts, capped } = await planSeries(parsed.data);
+      return reply.send({
+        success: true,
+        data: { occurrences, count: occurrences.length, conflicts, capped },
+      });
     } catch (e: any) {
       return reply.status(400).send({ success: false, error: e.message });
     }
@@ -330,7 +355,8 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
     const parsed = recurringSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
 
-    const { batchIds, date, startTime, endTime, recurrence, skipConflicts, ...rest } = parsed.data;
+    // tzOffsetMinutes is a transport concern, not a Schedule column — keep it out of `rest`.
+    const { batchIds, startDate, endDate, days, skipConflicts, tzOffsetMinutes, ...rest } = parsed.data;
 
     let plan;
     try {
@@ -338,27 +364,29 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
     } catch (e: any) {
       return reply.status(400).send({ success: false, error: e.message });
     }
-    const { days, conflicts, at, startClock, endClock, capped } = plan;
+    const { occurrences, conflicts, instant, capped } = plan;
 
-    const conflictDays = new Set(conflicts.map((c) => c.date));
-    const toCreate = skipConflicts ? days.filter((day) => !conflictDays.has(day)) : days;
+    const clashing = new Set(conflicts.map((c) => `${c.date}T${c.startTime}`));
+    const toCreate = skipConflicts
+      ? occurrences.filter((o) => !clashing.has(`${o.date}T${o.startTime}`))
+      : occurrences;
     if (toCreate.length === 0) {
       return reply.status(400).send({
         success: false,
-        error: "Every date in that series clashes with an existing class for this faculty",
+        error: "Every class in that range clashes with an existing one for this faculty",
       });
     }
 
     const recurrenceId = randomUUID();
     await prisma.$transaction(
-      toCreate.map((day) =>
+      toCreate.map((o) =>
         prisma.schedule.create({
           data: {
             ...rest,
             recurrenceId,
-            date:      new Date(day),
-            startTime: at(day, startClock),
-            endTime:   at(day, endClock),
+            date:      new Date(o.date),
+            startTime: instant(o.date, o.startTime),
+            endTime:   instant(o.date, o.endTime),
             batches:   { create: batchIds.map((batchId) => ({ batchId })) },
           },
         })
@@ -370,9 +398,9 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
       data: {
         recurrenceId,
         created: toCreate.length,
-        dates: toCreate,
+        occurrences: toCreate,
         conflicts,
-        skipped: skipConflicts ? conflicts.length : 0,
+        skipped: skipConflicts ? occurrences.length - toCreate.length : 0,
         capped,
       },
     });

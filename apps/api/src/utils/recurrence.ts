@@ -6,6 +6,13 @@
  * DST transition from shifting a lecture onto the previous day.
  */
 
+// NOTE: the frequency-based rule below is NOT currently reached by any route.
+// The scheduling form was changed to the weekday-grid format (see
+// expandWeekdayPlan at the foot of this file), which covers daily, weekly and
+// arbitrary weekday mixes but not fortnightly or monthly. This is kept, with its
+// tests, so those two can be restored by wiring a branch rather than rewriting
+// the maths.
+
 export type Frequency = "DAILY" | "WEEKLY" | "FORTNIGHTLY" | "MONTHLY" | "CUSTOM";
 
 export interface RecurrenceRule {
@@ -105,3 +112,57 @@ export function expandRecurrence(start: string, rule: RecurrenceRule): string[] 
 
   return [...new Set(out)].sort();
 }
+
+// ─── Weekday plan ─────────────────────────────────────────────────────────────
+// What the "Add Multiple Schedules" form produces: a date range plus the chosen
+// weekdays, each carrying its own start and end time (Mon 09:00 and Wed 14:00
+// in a single submission).
+
+export interface DaySpec {
+  /** 0 = Sunday … 6 = Saturday. */
+  weekday: number;
+  /** Wall-clock "HH:MM". */
+  startTime: string;
+  endTime: string;
+}
+
+export interface Occurrence {
+  date: string;      // YYYY-MM-DD
+  startTime: string; // HH:MM
+  endTime: string;   // HH:MM
+}
+
+const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+/**
+ * Every occurrence of the selected weekdays between two dates, inclusive.
+ * Ascending by date. Each occurrence carries the times of its own weekday.
+ */
+export function expandWeekdayPlan(startDate: string, endDate: string, days: DaySpec[]): Occurrence[] {
+  const startD = parseDay(startDate);
+  const endD   = parseDay(endDate);
+  if (endD < startD) throw new Error("End date must be on or after the start date");
+  if (!days.length) throw new Error("Select at least one day");
+
+  const byWeekday = new Map<number, DaySpec>();
+  for (const d of days) {
+    if (d.weekday < 0 || d.weekday > 6) throw new Error(`Invalid weekday: ${d.weekday}`);
+    if (!HHMM.test(d.startTime) || !HHMM.test(d.endTime)) {
+      throw new Error("Times must be in HH:MM form");
+    }
+    if (d.endTime <= d.startTime) {
+      throw new Error(`End time must be after start time on ${WEEKDAY_NAMES[d.weekday]}`);
+    }
+    byWeekday.set(d.weekday, d); // last one wins, so a duplicated day can't double-book
+  }
+
+  const out: Occurrence[] = [];
+  for (let t = startD.getTime(); t <= endD.getTime() && out.length < MAX_OCCURRENCES; t += DAY_MS) {
+    const day = new Date(t);
+    const spec = byWeekday.get(day.getUTCDay());
+    if (spec) out.push({ date: toDayString(day), startTime: spec.startTime, endTime: spec.endTime });
+  }
+  return out;
+}
+
+export const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];

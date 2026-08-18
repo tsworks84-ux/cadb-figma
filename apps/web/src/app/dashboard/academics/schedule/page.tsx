@@ -600,41 +600,29 @@ function StatsPanel({ schedules, subjects }: { schedules: any[]; subjects: any[]
 
 // ── Schedule modal ────────────────────────────────────────────────────────────
 
-type Frequency = "DAILY" | "WEEKLY" | "FORTNIGHTLY" | "MONTHLY" | "CUSTOM";
+type DayRow = { on: boolean; startTime: string; endTime: string };
 
 type ScheduleForm = {
   academicYear: string; batchIds: string[]; subjectId: string; employeeId: string;
   locationId: string; mode: "ONLINE" | "OFFLINE"; date: string; startTime: string; endTime: string; topics: string; notes: string;
-  // Recurrence — only ever sent when creating, never when editing one occurrence.
-  repeat: boolean; frequency: Frequency; weekdays: number[]; until: string; skipConflicts: boolean;
+  // "Add multiple schedules" — a date range plus per-weekday times.
+  multi: boolean; endDate: string; sameTime: boolean;
+  commonStart: string; commonEnd: string;
+  days: DayRow[]; // indexed 0 = Sunday … 6 = Saturday
+  skipConflicts: boolean;
 };
 
-const FREQUENCIES: { value: Frequency; label: string }[] = [
-  { value: "DAILY",       label: "Daily" },
-  { value: "WEEKLY",      label: "Weekly" },
-  { value: "FORTNIGHTLY", label: "Fortnightly" },
-  { value: "MONTHLY",     label: "Monthly" },
-  { value: "CUSTOM",      label: "Custom days" },
-];
+// Sunday-first, matching the attached form.
+const WEEKDAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-// Monday-first, matching the Mon–Sat academy week. Values are JS getDay() codes.
-const WEEKDAYS = [
-  { v: 1, label: "M", full: "Monday" },
-  { v: 2, label: "T", full: "Tuesday" },
-  { v: 3, label: "W", full: "Wednesday" },
-  { v: 4, label: "T", full: "Thursday" },
-  { v: 5, label: "F", full: "Friday" },
-  { v: 6, label: "S", full: "Saturday" },
-  { v: 0, label: "S", full: "Sunday" },
-];
+const blankDays = (): DayRow[] =>
+  WEEKDAY_LABELS.map(() => ({ on: false, startTime: "09:00", endTime: "10:00" }));
 
 const fmtShortDate = (d: string) =>
   new Date(`${d}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 
-/** The wire shape shared by the create, preview and recurring endpoints. */
-function buildBasePayload(form: ScheduleForm) {
-  const startDT = new Date(`${form.date}T${form.startTime}`);
-  const endDT   = new Date(`${form.date}T${form.endTime}`);
+/** Payload for a single class. */
+function buildSinglePayload(form: ScheduleForm) {
   return {
     academicYear: form.academicYear,
     batchIds: form.batchIds,
@@ -643,20 +631,37 @@ function buildBasePayload(form: ScheduleForm) {
     locationId: form.locationId || null,
     mode: form.mode,
     date: new Date(form.date).toISOString(),
-    startTime: startDT.toISOString(),
-    endTime: endDT.toISOString(),
+    startTime: new Date(`${form.date}T${form.startTime}`).toISOString(),
+    endTime:   new Date(`${form.date}T${form.endTime}`).toISOString(),
     topics: form.topics || undefined,
     notes: form.notes || undefined,
-    ...(form.repeat
-      ? {
-          recurrence: {
-            frequency: form.frequency,
-            weekdays: form.frequency === "DAILY" || form.frequency === "MONTHLY" ? undefined : form.weekdays,
-            until: form.until,
-          },
-          skipConflicts: form.skipConflicts,
-        }
-      : {}),
+  };
+}
+
+/** Payload for "Add multiple schedules" — date range plus the ticked weekdays. */
+function buildMultiPayload(form: ScheduleForm) {
+  return {
+    academicYear: form.academicYear,
+    batchIds: form.batchIds,
+    subjectId: form.subjectId || null,
+    employeeId: form.employeeId || null,
+    locationId: form.locationId || null,
+    mode: form.mode,
+    topics: form.topics || undefined,
+    notes: form.notes || undefined,
+    startDate: form.date,
+    endDate: form.endDate,
+    days: form.days
+      .map((d, weekday) => ({ ...d, weekday }))
+      .filter((d) => d.on)
+      .map((d) => ({
+        weekday: d.weekday,
+        startTime: form.sameTime ? form.commonStart : d.startTime,
+        endTime:   form.sameTime ? form.commonEnd   : d.endTime,
+      })),
+    skipConflicts: form.skipConflicts,
+    // So the server builds instants in the user's zone, not its own (prod is UTC).
+    tzOffsetMinutes: new Date().getTimezoneOffset(),
   };
 }
 
@@ -671,7 +676,8 @@ function ScheduleModal({
   const emptyForm = (): ScheduleForm => ({
     academicYear: defaultYear, batchIds: [], subjectId: "", employeeId: "",
     locationId: "", mode: "OFFLINE", date: "", startTime: "", endTime: "", topics: "", notes: "",
-    repeat: false, frequency: "WEEKLY", weekdays: [], until: "", skipConflicts: false,
+    multi: false, endDate: "", sameTime: true, commonStart: "09:00", commonEnd: "10:00",
+    days: blankDays(), skipConflicts: false,
   });
   const [form, setForm] = useState<ScheduleForm>(initial ?? emptyForm());
 
@@ -691,7 +697,7 @@ function ScheduleModal({
 
   // In repeat mode the series preview reports clashes across every occurrence,
   // so the single-date banner would just duplicate it.
-  const conflictEnabled = Boolean(form.employeeId && form.date && form.startTime && form.endTime && !endTimeError && !form.repeat);
+  const conflictEnabled = Boolean(form.employeeId && form.date && form.startTime && form.endTime && !endTimeError && !form.multi);
   const { data: conflictData } = useQuery({
     queryKey: ["faculty-conflicts", form.employeeId, form.date],
     queryFn: () =>
@@ -749,16 +755,19 @@ function ScheduleModal({
   });
   const busy = createMut.isPending || updateMut.isPending || recurringMut.isPending;
 
-  // The series preview is computed by the same server code that creates it, so
-  // the dates and clashes shown here are exactly what saving will produce.
+  // The preview is computed by the same server code that creates the classes,
+  // so what is listed here is exactly what saving produces.
+  const selectedDays = form.days.filter((d) => d.on).length;
+  const multiTimesValid = form.sameTime
+    ? form.commonEnd > form.commonStart
+    : form.days.every((d) => !d.on || d.endTime > d.startTime);
   const previewReady = Boolean(
-    !scheduleId && form.repeat && form.academicYear && form.batchIds.length &&
-    form.date && form.startTime && form.endTime && form.until && !endTimeError &&
-    (form.frequency !== "CUSTOM" || form.weekdays.length > 0)
+    !scheduleId && form.multi && form.academicYear && form.batchIds.length &&
+    form.date && form.endDate && selectedDays > 0 && multiTimesValid
   );
-  const previewBody = previewReady ? buildBasePayload(form) : null;
+  const previewBody = previewReady ? buildMultiPayload(form) : null;
   const { data: previewRes, isFetching: previewLoading } = useQuery({
-    queryKey: ["schedule-series-preview", JSON.stringify(previewBody)],
+    queryKey: ["schedule-multi-preview", JSON.stringify(previewBody)],
     queryFn: () => api.post("/api/v1/academics/schedules/recurring/preview", previewBody).then((r) => r.data),
     enabled: previewReady,
     staleTime: 30_000,
@@ -770,35 +779,31 @@ function ScheduleModal({
   const buildPayload = () => {
     if (!form.academicYear) { toast.error("Academic year is required"); return null; }
     if (form.batchIds.length === 0) { toast.error("Select at least one batch"); return null; }
+
+    if (form.multi) {
+      if (!form.date || !form.endDate) { toast.error("Start and end date are required"); return null; }
+      if (new Date(form.endDate) < new Date(form.date)) { toast.error("End date must be on or after the start date"); return null; }
+      if (selectedDays === 0) { toast.error("Tick at least one day"); return null; }
+      if (!multiTimesValid) { toast.error("End time must be after start time on every selected day"); return null; }
+      return buildMultiPayload(form);
+    }
+
     if (!form.date) { toast.error("Date is required"); return null; }
     if (!form.startTime || !form.endTime) { toast.error("Start and end time required"); return null; }
     if (endTimeError) { toast.error("End time must be after start time"); return null; }
-    if (form.repeat) {
-      if (!form.until) { toast.error("Choose a date to repeat until"); return null; }
-      if (form.frequency === "CUSTOM" && form.weekdays.length === 0) {
-        toast.error("Select at least one weekday"); return null;
-      }
-    }
-    return buildBasePayload(form);
+    return buildSinglePayload(form);
   };
 
   const handleSave = () => {
     const p = buildPayload(); if (!p) return;
     if (scheduleId) updateMut.mutate(p);
-    else if (form.repeat) recurringMut.mutate(p, { onSuccess: (res) => { if (res.success) onClose(); } });
+    else if (form.multi) recurringMut.mutate(p, { onSuccess: (res) => { if (res.success) onClose(); } });
     else createMut.mutate(p, { onSuccess: (res) => { if (res.success) onClose(); } });
   };
   const handleSaveAnother = () => {
     const p = buildPayload(); if (!p) return;
-    createMut.mutate(p, {
-      onSuccess: (res) => {
-        if (res.success) setForm({ ...emptyForm(), academicYear: form.academicYear, date: form.date });
-      },
-    });
-  };
-  const handleSaveSeriesAnother = () => {
-    const p = buildPayload(); if (!p) return;
-    recurringMut.mutate(p, {
+    const mut = form.multi ? recurringMut : createMut;
+    mut.mutate(p, {
       onSuccess: (res) => {
         if (res.success) setForm({ ...emptyForm(), academicYear: form.academicYear, date: form.date });
       },
@@ -893,19 +898,24 @@ function ScheduleModal({
 
             <section style={sectionStyle}>
               <h3 style={sectionHeadStyle}>Timing &amp; Location</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-[14px]">
-                <DField label="Date" required>
+              <div className={`grid grid-cols-1 gap-[14px] ${form.multi ? "" : "sm:grid-cols-3"}`}>
+                <DField label={form.multi ? "Start Date" : "Date"} required>
                   <DInput type="date" max="2099-12-31" min="1900-01-01" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
                 </DField>
-                <DField label="Start Time" required>
-                  <DInput type="time" value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} />
-                </DField>
-                <DField label="End Time" required>
-                  <DInput type="time" error={endTimeError} value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} />
-                  {endTimeError && <p style={{ fontSize: 12, color: "#ef4444", margin: 0 }}>End time must be after start time</p>}
-                </DField>
+                {/* In multi mode the per-day rows below carry the times. */}
+                {!form.multi && (
+                  <>
+                    <DField label="Start Time" required>
+                      <DInput type="time" value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} />
+                    </DField>
+                    <DField label="End Time" required>
+                      <DInput type="time" error={endTimeError} value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} />
+                      {endTimeError && <p style={{ fontSize: 12, color: "#ef4444", margin: 0 }}>End time must be after start time</p>}
+                    </DField>
+                  </>
+                )}
               </div>
-              {form.startTime && form.endTime && form.date && !endTimeError && (
+              {!form.multi && form.startTime && form.endTime && form.date && !endTimeError && (
                 <p style={{ fontSize: 13, color: D.muted, margin: "8px 0 0" }}>
                   Duration: {calcDuration(new Date(`${form.date}T${form.startTime}`).toISOString(), new Date(`${form.date}T${form.endTime}`).toISOString())}
                 </p>
@@ -933,108 +943,132 @@ function ScheduleModal({
               </div>
             </section>
 
-            {/* Repeat — creation only. Editing one occurrence must not silently
-                reshape the whole series. */}
+            {/* Add Multiple Schedules — creation only. Editing one class must not
+                silently reshape the whole set. */}
             {!scheduleId && (
               <section style={sectionStyle}>
-                <div className="flex flex-wrap items-center justify-between gap-3" style={{ marginBottom: form.repeat ? 14 : 0 }}>
-                  <h3 style={{ ...sectionHeadStyle, margin: 0 }}>Repeat</h3>
+                <div className="flex flex-wrap items-center justify-between gap-3" style={{ marginBottom: form.multi ? 16 : 0 }}>
+                  <h3 style={{ ...sectionHeadStyle, margin: 0 }}>Add Multiple Schedules</h3>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={form.repeat}
-                      onChange={(e) => setForm({
-                        ...form,
-                        repeat: e.target.checked,
-                        // Seed the weekday chips from the chosen date so weekly
-                        // repeats are correct without extra clicks.
-                        weekdays: e.target.checked && form.date ? [new Date(`${form.date}T00:00:00`).getDay()] : form.weekdays,
-                      })}
+                      checked={form.multi}
+                      onChange={(e) => setForm({ ...form, multi: e.target.checked })}
                       style={{ width: 16, height: 16, accentColor: D.nav2 }}
                     />
-                    <span style={{ fontSize: 14, color: D.muted }}>Repeat this class on a schedule</span>
+                    <span style={{ fontSize: 14, color: D.muted }}>Schedule across a date range</span>
                   </label>
                 </div>
 
-                {form.repeat && (
+                {form.multi && (
                   <>
-                    {!form.date && (
-                      <p style={{ fontSize: 13, color: "#b45309", margin: "0 0 12px" }}>
-                        Pick a date above — the series starts from it.
+                    <DField label="End Date" required>
+                      <DInput
+                        type="date"
+                        min={form.date || undefined}
+                        max="2099-12-31"
+                        value={form.endDate}
+                        onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+                      />
+                      <p style={{ fontSize: 12, color: D.muted, margin: "6px 0 0" }}>
+                        Classes run from the date above through to this one.
                       </p>
-                    )}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-[14px]">
-                      <DField label="Frequency">
-                        <DSelect
-                          value={form.frequency}
-                          onChange={(e) => {
-                            const frequency = e.target.value as Frequency;
-                            setForm({
-                              ...form,
-                              frequency,
-                              weekdays: frequency === "CUSTOM" && form.weekdays.length === 0 && form.date
-                                ? [new Date(`${form.date}T00:00:00`).getDay()]
-                                : form.weekdays,
-                            });
-                          }}
-                        >
-                          {FREQUENCIES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
-                        </DSelect>
-                      </DField>
-                      <DField label="Repeat until" required>
-                        <DInput
-                          type="date"
-                          min={form.date || undefined}
-                          max="2099-12-31"
-                          value={form.until}
-                          onChange={(e) => setForm({ ...form, until: e.target.value })}
-                        />
-                      </DField>
-                    </div>
+                    </DField>
 
-                    {(form.frequency === "WEEKLY" || form.frequency === "FORTNIGHTLY" || form.frequency === "CUSTOM") && (
-                      <div style={{ marginTop: 14 }}>
-                        <DField label={form.frequency === "CUSTOM" ? "On these days" : "On these days (optional)"}>
-                          <div className="flex flex-wrap gap-2">
-                            {WEEKDAYS.map((d) => {
-                              const on = form.weekdays.includes(d.v);
-                              return (
-                                <button
-                                  key={d.v}
-                                  type="button"
-                                  title={d.full}
-                                  aria-label={d.full}
-                                  aria-pressed={on}
-                                  onClick={() => setForm({
-                                    ...form,
-                                    weekdays: on ? form.weekdays.filter((w) => w !== d.v) : [...form.weekdays, d.v],
-                                  })}
-                                  style={{
-                                    width: 42, height: 42, borderRadius: 12, cursor: "pointer",
-                                    border: `1.5px solid ${on ? D.nav2 : "#e6e8ef"}`,
-                                    background: on ? "#ede9fe" : "white",
-                                    color: on ? "#3730a3" : "#7c8598",
-                                    fontWeight: on ? 800 : 500, fontSize: 14, transition: "all .15s",
-                                  }}
-                                >
-                                  {d.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                          {form.frequency !== "CUSTOM" && form.weekdays.length === 0 && (
-                            <p style={{ fontSize: 12, color: D.muted, margin: "6px 0 0" }}>
-                              None selected — repeats on the same weekday as the start date.
-                            </p>
+                    <label className="flex items-center gap-2 cursor-pointer" style={{ margin: "16px 0 12px" }}>
+                      <input
+                        type="checkbox"
+                        checked={form.sameTime}
+                        onChange={(e) => setForm({ ...form, sameTime: e.target.checked })}
+                        style={{ width: 16, height: 16, accentColor: D.nav2 }}
+                      />
+                      <span style={{ fontSize: 14, color: D.ink, fontWeight: 600 }}>Same time for every day</span>
+                    </label>
+
+                    {form.sameTime && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-[14px]" style={{ marginBottom: 16 }}>
+                        <DField label="Start Time" required>
+                          <DInput type="time" value={form.commonStart}
+                            onChange={(e) => setForm({ ...form, commonStart: e.target.value })} />
+                        </DField>
+                        <DField label="End Time" required>
+                          <DInput type="time" error={form.commonEnd <= form.commonStart} value={form.commonEnd}
+                            onChange={(e) => setForm({ ...form, commonEnd: e.target.value })} />
+                          {form.commonEnd <= form.commonStart && (
+                            <p style={{ fontSize: 12, color: "#ef4444", margin: "4px 0 0" }}>End time must be after start time</p>
                           )}
                         </DField>
                       </div>
                     )}
 
+                    <DField label="Days" required>
+                      <div style={{ display: "grid", gap: 8 }}>
+                        {WEEKDAY_LABELS.map((label, i) => {
+                          const row = form.days[i];
+                          const bad = row.on && !form.sameTime && row.endTime <= row.startTime;
+                          const setRow = (patch: Partial<DayRow>) => {
+                            const days = form.days.map((d, j) => (j === i ? { ...d, ...patch } : d));
+                            setForm({ ...form, days });
+                          };
+                          return (
+                            <div
+                              key={label}
+                              className="flex flex-wrap items-center gap-x-3 gap-y-2"
+                              style={{
+                                padding: "10px 12px", borderRadius: 12,
+                                border: `1px solid ${row.on ? "#ddd6fe" : D.line}`,
+                                background: row.on ? "#f5f3ff" : "white",
+                                transition: "background .15s, border-color .15s",
+                              }}
+                            >
+                              <label className="flex items-center gap-2 cursor-pointer" style={{ minWidth: 132 }}>
+                                <input
+                                  type="checkbox"
+                                  checked={row.on}
+                                  onChange={(e) => setRow({ on: e.target.checked })}
+                                  style={{ width: 16, height: 16, accentColor: D.nav2 }}
+                                />
+                                <span style={{ fontSize: 14, fontWeight: row.on ? 700 : 500, color: row.on ? D.ink : D.muted }}>
+                                  {label}
+                                </span>
+                              </label>
+
+                              {!form.sameTime && (
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <DInput
+                                    type="time" value={row.startTime} disabled={!row.on}
+                                    onChange={(e) => setRow({ startTime: e.target.value })}
+                                    style={{ width: 132, opacity: row.on ? 1 : 0.5 }}
+                                  />
+                                  <span style={{ color: D.muted, fontSize: 13 }}>to</span>
+                                  <DInput
+                                    type="time" value={row.endTime} disabled={!row.on} error={bad}
+                                    onChange={(e) => setRow({ endTime: e.target.value })}
+                                    style={{ width: 132, opacity: row.on ? 1 : 0.5 }}
+                                  />
+                                </div>
+                              )}
+                              {form.sameTime && row.on && (
+                                <span style={{ fontSize: 13, color: D.muted }}>
+                                  {form.commonStart} – {form.commonEnd}
+                                </span>
+                              )}
+                              {bad && (
+                                <span style={{ fontSize: 12, color: "#ef4444" }}>End must be after start</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {selectedDays === 0 && (
+                        <p style={{ fontSize: 12, color: "#b45309", margin: "8px 0 0" }}>Tick at least one day.</p>
+                      )}
+                    </DField>
+
                     {/* Preview comes from the server, so it matches what saving creates. */}
                     {previewReady && (
-                      <div style={{ marginTop: 14, padding: 14, borderRadius: 12, background: "white", border: `1px solid ${D.line}` }}>
-                        {previewLoading && <p style={{ fontSize: 13, color: D.muted, margin: 0 }}>Working out the dates…</p>}
+                      <div style={{ marginTop: 16, padding: 14, borderRadius: 12, background: "white", border: `1px solid ${D.line}` }}>
+                        {previewLoading && <p style={{ fontSize: 13, color: D.muted, margin: 0 }}>Working out the classes…</p>}
                         {previewError && <p style={{ fontSize: 13, color: "#ef4444", margin: 0 }}>{previewError}</p>}
                         {preview && (
                           <>
@@ -1042,8 +1076,9 @@ function ScheduleModal({
                               Creates {preview.count} {preview.count === 1 ? "class" : "classes"}
                             </p>
                             <p style={{ fontSize: 13, color: D.muted, margin: 0, lineHeight: 1.6 }}>
-                              {preview.dates.slice(0, 8).map(fmtShortDate).join(" · ")}
-                              {preview.dates.length > 8 && ` … and ${preview.dates.length - 8} more, to ${fmtShortDate(preview.dates[preview.dates.length - 1])}`}
+                              {preview.occurrences.slice(0, 6).map((o: any) => `${fmtShortDate(o.date)} ${o.startTime}`).join(" · ")}
+                              {preview.occurrences.length > 6 &&
+                                ` … and ${preview.occurrences.length - 6} more, to ${fmtShortDate(preview.occurrences[preview.occurrences.length - 1].date)}`}
                             </p>
                             {preview.capped && (
                               <p style={{ fontSize: 12, color: "#b45309", margin: "8px 0 0" }}>
@@ -1053,10 +1088,10 @@ function ScheduleModal({
                             {preview.conflicts?.length > 0 && (
                               <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: "#fef2f2", border: "1px solid #fecaca" }}>
                                 <p style={{ fontSize: 13, fontWeight: 700, color: "#b91c1c", margin: "0 0 4px" }}>
-                                  {preview.conflicts.length} {preview.conflicts.length === 1 ? "date clashes" : "dates clash"} with this faculty&apos;s other classes
+                                  {preview.conflicts.length} {preview.conflicts.length === 1 ? "class clashes" : "classes clash"} with this faculty&apos;s other lectures
                                 </p>
                                 <p style={{ fontSize: 12, color: "#ef4444", margin: "0 0 8px", lineHeight: 1.6 }}>
-                                  {preview.conflicts.slice(0, 5).map((c: any) => `${fmtShortDate(c.date)} (${c.batches})`).join(" · ")}
+                                  {preview.conflicts.slice(0, 5).map((c: any) => `${fmtShortDate(c.date)} ${c.startTime} (${c.batches})`).join(" · ")}
                                   {preview.conflicts.length > 5 && ` … +${preview.conflicts.length - 5} more`}
                                 </p>
                                 <label className="flex items-center gap-2 cursor-pointer">
@@ -1066,7 +1101,7 @@ function ScheduleModal({
                                     onChange={(e) => setForm({ ...form, skipConflicts: e.target.checked })}
                                     style={{ width: 15, height: 15, accentColor: "#b91c1c" }}
                                   />
-                                  <span style={{ fontSize: 12, color: "#b91c1c" }}>Skip those dates</span>
+                                  <span style={{ fontSize: 12, color: "#b91c1c" }}>Skip those</span>
                                 </label>
                               </div>
                             )}
@@ -1098,7 +1133,7 @@ function ScheduleModal({
           <div className="flex flex-wrap items-center gap-3">
             {!scheduleId && (
               <DBtn
-                onClick={form.repeat ? handleSaveSeriesAnother : handleSaveAnother}
+                onClick={handleSaveAnother}
                 disabled={busy || endTimeError}
               >
                 Save &amp; Add Another
@@ -1108,8 +1143,8 @@ function ScheduleModal({
               {busy && <Loader2 className="h-4 w-4 animate-spin" />}
               {scheduleId
                 ? "Save Changes"
-                : form.repeat
-                  ? (preview ? `Create ${preview.count} ${preview.count === 1 ? "class" : "classes"}` : "Create series")
+                : form.multi
+                  ? (preview ? `Create ${preview.count} ${preview.count === 1 ? "class" : "classes"}` : "Create schedules")
                   : "Save"}
             </DBtn>
           </div>
