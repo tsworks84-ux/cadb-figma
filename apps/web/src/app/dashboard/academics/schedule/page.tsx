@@ -606,7 +606,7 @@ type ScheduleForm = {
   academicYear: string; batchIds: string[]; subjectId: string; employeeId: string;
   locationId: string; mode: "ONLINE" | "OFFLINE"; date: string; startTime: string; endTime: string; topics: string; notes: string;
   // "Add multiple schedules" — a date range plus per-weekday times.
-  multi: boolean; endDate: string; sameTime: boolean;
+  endDate: string; sameTime: boolean;
   commonStart: string; commonEnd: string;
   days: DayRow[]; // indexed 0 = Sunday … 6 = Saturday
   skipConflicts: boolean;
@@ -615,8 +615,53 @@ type ScheduleForm = {
 // Sunday-first, matching the attached form.
 const WEEKDAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+// Quarter-hour options, rendered "5:00 AM" as in the reference form.
+const TIME_OPTIONS: { value: string; label: string }[] = Array.from({ length: 96 }, (_, i) => {
+  const h = Math.floor(i / 4), m = (i % 4) * 15;
+  const ampm = h < 12 ? "AM" : "PM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return {
+    value: `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`,
+    label: `${h12}:${String(m).padStart(2, "0")} ${ampm}`,
+  };
+});
+
+const DEFAULT_TIME = "05:00";
+
 const blankDays = (): DayRow[] =>
-  WEEKDAY_LABELS.map(() => ({ on: false, startTime: "09:00", endTime: "10:00" }));
+  WEEKDAY_LABELS.map(() => ({ on: false, startTime: DEFAULT_TIME, endTime: DEFAULT_TIME }));
+
+/** Left-label row, matching the reference form's layout. Stacks on mobile. */
+function MRow({ label, required, children, align = "center" }: {
+  label: string; required?: boolean; children: React.ReactNode; align?: "center" | "start";
+}) {
+  return (
+    <div className="flex flex-col sm:flex-row sm:gap-4" style={{ marginBottom: 14 }}>
+      <div
+        className="sm:w-[110px] sm:text-right shrink-0"
+        style={{
+          fontSize: 14, fontWeight: 700, color: D.ink,
+          paddingTop: align === "start" ? 10 : 10,
+          marginBottom: 6,
+        }}
+      >
+        {label}{required && <span style={{ color: "#ef4444" }}>*</span>}
+      </div>
+      <div className="flex-1 min-w-0">{children}</div>
+    </div>
+  );
+}
+
+const TimeSelect = ({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled?: boolean }) => (
+  <DSelect
+    value={value}
+    disabled={disabled}
+    onChange={(e) => onChange(e.target.value)}
+    style={{ width: "100%", maxWidth: 190, opacity: disabled ? 0.5 : 1 }}
+  >
+    {TIME_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+  </DSelect>
+);
 
 const fmtShortDate = (d: string) =>
   new Date(`${d}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
@@ -676,7 +721,7 @@ function ScheduleModal({
   const emptyForm = (): ScheduleForm => ({
     academicYear: defaultYear, batchIds: [], subjectId: "", employeeId: "",
     locationId: "", mode: "OFFLINE", date: "", startTime: "", endTime: "", topics: "", notes: "",
-    multi: false, endDate: "", sameTime: true, commonStart: "09:00", commonEnd: "10:00",
+    endDate: "", sameTime: true, commonStart: DEFAULT_TIME, commonEnd: DEFAULT_TIME,
     days: blankDays(), skipConflicts: false,
   });
   const [form, setForm] = useState<ScheduleForm>(initial ?? emptyForm());
@@ -697,7 +742,7 @@ function ScheduleModal({
 
   // In repeat mode the series preview reports clashes across every occurrence,
   // so the single-date banner would just duplicate it.
-  const conflictEnabled = Boolean(form.employeeId && form.date && form.startTime && form.endTime && !endTimeError && !form.multi);
+  const conflictEnabled = Boolean(form.employeeId && form.date && form.startTime && form.endTime && !endTimeError && Boolean(scheduleId));
   const { data: conflictData } = useQuery({
     queryKey: ["faculty-conflicts", form.employeeId, form.date],
     queryFn: () =>
@@ -724,14 +769,6 @@ function ScheduleModal({
     }
   }
 
-  const createMut = useMutation({
-    mutationFn: (d: any) => api.post("/api/v1/academics/schedules", d).then((r) => r.data),
-    onSuccess: (res) => {
-      if (!res.success) { toast.error(res.error); return; }
-      qc.invalidateQueries({ queryKey: ["schedules"] });
-      toast.success("Schedule created");
-    },
-  });
   const updateMut = useMutation({
     mutationFn: (d: any) => api.patch(`/api/v1/academics/schedules/${scheduleId}`, d).then((r) => r.data),
     onSuccess: (res) => {
@@ -753,7 +790,7 @@ function ScheduleModal({
       toast.success(msg);
     },
   });
-  const busy = createMut.isPending || updateMut.isPending || recurringMut.isPending;
+  const busy = updateMut.isPending || recurringMut.isPending;
 
   // The preview is computed by the same server code that creates the classes,
   // so what is listed here is exactly what saving produces.
@@ -762,7 +799,7 @@ function ScheduleModal({
     ? form.commonEnd > form.commonStart
     : form.days.every((d) => !d.on || d.endTime > d.startTime);
   const previewReady = Boolean(
-    !scheduleId && form.multi && form.academicYear && form.batchIds.length &&
+    !scheduleId && form.academicYear && form.batchIds.length &&
     form.date && form.endDate && selectedDays > 0 && multiTimesValid
   );
   const previewBody = previewReady ? buildMultiPayload(form) : null;
@@ -780,7 +817,9 @@ function ScheduleModal({
     if (!form.academicYear) { toast.error("Academic year is required"); return null; }
     if (form.batchIds.length === 0) { toast.error("Select at least one batch"); return null; }
 
-    if (form.multi) {
+    // Creating always goes through the multiple-schedules grid; only editing
+    // works on a single date and time.
+    if (!scheduleId) {
       if (!form.date || !form.endDate) { toast.error("Start and end date are required"); return null; }
       if (new Date(form.endDate) < new Date(form.date)) { toast.error("End date must be on or after the start date"); return null; }
       if (selectedDays === 0) { toast.error("Tick at least one day"); return null; }
@@ -797,13 +836,11 @@ function ScheduleModal({
   const handleSave = () => {
     const p = buildPayload(); if (!p) return;
     if (scheduleId) updateMut.mutate(p);
-    else if (form.multi) recurringMut.mutate(p, { onSuccess: (res) => { if (res.success) onClose(); } });
-    else createMut.mutate(p, { onSuccess: (res) => { if (res.success) onClose(); } });
+    else recurringMut.mutate(p, { onSuccess: (res) => { if (res.success) onClose(); } });
   };
   const handleSaveAnother = () => {
     const p = buildPayload(); if (!p) return;
-    const mut = form.multi ? recurringMut : createMut;
-    mut.mutate(p, {
+    recurringMut.mutate(p, {
       onSuccess: (res) => {
         if (res.success) setForm({ ...emptyForm(), academicYear: form.academicYear, date: form.date });
       },
@@ -880,49 +917,10 @@ function ScheduleModal({
                   </DSelect>
                 </DField>
               </div>
-              {conflictWarnings.length > 0 && (
-                <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50" style={{ padding: "10px 14px", marginTop: 14 }}>
-                  <AlertTriangle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
-                  <div>
-                    <p style={{ fontSize: 13, fontWeight: 700, color: "#b91c1c", margin: "0 0 2px" }}>Faculty conflict detected</p>
-                    <p style={{ fontSize: 12, color: "#ef4444", margin: 0 }}>
-                      {employees.find((e) => e.id === form.employeeId)
-                        ? `${employees.find((e) => e.id === form.employeeId)!.firstName} ${employees.find((e) => e.id === form.employeeId)!.lastName}`
-                        : "This faculty"}{" "}
-                      already has a class at this time with: {conflictWarnings.join("; ")}
-                    </p>
-                  </div>
-                </div>
-              )}
-            </section>
-
-            <section style={sectionStyle}>
-              <h3 style={sectionHeadStyle}>Timing &amp; Location</h3>
-              <div className={`grid grid-cols-1 gap-[14px] ${form.multi ? "" : "sm:grid-cols-3"}`}>
-                <DField label={form.multi ? "Start Date" : "Date"} required>
-                  <DInput type="date" max="2099-12-31" min="1900-01-01" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-                </DField>
-                {/* In multi mode the per-day rows below carry the times. */}
-                {!form.multi && (
-                  <>
-                    <DField label="Start Time" required>
-                      <DInput type="time" value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} />
-                    </DField>
-                    <DField label="End Time" required>
-                      <DInput type="time" error={endTimeError} value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} />
-                      {endTimeError && <p style={{ fontSize: 12, color: "#ef4444", margin: 0 }}>End time must be after start time</p>}
-                    </DField>
-                  </>
-                )}
-              </div>
-              {!form.multi && form.startTime && form.endTime && form.date && !endTimeError && (
-                <p style={{ fontSize: 13, color: D.muted, margin: "8px 0 0" }}>
-                  Duration: {calcDuration(new Date(`${form.date}T${form.startTime}`).toISOString(), new Date(`${form.date}T${form.endTime}`).toISOString())}
-                </p>
-              )}
+              {/* Mode kept here after the Timing & Location section was removed. */}
               <div style={{ marginTop: 14 }}>
                 <DField label="Mode">
-                  <div style={{ display: "flex", gap: 8 }}>
+                  <div style={{ display: "flex", gap: 8, maxWidth: 420 }}>
                     {(["OFFLINE", "ONLINE"] as const).map((m) => (
                       <button
                         key={m}
@@ -941,175 +939,174 @@ function ScheduleModal({
                   </div>
                 </DField>
               </div>
+              {conflictWarnings.length > 0 && (
+                <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50" style={{ padding: "10px 14px", marginTop: 14 }}>
+                  <AlertTriangle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
+                  <div>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: "#b91c1c", margin: "0 0 2px" }}>Faculty conflict detected</p>
+                    <p style={{ fontSize: 12, color: "#ef4444", margin: 0 }}>
+                      {employees.find((e) => e.id === form.employeeId)
+                        ? `${employees.find((e) => e.id === form.employeeId)!.firstName} ${employees.find((e) => e.id === form.employeeId)!.lastName}`
+                        : "This faculty"}{" "}
+                      already has a class at this time with: {conflictWarnings.join("; ")}
+                    </p>
+                  </div>
+                </div>
+              )}
             </section>
 
-            {/* Add Multiple Schedules — creation only. Editing one class must not
-                silently reshape the whole set. */}
+            {/* Editing one class keeps a single date and time — the grid below is
+                only for creating a set. */}
+            {scheduleId && (
+              <section style={sectionStyle}>
+                <h3 style={sectionHeadStyle}>Timing</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-[14px]">
+                  <DField label="Date" required>
+                    <DInput type="date" max="2099-12-31" min="1900-01-01" value={form.date}
+                      onChange={(e) => setForm({ ...form, date: e.target.value })} />
+                  </DField>
+                  <DField label="Start Time" required>
+                    <DInput type="time" value={form.startTime}
+                      onChange={(e) => setForm({ ...form, startTime: e.target.value })} />
+                  </DField>
+                  <DField label="End Time" required>
+                    <DInput type="time" error={endTimeError} value={form.endTime}
+                      onChange={(e) => setForm({ ...form, endTime: e.target.value })} />
+                    {endTimeError && <p style={{ fontSize: 12, color: "#ef4444", margin: 0 }}>End time must be after start time</p>}
+                  </DField>
+                </div>
+              </section>
+            )}
+
+            {/* Add Multiple Schedules — the only way to create. */}
             {!scheduleId && (
               <section style={sectionStyle}>
-                <div className="flex flex-wrap items-center justify-between gap-3" style={{ marginBottom: form.multi ? 16 : 0 }}>
-                  <h3 style={{ ...sectionHeadStyle, margin: 0 }}>Add Multiple Schedules</h3>
-                  <label className="flex items-center gap-2 cursor-pointer">
+                <h3 style={sectionHeadStyle}>Add Multiple Schedules</h3>
+
+                <MRow label="Date" required>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <DInput
+                      type="date" placeholder="Start Date" max="2099-12-31" min="1900-01-01"
+                      value={form.date}
+                      onChange={(e) => setForm({ ...form, date: e.target.value })}
+                      style={{ flex: 1, minWidth: 0 }}
+                    />
+                    <DInput
+                      type="date" placeholder="End Date" max="2099-12-31" min={form.date || undefined}
+                      value={form.endDate}
+                      onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+                      style={{ flex: 1, minWidth: 0 }}
+                    />
+                  </div>
+                </MRow>
+
+                <MRow label="Apply">
+                  <label className="flex items-center gap-2 cursor-pointer" style={{ minHeight: 42 }}>
                     <input
                       type="checkbox"
-                      checked={form.multi}
-                      onChange={(e) => setForm({ ...form, multi: e.target.checked })}
+                      checked={form.sameTime}
+                      onChange={(e) => setForm({ ...form, sameTime: e.target.checked })}
                       style={{ width: 16, height: 16, accentColor: D.nav2 }}
                     />
-                    <span style={{ fontSize: 14, color: D.muted }}>Schedule across a date range</span>
+                    <span style={{ fontSize: 14, color: D.ink }}>Same Time to Schedules</span>
                   </label>
-                </div>
+                </MRow>
 
-                {form.multi && (
-                  <>
-                    <DField label="End Date" required>
-                      <DInput
-                        type="date"
-                        min={form.date || undefined}
-                        max="2099-12-31"
-                        value={form.endDate}
-                        onChange={(e) => setForm({ ...form, endDate: e.target.value })}
-                      />
-                      <p style={{ fontSize: 12, color: D.muted, margin: "6px 0 0" }}>
-                        Classes run from the date above through to this one.
-                      </p>
-                    </DField>
-
-                    <label className="flex items-center gap-2 cursor-pointer" style={{ margin: "16px 0 12px" }}>
-                      <input
-                        type="checkbox"
-                        checked={form.sameTime}
-                        onChange={(e) => setForm({ ...form, sameTime: e.target.checked })}
-                        style={{ width: 16, height: 16, accentColor: D.nav2 }}
-                      />
-                      <span style={{ fontSize: 14, color: D.ink, fontWeight: 600 }}>Same time for every day</span>
-                    </label>
-
-                    {form.sameTime && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-[14px]" style={{ marginBottom: 16 }}>
-                        <DField label="Start Time" required>
-                          <DInput type="time" value={form.commonStart}
-                            onChange={(e) => setForm({ ...form, commonStart: e.target.value })} />
-                        </DField>
-                        <DField label="End Time" required>
-                          <DInput type="time" error={form.commonEnd <= form.commonStart} value={form.commonEnd}
-                            onChange={(e) => setForm({ ...form, commonEnd: e.target.value })} />
-                          {form.commonEnd <= form.commonStart && (
-                            <p style={{ fontSize: 12, color: "#ef4444", margin: "4px 0 0" }}>End time must be after start time</p>
-                          )}
-                        </DField>
-                      </div>
+                {form.sameTime && (
+                  <MRow label="Time" required>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <TimeSelect value={form.commonStart} onChange={(v) => setForm({ ...form, commonStart: v })} />
+                      <TimeSelect value={form.commonEnd} onChange={(v) => setForm({ ...form, commonEnd: v })} />
+                    </div>
+                    {/* Both default to 5:00 AM as in the reference form, so hold the
+                        error back until a day is actually ticked. */}
+                    {selectedDays > 0 && form.commonEnd <= form.commonStart && (
+                      <p style={{ fontSize: 12, color: "#ef4444", margin: "6px 0 0" }}>End time must be after start time</p>
                     )}
+                  </MRow>
+                )}
 
-                    <DField label="Days" required>
-                      <div style={{ display: "grid", gap: 8 }}>
-                        {WEEKDAY_LABELS.map((label, i) => {
-                          const row = form.days[i];
-                          const bad = row.on && !form.sameTime && row.endTime <= row.startTime;
-                          const setRow = (patch: Partial<DayRow>) => {
-                            const days = form.days.map((d, j) => (j === i ? { ...d, ...patch } : d));
-                            setForm({ ...form, days });
-                          };
-                          return (
-                            <div
-                              key={label}
-                              className="flex flex-wrap items-center gap-x-3 gap-y-2"
-                              style={{
-                                padding: "10px 12px", borderRadius: 12,
-                                border: `1px solid ${row.on ? "#ddd6fe" : D.line}`,
-                                background: row.on ? "#f5f3ff" : "white",
-                                transition: "background .15s, border-color .15s",
-                              }}
-                            >
-                              <label className="flex items-center gap-2 cursor-pointer" style={{ minWidth: 132 }}>
+                <MRow label="Schedules" required align="start">
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {WEEKDAY_LABELS.map((label, i) => {
+                      const row = form.days[i];
+                      const bad = row.on && !form.sameTime && row.endTime <= row.startTime;
+                      const setRow = (patch: Partial<DayRow>) =>
+                        setForm({ ...form, days: form.days.map((d, j) => (j === i ? { ...d, ...patch } : d)) });
+                      return (
+                        <div key={label} className="flex flex-col sm:flex-row sm:items-center gap-2">
+                          <label className="flex items-center gap-2 cursor-pointer shrink-0" style={{ width: 140 }}>
+                            <input
+                              type="checkbox"
+                              checked={row.on}
+                              onChange={(e) => setRow({ on: e.target.checked })}
+                              style={{ width: 16, height: 16, accentColor: D.nav2 }}
+                            />
+                            <span style={{ fontSize: 14, color: row.on ? D.ink : D.muted, fontWeight: row.on ? 600 : 400 }}>
+                              {label}
+                            </span>
+                          </label>
+                          {!form.sameTime && (
+                            <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
+                              <TimeSelect value={row.startTime} disabled={!row.on} onChange={(v) => setRow({ startTime: v })} />
+                              <TimeSelect value={row.endTime} disabled={!row.on} onChange={(v) => setRow({ endTime: v })} />
+                            </div>
+                          )}
+                          {bad && <span style={{ fontSize: 12, color: "#ef4444" }}>End must be after start</span>}
+                        </div>
+                      );
+                    })}
+                    {selectedDays === 0 && (
+                      <p style={{ fontSize: 12, color: "#b45309", margin: 0 }}>Tick at least one day.</p>
+                    )}
+                  </div>
+                </MRow>
+
+                {/* Preview comes from the server, so it matches what saving creates. */}
+                {previewReady && (
+                  <MRow label="Preview" align="start">
+                    <div style={{ padding: 14, borderRadius: 12, background: "white", border: `1px solid ${D.line}` }}>
+                      {previewLoading && <p style={{ fontSize: 13, color: D.muted, margin: 0 }}>Working out the classes…</p>}
+                      {previewError && <p style={{ fontSize: 13, color: "#ef4444", margin: 0 }}>{previewError}</p>}
+                      {preview && (
+                        <>
+                          <p style={{ fontSize: 14, fontWeight: 700, color: D.ink, margin: "0 0 6px" }}>
+                            Creates {preview.count} {preview.count === 1 ? "class" : "classes"}
+                          </p>
+                          <p style={{ fontSize: 13, color: D.muted, margin: 0, lineHeight: 1.6 }}>
+                            {preview.occurrences.slice(0, 6).map((o: any) => `${fmtShortDate(o.date)} ${o.startTime}`).join(" · ")}
+                            {preview.occurrences.length > 6 &&
+                              ` … and ${preview.occurrences.length - 6} more, to ${fmtShortDate(preview.occurrences[preview.occurrences.length - 1].date)}`}
+                          </p>
+                          {preview.capped && (
+                            <p style={{ fontSize: 12, color: "#b45309", margin: "8px 0 0" }}>
+                              Stops at the 200-class limit. Shorten the date range to cover the rest.
+                            </p>
+                          )}
+                          {preview.conflicts?.length > 0 && (
+                            <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: "#fef2f2", border: "1px solid #fecaca" }}>
+                              <p style={{ fontSize: 13, fontWeight: 700, color: "#b91c1c", margin: "0 0 4px" }}>
+                                {preview.conflicts.length} {preview.conflicts.length === 1 ? "class clashes" : "classes clash"} with this faculty&apos;s other lectures
+                              </p>
+                              <p style={{ fontSize: 12, color: "#ef4444", margin: "0 0 8px", lineHeight: 1.6 }}>
+                                {preview.conflicts.slice(0, 5).map((c: any) => `${fmtShortDate(c.date)} ${c.startTime} (${c.batches})`).join(" · ")}
+                                {preview.conflicts.length > 5 && ` … +${preview.conflicts.length - 5} more`}
+                              </p>
+                              <label className="flex items-center gap-2 cursor-pointer">
                                 <input
                                   type="checkbox"
-                                  checked={row.on}
-                                  onChange={(e) => setRow({ on: e.target.checked })}
-                                  style={{ width: 16, height: 16, accentColor: D.nav2 }}
+                                  checked={form.skipConflicts}
+                                  onChange={(e) => setForm({ ...form, skipConflicts: e.target.checked })}
+                                  style={{ width: 15, height: 15, accentColor: "#b91c1c" }}
                                 />
-                                <span style={{ fontSize: 14, fontWeight: row.on ? 700 : 500, color: row.on ? D.ink : D.muted }}>
-                                  {label}
-                                </span>
+                                <span style={{ fontSize: 12, color: "#b91c1c" }}>Skip those</span>
                               </label>
-
-                              {!form.sameTime && (
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <DInput
-                                    type="time" value={row.startTime} disabled={!row.on}
-                                    onChange={(e) => setRow({ startTime: e.target.value })}
-                                    style={{ width: 132, opacity: row.on ? 1 : 0.5 }}
-                                  />
-                                  <span style={{ color: D.muted, fontSize: 13 }}>to</span>
-                                  <DInput
-                                    type="time" value={row.endTime} disabled={!row.on} error={bad}
-                                    onChange={(e) => setRow({ endTime: e.target.value })}
-                                    style={{ width: 132, opacity: row.on ? 1 : 0.5 }}
-                                  />
-                                </div>
-                              )}
-                              {form.sameTime && row.on && (
-                                <span style={{ fontSize: 13, color: D.muted }}>
-                                  {form.commonStart} – {form.commonEnd}
-                                </span>
-                              )}
-                              {bad && (
-                                <span style={{ fontSize: 12, color: "#ef4444" }}>End must be after start</span>
-                              )}
                             </div>
-                          );
-                        })}
-                      </div>
-                      {selectedDays === 0 && (
-                        <p style={{ fontSize: 12, color: "#b45309", margin: "8px 0 0" }}>Tick at least one day.</p>
+                          )}
+                        </>
                       )}
-                    </DField>
-
-                    {/* Preview comes from the server, so it matches what saving creates. */}
-                    {previewReady && (
-                      <div style={{ marginTop: 16, padding: 14, borderRadius: 12, background: "white", border: `1px solid ${D.line}` }}>
-                        {previewLoading && <p style={{ fontSize: 13, color: D.muted, margin: 0 }}>Working out the classes…</p>}
-                        {previewError && <p style={{ fontSize: 13, color: "#ef4444", margin: 0 }}>{previewError}</p>}
-                        {preview && (
-                          <>
-                            <p style={{ fontSize: 14, fontWeight: 700, color: D.ink, margin: "0 0 6px" }}>
-                              Creates {preview.count} {preview.count === 1 ? "class" : "classes"}
-                            </p>
-                            <p style={{ fontSize: 13, color: D.muted, margin: 0, lineHeight: 1.6 }}>
-                              {preview.occurrences.slice(0, 6).map((o: any) => `${fmtShortDate(o.date)} ${o.startTime}`).join(" · ")}
-                              {preview.occurrences.length > 6 &&
-                                ` … and ${preview.occurrences.length - 6} more, to ${fmtShortDate(preview.occurrences[preview.occurrences.length - 1].date)}`}
-                            </p>
-                            {preview.capped && (
-                              <p style={{ fontSize: 12, color: "#b45309", margin: "8px 0 0" }}>
-                                Stops at the 200-class limit. Shorten the date range to cover the rest.
-                              </p>
-                            )}
-                            {preview.conflicts?.length > 0 && (
-                              <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: "#fef2f2", border: "1px solid #fecaca" }}>
-                                <p style={{ fontSize: 13, fontWeight: 700, color: "#b91c1c", margin: "0 0 4px" }}>
-                                  {preview.conflicts.length} {preview.conflicts.length === 1 ? "class clashes" : "classes clash"} with this faculty&apos;s other lectures
-                                </p>
-                                <p style={{ fontSize: 12, color: "#ef4444", margin: "0 0 8px", lineHeight: 1.6 }}>
-                                  {preview.conflicts.slice(0, 5).map((c: any) => `${fmtShortDate(c.date)} ${c.startTime} (${c.batches})`).join(" · ")}
-                                  {preview.conflicts.length > 5 && ` … +${preview.conflicts.length - 5} more`}
-                                </p>
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    checked={form.skipConflicts}
-                                    onChange={(e) => setForm({ ...form, skipConflicts: e.target.checked })}
-                                    style={{ width: 15, height: 15, accentColor: "#b91c1c" }}
-                                  />
-                                  <span style={{ fontSize: 12, color: "#b91c1c" }}>Skip those</span>
-                                </label>
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </>
+                    </div>
+                  </MRow>
                 )}
               </section>
             )}
@@ -1143,9 +1140,7 @@ function ScheduleModal({
               {busy && <Loader2 className="h-4 w-4 animate-spin" />}
               {scheduleId
                 ? "Save Changes"
-                : form.multi
-                  ? (preview ? `Create ${preview.count} ${preview.count === 1 ? "class" : "classes"}` : "Create schedules")
-                  : "Save"}
+                : (preview ? `Create ${preview.count} ${preview.count === 1 ? "class" : "classes"}` : "Create Schedules")}
             </DBtn>
           </div>
         </div>
