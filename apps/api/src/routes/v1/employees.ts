@@ -571,7 +571,7 @@ export async function employeeRoutes(fastify: FastifyInstance) {
     }
 
     if (updateData.panEncrypted !== undefined) {
-      const pan = String(updateData.panEncrypted).toUpperCase();
+      const pan = String(updateData.panEncrypted).trim().toUpperCase();
       if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) {
         return reply.status(400).send({ success: false, error: "Invalid PAN format. Must be like ABCDE1234F", statusCode: 400 });
       }
@@ -579,7 +579,7 @@ export async function employeeRoutes(fastify: FastifyInstance) {
     }
 
     if (updateData.aadhaarEncrypted !== undefined) {
-      const aadhaar = String(updateData.aadhaarEncrypted).replace(/\s/g, "");
+      const aadhaar = String(updateData.aadhaarEncrypted).replace(/\D/g, "");
       if (!/^\d{12}$/.test(aadhaar)) {
         return reply.status(400).send({ success: false, error: "Invalid Aadhaar format. Must be 12 digits", statusCode: 400 });
       }
@@ -587,7 +587,7 @@ export async function employeeRoutes(fastify: FastifyInstance) {
     }
 
     if (updateData.uanNumber !== undefined) {
-      const uan = String(updateData.uanNumber).replace(/\s/g, "");
+      const uan = String(updateData.uanNumber).replace(/\D/g, "");
       if (uan && !/^\d{12}$/.test(uan)) {
         return reply.status(400).send({ success: false, error: "Invalid UAN format. Must be 12 digits", statusCode: 400 });
       }

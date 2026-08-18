@@ -614,18 +614,28 @@ const addrSchema = z.object({
   country: z.string().default("India"),
 });
 
+// Phone numbers already on file may carry spaces, dashes or a country code
+// (bulk import, admin entry). Judge them on their digits, not their raw length,
+// so a legacy value can never block the whole form from saving.
+const digitsOf = (v: string) => v.replace(/\D/g, "");
+const phoneField = z.string()
+  .refine((v) => v === "" || (digitsOf(v).length >= 10 && digitsOf(v).length <= 15), "Enter a valid phone number (10–15 digits)")
+  .optional().or(z.literal(""));
+
 const personalEditSchema = z.object({
   panEncrypted: z.string()
-    .refine((v) => v === "" || /^[A-Za-z]{5}[0-9]{4}[A-Za-z]$/.test(v), "Invalid PAN (e.g. ABCDE1234F)"),
+    .refine((v) => v === "" || /^[A-Za-z]{5}[0-9]{4}[A-Za-z]$/.test(v.trim()), "Invalid PAN (e.g. ABCDE1234F)"),
   aadhaarEncrypted: z.string()
-    .refine((v) => v === "" || /^\d{12}$/.test(v.replace(/\s/g, "")), "Aadhaar must be 12 digits")
+    .refine((v) => v === "" || /^\d{12}$/.test(digitsOf(v)), "Aadhaar must be 12 digits")
     .optional().or(z.literal("")),
   uanNumber: z.string()
-    .refine((v) => v === "" || /^\d{12}$/.test(v), "UAN must be 12 digits")
+    .refine((v) => v === "" || /^\d{12}$/.test(digitsOf(v)), "UAN must be 12 digits")
     .optional().or(z.literal("")),
-  personalPhone: z.string().length(10, "Must be 10 digits").optional().or(z.literal("")),
-  officialPhone: z.string().length(10).optional().or(z.literal("")),
-  personalEmail: z.string().email().optional().or(z.literal("")),
+  personalPhone: phoneField,
+  officialPhone: phoneField,
+  personalEmail: z.string()
+    .refine((v) => v === "" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()), "Enter a valid email address")
+    .optional().or(z.literal("")),
   maritalStatus: z.enum(["SINGLE", "MARRIED", "DIVORCED", "WIDOWED"]).optional().or(z.literal("")),
   bloodGroup: z.enum(["A_POS", "A_NEG", "B_POS", "B_NEG", "AB_POS", "AB_NEG", "O_POS", "O_NEG"]).optional().or(z.literal("")),
   religion: z.string().optional(),
@@ -689,13 +699,17 @@ function EditPersonalForm({
     mutationFn: (data: PersonalEditForm) => {
       const payload: Record<string, any> = { ...data };
       if (!payload.panEncrypted) delete payload.panEncrypted;
-      else payload.panEncrypted = payload.panEncrypted.toUpperCase();
+      else payload.panEncrypted = payload.panEncrypted.trim().toUpperCase();
       if (!payload.aadhaarEncrypted) delete payload.aadhaarEncrypted;
-      else payload.aadhaarEncrypted = payload.aadhaarEncrypted.replace(/\s/g, "");
+      else payload.aadhaarEncrypted = digitsOf(payload.aadhaarEncrypted);
       if (!payload.uanNumber) delete payload.uanNumber;
+      else payload.uanNumber = digitsOf(payload.uanNumber);
       if (!payload.personalPhone) delete payload.personalPhone;
+      else payload.personalPhone = digitsOf(payload.personalPhone);
       if (!payload.officialPhone) delete payload.officialPhone;
+      else payload.officialPhone = digitsOf(payload.officialPhone);
       if (!payload.personalEmail) delete payload.personalEmail;
+      else payload.personalEmail = payload.personalEmail.trim();
       if (!payload.maritalStatus) delete payload.maritalStatus;
       if (!payload.bloodGroup) delete payload.bloodGroup;
       if (!payload.currentAddress?.line1) delete payload.currentAddress;
@@ -785,8 +799,21 @@ function EditPersonalForm({
     );
   }
 
+  // A blocked submit used to do nothing at all — no toast, and some fields had
+  // no inline slot to print their error into. Always say something, and take the
+  // user to the field that is holding the save back.
+  function onInvalid(errs: typeof errors) {
+    const first = Object.keys(errs)[0];
+    if (first) {
+      const el = document.querySelector<HTMLElement>(`[name="${first}"], [name^="${first}."]`);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      el?.focus({ preventScroll: true });
+    }
+    toast.error("Some fields need fixing before this can be saved.");
+  }
+
   return (
-    <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-6">
+    <form onSubmit={handleSubmit((d) => mutation.mutate(d), onInvalid)} className="space-y-6">
 
       {/* Personal Information — mirrors view layout: 3-col, read-only for admin-managed fields */}
       <ESection title="Personal Information" first>
@@ -823,7 +850,7 @@ function EditPersonalForm({
           <FInput
             label={`Aadhaar Number${!emp.aadhaar ? " *" : ""}`}
             placeholder={emp.aadhaar ? `On file: ${emp.aadhaar} — enter to update` : "12-digit Aadhaar"}
-            maxLength={12}
+            maxLength={14}
             {...register("aadhaarEncrypted")}
           />
           <ErrMsg err={errors.aadhaarEncrypted} />
@@ -832,7 +859,7 @@ function EditPersonalForm({
           <FInput
             label="UAN Number"
             placeholder={emp.uanNumber ? `On file: ${emp.uanNumber}` : "12-digit UAN (if PF enrolled)"}
-            maxLength={12}
+            maxLength={14}
             {...register("uanNumber")}
           />
           <ErrMsg err={errors.uanNumber} />
@@ -842,12 +869,18 @@ function EditPersonalForm({
       {/* Contact — mirrors view 2-col layout */}
       <ESection title="Contact" cols={2}>
         <div>
-          <FInput label="Personal Phone" maxLength={10} {...register("personalPhone")} />
+          <FInput label="Personal Phone" maxLength={15} {...register("personalPhone")} />
           <ErrMsg err={errors.personalPhone} />
         </div>
-        <FInput label="Official Phone" maxLength={10} {...register("officialPhone")} />
+        <div>
+          <FInput label="Official Phone" maxLength={15} {...register("officialPhone")} />
+          <ErrMsg err={errors.officialPhone} />
+        </div>
         <ReadField label="Official Email" value={emp.email} />
-        <FInput label="Personal Email" type="email" {...register("personalEmail")} />
+        <div>
+          <FInput label="Personal Email" type="email" {...register("personalEmail")} />
+          <ErrMsg err={errors.personalEmail} />
+        </div>
       </ESection>
 
       {/* Current Address */}
