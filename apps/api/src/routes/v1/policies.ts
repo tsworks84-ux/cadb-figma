@@ -9,6 +9,14 @@ import { uploadFile } from "../../utils/s3.js";
 
 const ALLOWED_CATEGORIES = ["HR", "FINANCE", "IT", "OPERATIONS", "COMPLIANCE", "ACADEMIC", "OTHER"] as const;
 
+// Policy PDFs are far bigger than the 5 MB the multipart plugin allows globally,
+// so this route raises its own ceiling. This must stay <= nginx's
+// client_max_body_size on prod (/etc/nginx/sites-enabled/cadb, raised to 12M
+// for this), since nginx rejects an oversized body with a bodyless HTML 413
+// before the API ever sees it. Keep in step with MAX_POLICY_MB in the
+// upload modal too.
+const MAX_POLICY_BYTES = 10 * 1024 * 1024;
+
 const createPolicySchema = z.object({
   title: z.string().min(1),
   category: z.enum(ALLOWED_CATEGORIES),
@@ -67,9 +75,18 @@ export async function policyRoutes(fastify: FastifyInstance) {
     { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN") },
     async (request, reply) => {
       const fields: Record<string, string> = {};
-      let fileUrl: string | null = null;
+      let pdf: Buffer | null = null;
 
-      const parts = request.parts();
+      // Buffer the PDF rather than piping it straight to storage: the fields
+      // arrive after the file, so nothing should be written until both the file
+      // and the metadata are known to be good.
+      // throwFileSizeLimit is honoured per-request by @fastify/multipart but is
+      // missing from its per-request types, hence the cast. Turning it off lets
+      // us answer with a readable message instead of a raw FST_REQ_FILE_TOO_LARGE.
+      const parts = request.parts({
+        limits: { fileSize: MAX_POLICY_BYTES, files: 1 },
+        throwFileSizeLimit: false,
+      } as any);
       for await (const part of parts) {
         if (part.type === "file") {
           const ext = extname(part.filename || "").toLowerCase();
@@ -79,19 +96,22 @@ export async function policyRoutes(fastify: FastifyInstance) {
               .status(400)
               .send({ success: false, error: "Only PDF files are allowed", statusCode: 400 });
           }
-          const fileName = `policy_${randomUUID()}.pdf`;
-          fileUrl = await uploadFile(
-            part.file,
-            `uploads/policies/${fileName}`,
-            "application/pdf",
-            `policies/${fileName}`
-          );
+          const chunks: Buffer[] = [];
+          for await (const chunk of part.file) chunks.push(chunk as Buffer);
+          if (part.file.truncated) {
+            return reply.status(413).send({
+              success: false,
+              error: `File is too large. The maximum policy size is ${MAX_POLICY_BYTES / 1024 / 1024} MB.`,
+              statusCode: 413,
+            });
+          }
+          pdf = Buffer.concat(chunks);
         } else {
           fields[part.fieldname] = part.value as string;
         }
       }
 
-      if (!fileUrl) {
+      if (!pdf || pdf.length === 0) {
         return reply
           .status(400)
           .send({ success: false, error: "No file uploaded", statusCode: 400 });
@@ -99,12 +119,22 @@ export async function policyRoutes(fastify: FastifyInstance) {
 
       const parsed = uploadFieldSchema.safeParse(fields);
       if (!parsed.success) {
+        const detail = parsed.error.issues
+          .map((i) => `${i.path.join(".") || "field"}: ${i.message}`)
+          .join(", ");
         return reply
           .status(400)
-          .send({ success: false, error: "Validation failed", statusCode: 400 });
+          .send({ success: false, error: `Validation failed — ${detail}`, statusCode: 400 });
       }
 
       const d = parsed.data;
+      const fileName = `policy_${randomUUID()}.pdf`;
+      const fileUrl = await uploadFile(
+        pdf,
+        `uploads/policies/${fileName}`,
+        "application/pdf",
+        `policies/${fileName}`
+      );
       const data = await prisma.policyDocument.create({
         data: {
           title: d.title,

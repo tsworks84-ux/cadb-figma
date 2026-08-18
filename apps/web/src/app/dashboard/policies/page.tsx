@@ -214,16 +214,38 @@ function PdfViewerModal({ policy, onClose }: { policy: Policy; onClose: () => vo
 
 const emptyForm = { title: "", category: "HR" as Category, version: "1.0", description: "", requiresAck: false };
 
+// Must match MAX_POLICY_BYTES on the API, and stay under nginx's
+// client_max_body_size on prod (12M).
+const MAX_POLICY_MB = 10;
+
 function UploadModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [form, setForm] = useState(emptyForm);
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  function handlePick(picked: File | null) {
+    if (!picked) { setFile(null); return; }
+    if (!picked.name.toLowerCase().endsWith(".pdf")) {
+      toast.error("Only PDF files are allowed");
+      return;
+    }
+    if (picked.size > MAX_POLICY_MB * 1024 * 1024) {
+      toast.error(`"${picked.name}" is ${(picked.size / 1024 / 1024).toFixed(1)} MB. The maximum policy size is ${MAX_POLICY_MB} MB.`);
+      return;
+    }
+    setFile(picked);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!file) { toast.error("Please select a PDF file"); return; }
     if (!form.title.trim()) { toast.error("Title is required"); return; }
+
+    if (file.size > MAX_POLICY_MB * 1024 * 1024) {
+      toast.error(`"${file.name}" is ${(file.size / 1024 / 1024).toFixed(1)} MB. The maximum policy size is ${MAX_POLICY_MB} MB.`);
+      return;
+    }
 
     const fd = new FormData();
     fd.append("file", file);
@@ -240,7 +262,13 @@ function UploadModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
       onSuccess();
       onClose();
     } catch (err: any) {
-      toast.error(err.response?.data?.error ?? "Upload failed");
+      // A 413 from the reverse proxy comes back as an HTML page with no JSON
+      // body, so fall back to a size message rather than a bare "Upload failed".
+      const fallback =
+        err.response?.status === 413
+          ? `File is too large. The maximum policy size is ${MAX_POLICY_MB} MB.`
+          : "Upload failed";
+      toast.error(err.response?.data?.error ?? fallback);
     } finally {
       setLoading(false);
     }
@@ -317,11 +345,11 @@ function UploadModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
               </label>
               {!file ? (
                 <label className="block cursor-pointer">
-                  <input type="file" accept=".pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="hidden" ref={fileRef} />
+                  <input type="file" accept="application/pdf,.pdf" onChange={(e) => handlePick(e.target.files?.[0] ?? null)} className="hidden" ref={fileRef} />
                   <div className="flex flex-col items-center justify-center gap-2 px-4 py-8 border-2 border-dashed border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
                     <Upload size={32} className="text-gray-400" />
                     <p className="text-sm font-medium text-gray-700">Click to upload policy document</p>
-                    <p className="text-xs text-gray-500">PDF (Max 10MB)</p>
+                    <p className="text-xs text-gray-500">PDF (Max {MAX_POLICY_MB}MB)</p>
                   </div>
                 </label>
               ) : (
