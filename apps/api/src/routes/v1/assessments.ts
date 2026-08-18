@@ -205,8 +205,17 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
   // These routes previously had no auth hook at all — anyone could read/write
   // assessment data unauthenticated.
   fastify.addHook("preHandler", authenticate);
-  // Assessments tab — gated on the STU_ASSESSMENT grant (SUPER_ADMIN / HR_ADMIN bypass).
-  fastify.addHook("preHandler", requireModulePermission("STU_ASSESSMENT"));
+  // Assessments tab — gated on the STU_ASSESSMENT grant; only SUPER_ADMIN bypasses.
+  fastify.addHook("preHandler", requireModulePermission("STU_ASSESSMENT", {
+    // Marks, attendance and exclusions all write to an exam that already exists,
+    // so they are an edit of that exam's data. Without this the bulk save (a POST)
+    // would demand canCreate — the grant for adding new exams, which a role that
+    // only marks papers has no reason to hold.
+    actionFor: (request) => {
+      const url = request.routeOptions?.url ?? request.url;
+      return url.includes("/results") && request.method !== "GET" ? "canEdit" : null;
+    },
+  }));
 
   // ── GET /stats ────────────────────────────────────────────────────────────
   fastify.get("/stats", async (req, reply) => {

@@ -240,10 +240,12 @@ function ExamModal({ open, onClose, initial, examId, batches, subjects, academic
   const createMut = useMutation({
     mutationFn: (d: any) => api.post("/api/v1/academics/assessments", d).then((r) => r.data),
     onSuccess: (res) => { if (!res.success) { toast.error(res.error); return; } qc.invalidateQueries({ queryKey: ["assessments"] }); toast.success("Assessment created"); },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to create assessment"),
   });
   const updateMut = useMutation({
     mutationFn: (d: any) => api.patch(`/api/v1/academics/assessments/${examId}`, d).then((r) => r.data),
     onSuccess: (res) => { if (!res.success) { toast.error(res.error); return; } qc.invalidateQueries({ queryKey: ["assessments"] }); toast.success("Assessment updated"); onClose(); },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to update assessment"),
   });
   const busy = createMut.isPending || updateMut.isPending;
 
@@ -447,8 +449,8 @@ function ExamModal({ open, onClose, initial, examId, batches, subjects, academic
 }
 
 // ── ExamCard ──────────────────────────────────────────────────────────────────
-function ExamCard({ exam, canEdit, onEdit, onDelete, onStatus }: {
-  exam: any; canEdit: boolean;
+function ExamCard({ exam, canEdit, canDelete, onEdit, onDelete, onStatus }: {
+  exam: any; canEdit: boolean; canDelete: boolean;
   onEdit: (e: any) => void; onDelete: (id: string) => void; onStatus: (id: string, s: string) => void;
 }) {
   const router = useRouter();
@@ -535,14 +537,17 @@ function ExamCard({ exam, canEdit, onEdit, onDelete, onStatus }: {
         <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 5, fontWeight: 500 }}>created on {format(new Date(exam.createdAt), "d MMM yyyy")}</p>
       </div>
 
-      {canEdit && (
+      {(canEdit || canDelete) && (
         <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }} ref={menuRef}>
           {/* Edit */}
+          {canEdit && (
           <button onClick={() => onEdit(exam)} title="Edit"
             style={{ padding: 6, borderRadius: 8, border: `1px solid ${D.line}`, background: "white", cursor: "pointer", color: D.muted, display: "flex" }}>
             <Pencil style={{ width: 13, height: 13 }} />
           </button>
+          )}
           {/* Archive / Unarchive */}
+          {canEdit && (
           <button
             onClick={() => onStatus(exam.id, exam.status === "ARCHIVED" ? "DUE" : "ARCHIVED")}
             title={exam.status === "ARCHIVED" ? "Unarchive" : "Archive"}
@@ -551,13 +556,16 @@ function ExamCard({ exam, canEdit, onEdit, onDelete, onStatus }: {
               ? <ArchiveRestore style={{ width: 13, height: 13 }} />
               : <Archive style={{ width: 13, height: 13 }} />}
           </button>
+          )}
           {/* Delete */}
+          {canDelete && (
           <button onClick={() => onDelete(exam.id)} title="Delete"
             style={{ padding: 6, borderRadius: 8, border: `1px solid ${D.line}`, background: "white", cursor: "pointer", color: "#ef4444", display: "flex" }}>
             <Trash2 style={{ width: 13, height: 13 }} />
           </button>
+          )}
           {/* 3-dot status menu */}
-          {statusItems.length > 0 && (
+          {canEdit && statusItems.length > 0 && (
             <div style={{ position: "relative" }}>
               <button onClick={() => setMenuOpen((v) => !v)} title="Change status"
                 style={{ padding: 6, borderRadius: 8, border: `1px solid ${D.line}`, background: "white", cursor: "pointer", color: D.muted, display: "flex" }}>
@@ -590,8 +598,12 @@ function AssessmentsPage() {
   const teacherId    = searchParams.get("teacherId");
   const qc           = useQueryClient();
   const permissions  = usePermissions();
-  // Write access comes from the permission matrix; only SUPER_ADMIN bypasses it
-  const canEdit = hasAcademicsAction(user?.role, permissions, "STU_ASSESSMENT", "canEdit");
+  // Write access comes from the permission matrix; only SUPER_ADMIN bypasses it.
+  // Each action is read separately — a role granted edit but not create (or not
+  // delete) used to be shown buttons that the API then refused.
+  const canCreate = hasAcademicsAction(user?.role, permissions, "STU_ASSESSMENT", "canCreate");
+  const canEdit   = hasAcademicsAction(user?.role, permissions, "STU_ASSESSMENT", "canEdit");
+  const canDelete = hasAcademicsAction(user?.role, permissions, "STU_ASSESSMENT", "canDelete");
 
   const [search,           setSearch]           = useState("");
   const [filterStatus,     setFilterStatus]     = useState("ALL");
@@ -666,10 +678,12 @@ function AssessmentsPage() {
     mutationFn: ({ id, status }: { id: string; status: string }) =>
       api.patch(`/api/v1/academics/assessments/${id}/status`, { status }).then((r) => r.data),
     onSuccess: (res) => { if (!res.success) { toast.error(res.error); return; } qc.invalidateQueries({ queryKey: ["assessments"] }); toast.success("Status updated"); },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to update status"),
   });
   const deleteMut = useMutation({
     mutationFn: (id: string) => api.delete(`/api/v1/academics/assessments/${id}`).then((r) => r.data),
     onSuccess: (res) => { if (!res.success) { toast.error(res.error); return; } qc.invalidateQueries({ queryKey: ["assessments"] }); toast.success("Deleted"); },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to delete assessment"),
   });
 
   const openEdit = (exam: any) => {
@@ -741,7 +755,7 @@ function AssessmentsPage() {
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         {!showStats && <DBtn onClick={exportCSV}>Export</DBtn>}
         <DBtn onClick={() => setShowStats((v) => !v)}>{showStats ? "← Tests" : "Stats"}</DBtn>
-        {!showStats && canEdit && <DBtn primary onClick={() => { setEditTarget(null); setModalOpen(true); }}>+ New Test</DBtn>}
+        {!showStats && canCreate && <DBtn primary onClick={() => { setEditTarget(null); setModalOpen(true); }}>+ New Test</DBtn>}
       </div>
     </div>
   );
@@ -839,7 +853,7 @@ function AssessmentsPage() {
             <DInput placeholder="Search assessments by test name, batch, subject, or faculty" value={toolbarSearch}
               onChange={(e) => setToolbarSearch(e.target.value)} style={{ minHeight: 48, borderRadius: 14, fontSize: 15 }} />
             <span style={{ color: D.muted, fontWeight: 850, whiteSpace: "nowrap" }}>{exams.length} test{exams.length !== 1 ? "s" : ""}</span>
-            {canEdit && <DBtn primary onClick={() => { setEditTarget(null); setModalOpen(true); }}>+ New Test</DBtn>}
+            {canCreate && <DBtn primary onClick={() => { setEditTarget(null); setModalOpen(true); }}>+ New Test</DBtn>}
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
@@ -869,7 +883,7 @@ function AssessmentsPage() {
                   <p style={{ margin: "8px auto 18px", color: D.muted, maxWidth: 500, lineHeight: 1.5, fontWeight: 650 }}>
                     Create the first test with papers, subjects, marks, batches, date, and time. Results and marking analytics will appear here once assessments are conducted.
                   </p>
-                  {canEdit && <DBtn primary onClick={() => { setEditTarget(null); setModalOpen(true); }}>+ Create Assessment</DBtn>}
+                  {canCreate && <DBtn primary onClick={() => { setEditTarget(null); setModalOpen(true); }}>+ Create Assessment</DBtn>}
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
@@ -888,7 +902,7 @@ function AssessmentsPage() {
           ) : (
             <div style={{ background: "white", border: `1px solid ${D.line}`, borderRadius: 18, overflow: "hidden", boxShadow: "0 4px 16px rgba(20,23,53,.06)" }}>
               {exams.map((exam) => (
-                <ExamCard key={exam.id} exam={exam} canEdit={canEdit}
+                <ExamCard key={exam.id} exam={exam} canEdit={canEdit} canDelete={canDelete}
                   onEdit={openEdit}
                   onDelete={(id) => { if (confirm("Delete this assessment?")) deleteMut.mutate(id); }}
                   onStatus={(id, status) => statusMut.mutate({ id, status })} />

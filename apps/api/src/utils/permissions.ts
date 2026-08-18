@@ -124,10 +124,23 @@ export type ModuleResolver = (
 ) => string | string[] | null;
 
 /**
+ * Overrides the verb→action mapping for routes where the HTTP method lies about
+ * the intent. Return `null` to keep the mapping from METHOD_ACTION.
+ */
+export type ActionResolver = (request: FastifyRequest) => PermAction | null;
+
+/**
  * Fastify preHandler that gates a route plugin on the permission matrix.
  * Must be registered AFTER `authenticate` so `request.user` is populated.
+ *
+ * `opts.actionFor` exists because the verb is not always the intent: writing
+ * marks onto an existing exam is a POST but is an *edit* of that exam's data,
+ * and demanding canCreate for it locks out roles granted edit-only.
  */
-export function requireModulePermission(spec: string | string[] | ModuleResolver) {
+export function requireModulePermission(
+  spec: string | string[] | ModuleResolver,
+  opts: { actionFor?: ActionResolver } = {},
+) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
     const user = request.user as JwtPayload | undefined;
     if (!user) {
@@ -140,7 +153,8 @@ export function requireModulePermission(spec: string | string[] | ModuleResolver
     if (resolved === null) return;
 
     const modules = Array.isArray(resolved) ? resolved : [resolved];
-    const action = METHOD_ACTION[request.method] ?? "canView";
+    const action =
+      opts.actionFor?.(request) ?? METHOD_ACTION[request.method] ?? "canView";
     if (await hasAnyPermission(user, modules, action)) return;
 
     return reply.status(403).send({

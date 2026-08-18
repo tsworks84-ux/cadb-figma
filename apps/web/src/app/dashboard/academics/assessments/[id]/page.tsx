@@ -11,6 +11,8 @@ import {
   FileDown, TrendingUp, TrendingDown, Minus,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
+import { usePermissions } from "@/hooks/usePermissions";
+import { hasAcademicsAction } from "@/lib/academicsAccess";
 import { format, parseISO } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
@@ -64,7 +66,11 @@ export default function ExamDetailPage() {
   const router = useRouter();
   const qc     = useQueryClient();
   const { user } = useAuthStore();
-  const canEdit = user?.role === "SUPER_ADMIN" || user?.role === "HR_ADMIN";
+  const permissions = usePermissions();
+  // Marking rights come from the permission matrix, exactly like the list page.
+  // This used to be hard-coded to SUPER_ADMIN / HR_ADMIN, which hid every marking
+  // control from any other role the matrix had granted edit on Assessments.
+  const canEdit = hasAcademicsAction(user?.role, permissions, "STU_ASSESSMENT", "canEdit");
 
   // ── Filter state ────────────────────────────────────────────────────────
   const [filterBatch,    setFilterBatch]    = useState("");
@@ -195,6 +201,7 @@ export default function ExamDetailPage() {
       toast.success("Marks saved successfully");
       qc.invalidateQueries({ queryKey: ["assessment-results", id] });
     },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to save marks"),
   });
 
   const excludeMut = useMutation({
@@ -204,6 +211,7 @@ export default function ExamDetailPage() {
       qc.invalidateQueries({ queryKey: ["assessment-results", id] });
       toast.success("Student removed from this exam");
     },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to remove student"),
   });
 
   const restoreMut = useMutation({
@@ -213,12 +221,14 @@ export default function ExamDetailPage() {
       qc.invalidateQueries({ queryKey: ["assessment-results", id] });
       toast.success("Student restored");
     },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to restore student"),
   });
 
   const statusMut = useMutation({
     mutationFn: (status: string) =>
       api.patch(`/api/v1/academics/assessments/${id}/status`, { status }).then((r) => r.data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["assessment", id] }); toast.success("Status updated"); },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to update status"),
   });
 
   // ── Overview stats ───────────────────────────────────────────────────────
