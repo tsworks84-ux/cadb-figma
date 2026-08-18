@@ -657,10 +657,19 @@ const TimeSelect = ({ value, onChange, disabled }: { value: string; onChange: (v
     value={value}
     disabled={disabled}
     onChange={(e) => onChange(e.target.value)}
-    style={{ width: "100%", maxWidth: 190, opacity: disabled ? 0.5 : 1 }}
+    style={{ width: "100%", opacity: disabled ? 0.5 : 1 }}
   >
     {TIME_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
   </DSelect>
+);
+
+/**
+ * Start + end share one two-column grid rather than flowing in a flex row, so the
+ * two fields are exactly equal width and every row's start (and end) column lines
+ * up with the row above it.
+ */
+const TimePair = ({ children }: { children: React.ReactNode }) => (
+  <div className="grid grid-cols-2 gap-2" style={{ maxWidth: 392 }}>{children}</div>
 );
 
 const fmtShortDate = (d: string) =>
@@ -1000,24 +1009,31 @@ function ScheduleModal({
                   </div>
                 </MRow>
 
-                <MRow label="Apply">
-                  <label className="flex items-center gap-2 cursor-pointer" style={{ minHeight: 42 }}>
-                    <input
-                      type="checkbox"
-                      checked={form.sameTime}
-                      onChange={(e) => setForm({ ...form, sameTime: e.target.checked })}
-                      style={{ width: 16, height: 16, accentColor: D.nav2 }}
-                    />
-                    <span style={{ fontSize: 14, color: D.ink }}>Same Time to Schedules</span>
-                  </label>
-                </MRow>
+                {/* Not an MRow: "Apply" belongs to the checkbox, so the box leads the
+                    line. Left in the label column it read as a stray box mid-row. */}
+                <div className="flex flex-col sm:flex-row sm:gap-4" style={{ marginBottom: 14 }}>
+                  <div className="sm:w-[110px] shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <label className="flex items-center gap-2 cursor-pointer" style={{ minHeight: 42 }}>
+                      <input
+                        type="checkbox"
+                        checked={form.sameTime}
+                        onChange={(e) => setForm({ ...form, sameTime: e.target.checked })}
+                        style={{ width: 16, height: 16, accentColor: D.nav2 }}
+                      />
+                      <span style={{ fontSize: 14, color: D.ink }}>
+                        <strong style={{ fontWeight: 700 }}>Apply</strong> Same Time to Schedules
+                      </span>
+                    </label>
+                  </div>
+                </div>
 
                 {form.sameTime && (
                   <MRow label="Time" required>
-                    <div className="flex flex-wrap items-center gap-2">
+                    <TimePair>
                       <TimeSelect value={form.commonStart} onChange={(v) => setForm({ ...form, commonStart: v })} />
                       <TimeSelect value={form.commonEnd} onChange={(v) => setForm({ ...form, commonEnd: v })} />
-                    </div>
+                    </TimePair>
                     {/* Both default to 5:00 AM as in the reference form, so hold the
                         error back until a day is actually ticked. */}
                     {selectedDays > 0 && form.commonEnd <= form.commonStart && (
@@ -1047,12 +1063,14 @@ function ScheduleModal({
                             </span>
                           </label>
                           {!form.sameTime && (
-                            <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
-                              <TimeSelect value={row.startTime} disabled={!row.on} onChange={(v) => setRow({ startTime: v })} />
-                              <TimeSelect value={row.endTime} disabled={!row.on} onChange={(v) => setRow({ endTime: v })} />
+                            <div className="flex-1 min-w-0">
+                              <TimePair>
+                                <TimeSelect value={row.startTime} disabled={!row.on} onChange={(v) => setRow({ startTime: v })} />
+                                <TimeSelect value={row.endTime} disabled={!row.on} onChange={(v) => setRow({ endTime: v })} />
+                              </TimePair>
                             </div>
                           )}
-                          {bad && <span style={{ fontSize: 12, color: "#ef4444" }}>End must be after start</span>}
+                          {bad && <span style={{ fontSize: 12, color: "#ef4444" }} className="shrink-0">End must be after start</span>}
                         </div>
                       );
                     })}
