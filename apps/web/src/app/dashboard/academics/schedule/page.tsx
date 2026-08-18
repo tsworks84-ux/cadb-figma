@@ -9,7 +9,7 @@ import {
   Download, Loader2, Pencil, Trash2, CalendarDays,
   BarChart2, AlertTriangle, CheckCircle2, XCircle,
   Search, SlidersHorizontal, ClipboardList, BookOpen,
-  Users, Percent, UserCheck, UserX, Check, ExternalLink,
+  Users, Percent, UserCheck, UserX, Check, ExternalLink, Repeat,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -600,10 +600,65 @@ function StatsPanel({ schedules, subjects }: { schedules: any[]; subjects: any[]
 
 // ── Schedule modal ────────────────────────────────────────────────────────────
 
+type Frequency = "DAILY" | "WEEKLY" | "FORTNIGHTLY" | "MONTHLY" | "CUSTOM";
+
 type ScheduleForm = {
   academicYear: string; batchIds: string[]; subjectId: string; employeeId: string;
   locationId: string; mode: "ONLINE" | "OFFLINE"; date: string; startTime: string; endTime: string; topics: string; notes: string;
+  // Recurrence — only ever sent when creating, never when editing one occurrence.
+  repeat: boolean; frequency: Frequency; weekdays: number[]; until: string; skipConflicts: boolean;
 };
+
+const FREQUENCIES: { value: Frequency; label: string }[] = [
+  { value: "DAILY",       label: "Daily" },
+  { value: "WEEKLY",      label: "Weekly" },
+  { value: "FORTNIGHTLY", label: "Fortnightly" },
+  { value: "MONTHLY",     label: "Monthly" },
+  { value: "CUSTOM",      label: "Custom days" },
+];
+
+// Monday-first, matching the Mon–Sat academy week. Values are JS getDay() codes.
+const WEEKDAYS = [
+  { v: 1, label: "M", full: "Monday" },
+  { v: 2, label: "T", full: "Tuesday" },
+  { v: 3, label: "W", full: "Wednesday" },
+  { v: 4, label: "T", full: "Thursday" },
+  { v: 5, label: "F", full: "Friday" },
+  { v: 6, label: "S", full: "Saturday" },
+  { v: 0, label: "S", full: "Sunday" },
+];
+
+const fmtShortDate = (d: string) =>
+  new Date(`${d}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+
+/** The wire shape shared by the create, preview and recurring endpoints. */
+function buildBasePayload(form: ScheduleForm) {
+  const startDT = new Date(`${form.date}T${form.startTime}`);
+  const endDT   = new Date(`${form.date}T${form.endTime}`);
+  return {
+    academicYear: form.academicYear,
+    batchIds: form.batchIds,
+    subjectId: form.subjectId || null,
+    employeeId: form.employeeId || null,
+    locationId: form.locationId || null,
+    mode: form.mode,
+    date: new Date(form.date).toISOString(),
+    startTime: startDT.toISOString(),
+    endTime: endDT.toISOString(),
+    topics: form.topics || undefined,
+    notes: form.notes || undefined,
+    ...(form.repeat
+      ? {
+          recurrence: {
+            frequency: form.frequency,
+            weekdays: form.frequency === "DAILY" || form.frequency === "MONTHLY" ? undefined : form.weekdays,
+            until: form.until,
+          },
+          skipConflicts: form.skipConflicts,
+        }
+      : {}),
+  };
+}
 
 function ScheduleModal({
   open, onClose, initial, scheduleId, batches, subjects, employees, locations, academicYears, defaultYear,
@@ -616,6 +671,7 @@ function ScheduleModal({
   const emptyForm = (): ScheduleForm => ({
     academicYear: defaultYear, batchIds: [], subjectId: "", employeeId: "",
     locationId: "", mode: "OFFLINE", date: "", startTime: "", endTime: "", topics: "", notes: "",
+    repeat: false, frequency: "WEEKLY", weekdays: [], until: "", skipConflicts: false,
   });
   const [form, setForm] = useState<ScheduleForm>(initial ?? emptyForm());
 
@@ -633,7 +689,9 @@ function ScheduleModal({
     new Date(`${form.date}T${form.endTime}`) <= new Date(`${form.date}T${form.startTime}`)
   );
 
-  const conflictEnabled = Boolean(form.employeeId && form.date && form.startTime && form.endTime && !endTimeError);
+  // In repeat mode the series preview reports clashes across every occurrence,
+  // so the single-date banner would just duplicate it.
+  const conflictEnabled = Boolean(form.employeeId && form.date && form.startTime && form.endTime && !endTimeError && !form.repeat);
   const { data: conflictData } = useQuery({
     queryKey: ["faculty-conflicts", form.employeeId, form.date],
     queryFn: () =>
@@ -677,7 +735,37 @@ function ScheduleModal({
       onClose();
     },
   });
-  const busy = createMut.isPending || updateMut.isPending;
+  const recurringMut = useMutation({
+    mutationFn: (d: any) => api.post("/api/v1/academics/schedules/recurring", d).then((r) => r.data),
+    onSuccess: (res) => {
+      if (!res.success) { toast.error(res.error); return; }
+      qc.invalidateQueries({ queryKey: ["schedules"] });
+      const { created, skipped, capped } = res.data;
+      let msg = `${created} ${created === 1 ? "class" : "classes"} scheduled`;
+      if (skipped) msg += ` · ${skipped} skipped for faculty clashes`;
+      if (capped)  msg += " · stopped at the 200-class limit";
+      toast.success(msg);
+    },
+  });
+  const busy = createMut.isPending || updateMut.isPending || recurringMut.isPending;
+
+  // The series preview is computed by the same server code that creates it, so
+  // the dates and clashes shown here are exactly what saving will produce.
+  const previewReady = Boolean(
+    !scheduleId && form.repeat && form.academicYear && form.batchIds.length &&
+    form.date && form.startTime && form.endTime && form.until && !endTimeError &&
+    (form.frequency !== "CUSTOM" || form.weekdays.length > 0)
+  );
+  const previewBody = previewReady ? buildBasePayload(form) : null;
+  const { data: previewRes, isFetching: previewLoading } = useQuery({
+    queryKey: ["schedule-series-preview", JSON.stringify(previewBody)],
+    queryFn: () => api.post("/api/v1/academics/schedules/recurring/preview", previewBody).then((r) => r.data),
+    enabled: previewReady,
+    staleTime: 30_000,
+    retry: false,
+  });
+  const preview = previewRes?.success ? previewRes.data : null;
+  const previewError = previewRes && !previewRes.success ? previewRes.error : null;
 
   const buildPayload = () => {
     if (!form.academicYear) { toast.error("Academic year is required"); return null; }
@@ -685,25 +773,32 @@ function ScheduleModal({
     if (!form.date) { toast.error("Date is required"); return null; }
     if (!form.startTime || !form.endTime) { toast.error("Start and end time required"); return null; }
     if (endTimeError) { toast.error("End time must be after start time"); return null; }
-    const startDT = new Date(`${form.date}T${form.startTime}`);
-    const endDT   = new Date(`${form.date}T${form.endTime}`);
-    return {
-      academicYear: form.academicYear, batchIds: form.batchIds,
-      subjectId: form.subjectId || null, employeeId: form.employeeId || null, locationId: form.locationId || null,
-      mode: form.mode,
-      date: new Date(form.date).toISOString(), startTime: startDT.toISOString(), endTime: endDT.toISOString(),
-      topics: form.topics || undefined, notes: form.notes || undefined,
-    };
+    if (form.repeat) {
+      if (!form.until) { toast.error("Choose a date to repeat until"); return null; }
+      if (form.frequency === "CUSTOM" && form.weekdays.length === 0) {
+        toast.error("Select at least one weekday"); return null;
+      }
+    }
+    return buildBasePayload(form);
   };
 
   const handleSave = () => {
     const p = buildPayload(); if (!p) return;
     if (scheduleId) updateMut.mutate(p);
+    else if (form.repeat) recurringMut.mutate(p, { onSuccess: (res) => { if (res.success) onClose(); } });
     else createMut.mutate(p, { onSuccess: (res) => { if (res.success) onClose(); } });
   };
   const handleSaveAnother = () => {
     const p = buildPayload(); if (!p) return;
     createMut.mutate(p, {
+      onSuccess: (res) => {
+        if (res.success) setForm({ ...emptyForm(), academicYear: form.academicYear, date: form.date });
+      },
+    });
+  };
+  const handleSaveSeriesAnother = () => {
+    const p = buildPayload(); if (!p) return;
+    recurringMut.mutate(p, {
       onSuccess: (res) => {
         if (res.success) setForm({ ...emptyForm(), academicYear: form.academicYear, date: form.date });
       },
@@ -838,6 +933,152 @@ function ScheduleModal({
               </div>
             </section>
 
+            {/* Repeat — creation only. Editing one occurrence must not silently
+                reshape the whole series. */}
+            {!scheduleId && (
+              <section style={sectionStyle}>
+                <div className="flex flex-wrap items-center justify-between gap-3" style={{ marginBottom: form.repeat ? 14 : 0 }}>
+                  <h3 style={{ ...sectionHeadStyle, margin: 0 }}>Repeat</h3>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.repeat}
+                      onChange={(e) => setForm({
+                        ...form,
+                        repeat: e.target.checked,
+                        // Seed the weekday chips from the chosen date so weekly
+                        // repeats are correct without extra clicks.
+                        weekdays: e.target.checked && form.date ? [new Date(`${form.date}T00:00:00`).getDay()] : form.weekdays,
+                      })}
+                      style={{ width: 16, height: 16, accentColor: D.nav2 }}
+                    />
+                    <span style={{ fontSize: 14, color: D.muted }}>Repeat this class on a schedule</span>
+                  </label>
+                </div>
+
+                {form.repeat && (
+                  <>
+                    {!form.date && (
+                      <p style={{ fontSize: 13, color: "#b45309", margin: "0 0 12px" }}>
+                        Pick a date above — the series starts from it.
+                      </p>
+                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-[14px]">
+                      <DField label="Frequency">
+                        <DSelect
+                          value={form.frequency}
+                          onChange={(e) => {
+                            const frequency = e.target.value as Frequency;
+                            setForm({
+                              ...form,
+                              frequency,
+                              weekdays: frequency === "CUSTOM" && form.weekdays.length === 0 && form.date
+                                ? [new Date(`${form.date}T00:00:00`).getDay()]
+                                : form.weekdays,
+                            });
+                          }}
+                        >
+                          {FREQUENCIES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+                        </DSelect>
+                      </DField>
+                      <DField label="Repeat until" required>
+                        <DInput
+                          type="date"
+                          min={form.date || undefined}
+                          max="2099-12-31"
+                          value={form.until}
+                          onChange={(e) => setForm({ ...form, until: e.target.value })}
+                        />
+                      </DField>
+                    </div>
+
+                    {(form.frequency === "WEEKLY" || form.frequency === "FORTNIGHTLY" || form.frequency === "CUSTOM") && (
+                      <div style={{ marginTop: 14 }}>
+                        <DField label={form.frequency === "CUSTOM" ? "On these days" : "On these days (optional)"}>
+                          <div className="flex flex-wrap gap-2">
+                            {WEEKDAYS.map((d) => {
+                              const on = form.weekdays.includes(d.v);
+                              return (
+                                <button
+                                  key={d.v}
+                                  type="button"
+                                  title={d.full}
+                                  aria-label={d.full}
+                                  aria-pressed={on}
+                                  onClick={() => setForm({
+                                    ...form,
+                                    weekdays: on ? form.weekdays.filter((w) => w !== d.v) : [...form.weekdays, d.v],
+                                  })}
+                                  style={{
+                                    width: 42, height: 42, borderRadius: 12, cursor: "pointer",
+                                    border: `1.5px solid ${on ? D.nav2 : "#e6e8ef"}`,
+                                    background: on ? "#ede9fe" : "white",
+                                    color: on ? "#3730a3" : "#7c8598",
+                                    fontWeight: on ? 800 : 500, fontSize: 14, transition: "all .15s",
+                                  }}
+                                >
+                                  {d.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {form.frequency !== "CUSTOM" && form.weekdays.length === 0 && (
+                            <p style={{ fontSize: 12, color: D.muted, margin: "6px 0 0" }}>
+                              None selected — repeats on the same weekday as the start date.
+                            </p>
+                          )}
+                        </DField>
+                      </div>
+                    )}
+
+                    {/* Preview comes from the server, so it matches what saving creates. */}
+                    {previewReady && (
+                      <div style={{ marginTop: 14, padding: 14, borderRadius: 12, background: "white", border: `1px solid ${D.line}` }}>
+                        {previewLoading && <p style={{ fontSize: 13, color: D.muted, margin: 0 }}>Working out the dates…</p>}
+                        {previewError && <p style={{ fontSize: 13, color: "#ef4444", margin: 0 }}>{previewError}</p>}
+                        {preview && (
+                          <>
+                            <p style={{ fontSize: 14, fontWeight: 700, color: D.ink, margin: "0 0 6px" }}>
+                              Creates {preview.count} {preview.count === 1 ? "class" : "classes"}
+                            </p>
+                            <p style={{ fontSize: 13, color: D.muted, margin: 0, lineHeight: 1.6 }}>
+                              {preview.dates.slice(0, 8).map(fmtShortDate).join(" · ")}
+                              {preview.dates.length > 8 && ` … and ${preview.dates.length - 8} more, to ${fmtShortDate(preview.dates[preview.dates.length - 1])}`}
+                            </p>
+                            {preview.capped && (
+                              <p style={{ fontSize: 12, color: "#b45309", margin: "8px 0 0" }}>
+                                Stops at the 200-class limit. Shorten the date range to cover the rest.
+                              </p>
+                            )}
+                            {preview.conflicts?.length > 0 && (
+                              <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: "#fef2f2", border: "1px solid #fecaca" }}>
+                                <p style={{ fontSize: 13, fontWeight: 700, color: "#b91c1c", margin: "0 0 4px" }}>
+                                  {preview.conflicts.length} {preview.conflicts.length === 1 ? "date clashes" : "dates clash"} with this faculty&apos;s other classes
+                                </p>
+                                <p style={{ fontSize: 12, color: "#ef4444", margin: "0 0 8px", lineHeight: 1.6 }}>
+                                  {preview.conflicts.slice(0, 5).map((c: any) => `${fmtShortDate(c.date)} (${c.batches})`).join(" · ")}
+                                  {preview.conflicts.length > 5 && ` … +${preview.conflicts.length - 5} more`}
+                                </p>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={form.skipConflicts}
+                                    onChange={(e) => setForm({ ...form, skipConflicts: e.target.checked })}
+                                    style={{ width: 15, height: 15, accentColor: "#b91c1c" }}
+                                  />
+                                  <span style={{ fontSize: 12, color: "#b91c1c" }}>Skip those dates</span>
+                                </label>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </section>
+            )}
+
             <section style={sectionStyle}>
               <h3 style={sectionHeadStyle}>Class Plan</h3>
               <DField label="Topics">
@@ -856,11 +1097,20 @@ function ScheduleModal({
           <DBtn onClick={onClose} disabled={busy}>Cancel</DBtn>
           <div className="flex flex-wrap items-center gap-3">
             {!scheduleId && (
-              <DBtn onClick={handleSaveAnother} disabled={busy || endTimeError}>Save &amp; Add Another</DBtn>
+              <DBtn
+                onClick={form.repeat ? handleSaveSeriesAnother : handleSaveAnother}
+                disabled={busy || endTimeError}
+              >
+                Save &amp; Add Another
+              </DBtn>
             )}
             <DBtn primary onClick={handleSave} disabled={busy || endTimeError}>
               {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-              {scheduleId ? "Save Changes" : "Save"}
+              {scheduleId
+                ? "Save Changes"
+                : form.repeat
+                  ? (preview ? `Create ${preview.count} ${preview.count === 1 ? "class" : "classes"}` : "Create series")
+                  : "Save"}
             </DBtn>
           </div>
         </div>
@@ -1438,7 +1688,7 @@ function ScheduleDetailModal({
 function ScheduleRow({ s, canEdit, onEdit, onDelete, onStatus, onClick }: {
   s: any; canEdit: boolean;
   onEdit: (s: any) => void;
-  onDelete: (id: string) => void;
+  onDelete: (s: any) => void;
   onStatus: (id: string, status: string) => void;
   onClick: (s: any) => void;
 }) {
@@ -1490,6 +1740,14 @@ function ScheduleRow({ s, canEdit, onEdit, onDelete, onStatus, onClick }: {
             ? <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-100">🌐 Online</span>
             : <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 bg-slate-50 text-slate-500 border border-slate-200">🏫 Offline</span>
           }
+          {s.recurrenceId && (
+            <span
+              className="text-[10px] font-semibold rounded-full px-2 py-0.5 bg-violet-50 text-violet-700 border border-violet-100 inline-flex items-center gap-1"
+              title="Part of a repeating series"
+            >
+              <Repeat className="h-2.5 w-2.5" /> Series
+            </span>
+          )}
         </div>
       </td>
       {canEdit && (
@@ -1503,7 +1761,7 @@ function ScheduleRow({ s, canEdit, onEdit, onDelete, onStatus, onClick }: {
                 <XCircle className="h-3.5 w-3.5" />
               </button>
             )}
-            <button onClick={() => onDelete(s.id)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 border-0 bg-transparent cursor-pointer" title="Delete">
+            <button onClick={() => onDelete(s)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 border-0 bg-transparent cursor-pointer" title="Delete">
               <Trash2 className="h-3.5 w-3.5" />
             </button>
           </div>
@@ -1540,7 +1798,8 @@ function SchedulePage() {
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [modalOpen,         setModalOpen]          = useState(false);
   const [editTarget,        setEditTarget]          = useState<any | null>(null);
-  const [deleteId,          setDeleteId]            = useState<string | null>(null);
+  const [deleteTarget,      setDeleteTarget]        = useState<any | null>(null);
+  const [deleteSeries,      setDeleteSeries]        = useState(false);
   const [searchQuery,       setSearchQuery]         = useState("");
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null);
   const [collapsedDates, setCollapsedDates] = useState<Set<string>>(new Set());
@@ -1654,12 +1913,14 @@ function SchedulePage() {
     },
   });
   const deleteMut = useMutation({
-    mutationFn: (id: string) => api.delete(`/api/v1/academics/schedules/${id}`).then((r) => r.data),
+    mutationFn: ({ id, series }: { id: string; series: boolean }) =>
+      api.delete(`/api/v1/academics/schedules/${id}${series ? "?scope=series" : ""}`).then((r) => r.data),
     onSuccess: (res) => {
       if (!res.success) { toast.error(res.error); return; }
       qc.invalidateQueries({ queryKey: ["schedules"] });
-      toast.success("Schedule deleted");
-      setDeleteId(null);
+      const n = res.data?.deleted ?? 1;
+      toast.success(n > 1 ? `${n} classes deleted` : "Schedule deleted");
+      setDeleteTarget(null);
     },
   });
 
@@ -2109,7 +2370,7 @@ function SchedulePage() {
                                       <ScheduleRow
                                         key={s.id} s={s} canEdit={canEdit}
                                         onEdit={openEdit}
-                                        onDelete={(id) => setDeleteId(id)}
+                                        onDelete={(row) => { setDeleteSeries(false); setDeleteTarget(row); }}
                                         onStatus={(id, status) => statusMut.mutate({ id, status })}
                                         onClick={(s) => setSelectedScheduleId(s.id)}
                                       />
@@ -2152,7 +2413,7 @@ function SchedulePage() {
       />
 
       {/* Delete confirm */}
-      {deleteId && (
+      {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div style={{
             background: "white", borderRadius: 22, boxShadow: "0 32px 90px rgba(0,0,0,.28)",
@@ -2165,11 +2426,29 @@ function SchedulePage() {
               <Trash2 style={{ width: 20, height: 20, color: "#ef4444" }} />
             </div>
             <h3 style={{ margin: "0 0 6px", fontSize: 16, fontWeight: 700, color: D.ink }}>Delete Schedule?</h3>
-            <p style={{ margin: "0 0 22px", fontSize: 14, color: D.muted }}>This action cannot be undone.</p>
+            <p style={{ margin: "0 0 18px", fontSize: 14, color: D.muted }}>This action cannot be undone.</p>
+            {deleteTarget.recurrenceId && (
+              <div style={{ margin: "0 0 18px", padding: 12, borderRadius: 12, background: "#f5f3ff", border: "1px solid #ddd6fe", textAlign: "left" }}>
+                <p style={{ margin: "0 0 8px", fontSize: 13, color: "#4c1d95" }}>
+                  This class is part of a repeating series.
+                </p>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={deleteSeries}
+                    onChange={(e) => setDeleteSeries(e.target.checked)}
+                    style={{ width: 15, height: 15, marginTop: 2, accentColor: "#6d28d9" }}
+                  />
+                  <span style={{ fontSize: 13, color: "#4c1d95" }}>
+                    Delete every upcoming class in the series. Past classes are kept so their attendance survives.
+                  </span>
+                </label>
+              </div>
+            )}
             <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
-              <DBtn onClick={() => setDeleteId(null)}>Cancel</DBtn>
+              <DBtn onClick={() => setDeleteTarget(null)}>Cancel</DBtn>
               <button
-                onClick={() => deleteMut.mutate(deleteId!)}
+                onClick={() => deleteMut.mutate({ id: deleteTarget.id, series: deleteSeries && Boolean(deleteTarget.recurrenceId) })}
                 disabled={deleteMut.isPending}
                 style={{
                   minHeight: 42, border: 0, borderRadius: 12, padding: "0 18px",

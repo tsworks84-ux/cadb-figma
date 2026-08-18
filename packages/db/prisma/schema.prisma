@@ -1548,6 +1548,9 @@ model Schedule {
   topics       String?
   notes        String?
   status       ScheduleStatus @default(UPCOMING)
+  // Occurrences created together by a recurrence rule share this id, so a
+  // series can be listed, edited or deleted as one. Null for one-off classes.
+  recurrenceId String?
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 
@@ -1563,6 +1566,7 @@ model Schedule {
   @@index([academicYear])
   @@index([employeeId])
   @@index([locationId])
+  @@index([recurrenceId])
 }
 
 model ScheduleAttendance {

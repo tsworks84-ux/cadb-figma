@@ -4,6 +4,8 @@ import { prisma } from "@cadb/db";
 import { authenticate } from "../../middleware/authenticate.js";
 import { maybeAutoConcludes } from "./scheduleHelpers.js";
 import { requireModulePermission } from "../../utils/permissions.js";
+import { expandRecurrence, MAX_OCCURRENCES } from "../../utils/recurrence.js";
+import { randomUUID } from "crypto";
 
 const scheduleSchema = z.object({
   academicYear: z.string().min(1),
@@ -17,6 +19,17 @@ const scheduleSchema = z.object({
   endTime:      z.string().min(1),
   topics:       z.string().optional(),
   notes:        z.string().optional(),
+});
+
+const recurringSchema = scheduleSchema.extend({
+  recurrence: z.object({
+    frequency: z.enum(["DAILY", "WEEKLY", "FORTNIGHTLY", "MONTHLY", "CUSTOM"]),
+    // 0 = Sunday … 6 = Saturday.
+    weekdays:  z.array(z.number().int().min(0).max(6)).optional(),
+    until:     z.string().min(1),
+  }),
+  /** Leave out the occurrences where this faculty is already booked elsewhere. */
+  skipConflicts: z.boolean().optional().default(false),
 });
 
 const scheduleInclude = {
@@ -245,6 +258,126 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
     return reply.status(201).send({ success: true, data: schedule });
   });
 
+  // ── RECURRING SERIES ───────────────────────────────────────────────────────
+  // Materialises one Schedule row per occurrence rather than storing the rule
+  // and expanding on read: attendance, assignments and status are all per-class,
+  // so every occurrence needs somewhere to hang them. Rows are tied together by
+  // recurrenceId so the series can be deleted as one.
+
+  /**
+   * Shared by /recurring and /recurring/preview so the dates and clashes the
+   * user is shown are computed by exactly the code that will create them.
+   */
+  async function planSeries(d: z.infer<typeof recurringSchema>) {
+    const { batchIds, date, startTime, endTime, recurrence, employeeId } = d;
+
+    if (recurrence.frequency === "CUSTOM" && !recurrence.weekdays?.length) {
+      throw new Error("Select at least one weekday");
+    }
+    const days = expandRecurrence(date.slice(0, 10), recurrence);
+    if (days.length === 0) throw new Error("That pattern produces no classes");
+
+    // Times arrive as full ISO instants on the first date; carry that wall-clock
+    // time across to every occurrence.
+    const startClock = new Date(startTime);
+    const endClock   = new Date(endTime);
+    const at = (day: string, clock: Date) =>
+      new Date(`${day}T${String(clock.getHours()).padStart(2, "0")}:${String(clock.getMinutes()).padStart(2, "0")}:00`);
+
+    // Faculty double-booking: same teacher, overlapping window, against a batch
+    // they are not already teaching in that slot. Mirrors the modal's live check.
+    const conflicts: { date: string; batches: string }[] = [];
+    if (employeeId) {
+      const existing = await prisma.schedule.findMany({
+        where: {
+          employeeId,
+          status: { not: "CANCELLED" },
+          date: { gte: new Date(days[0]), lte: new Date(days[days.length - 1]) },
+        },
+        include: { batches: { include: { batch: { select: { name: true } } } } },
+      });
+      for (const day of days) {
+        const s0 = at(day, startClock).getTime();
+        const e0 = at(day, endClock).getTime();
+        for (const ex of existing) {
+          if (ex.date.toISOString().slice(0, 10) !== day) continue;
+          if (ex.batches.some((b) => batchIds.includes(b.batchId))) continue;
+          if (s0 < ex.endTime.getTime() && e0 > ex.startTime.getTime()) {
+            conflicts.push({
+              date: day,
+              batches: ex.batches.map((b) => b.batch?.name).filter(Boolean).join(", ") || "another batch",
+            });
+            break;
+          }
+        }
+      }
+    }
+    return { days, conflicts, at, startClock, endClock, capped: days.length >= MAX_OCCURRENCES };
+  }
+
+  fastify.post("/recurring/preview", async (request, reply) => {
+    const parsed = recurringSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
+    try {
+      const { days, conflicts, capped } = await planSeries(parsed.data);
+      return reply.send({ success: true, data: { dates: days, count: days.length, conflicts, capped } });
+    } catch (e: any) {
+      return reply.status(400).send({ success: false, error: e.message });
+    }
+  });
+
+  fastify.post("/recurring", async (request, reply) => {
+    const parsed = recurringSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
+
+    const { batchIds, date, startTime, endTime, recurrence, skipConflicts, ...rest } = parsed.data;
+
+    let plan;
+    try {
+      plan = await planSeries(parsed.data);
+    } catch (e: any) {
+      return reply.status(400).send({ success: false, error: e.message });
+    }
+    const { days, conflicts, at, startClock, endClock, capped } = plan;
+
+    const conflictDays = new Set(conflicts.map((c) => c.date));
+    const toCreate = skipConflicts ? days.filter((day) => !conflictDays.has(day)) : days;
+    if (toCreate.length === 0) {
+      return reply.status(400).send({
+        success: false,
+        error: "Every date in that series clashes with an existing class for this faculty",
+      });
+    }
+
+    const recurrenceId = randomUUID();
+    await prisma.$transaction(
+      toCreate.map((day) =>
+        prisma.schedule.create({
+          data: {
+            ...rest,
+            recurrenceId,
+            date:      new Date(day),
+            startTime: at(day, startClock),
+            endTime:   at(day, endClock),
+            batches:   { create: batchIds.map((batchId) => ({ batchId })) },
+          },
+        })
+      )
+    );
+
+    return reply.status(201).send({
+      success: true,
+      data: {
+        recurrenceId,
+        created: toCreate.length,
+        dates: toCreate,
+        conflicts,
+        skipped: skipConflicts ? conflicts.length : 0,
+        capped,
+      },
+    });
+  });
+
   // ── UPDATE ─────────────────────────────────────────────────────────────────
 
   fastify.patch("/:id", async (request, reply) => {
@@ -299,9 +432,26 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
 
   // ── DELETE ─────────────────────────────────────────────────────────────────
 
+  // `?scope=series` removes every remaining occurrence created by the same
+  // recurrence rule — a 40-class series is otherwise 40 separate deletions.
+  // Past occurrences are kept: they may already carry attendance.
   fastify.delete("/:id", async (request, reply) => {
     const { id } = request.params as any;
+    const { scope } = request.query as { scope?: string };
+
+    if (scope === "series") {
+      const target = await prisma.schedule.findUnique({ where: { id }, select: { recurrenceId: true } });
+      if (!target) return reply.status(404).send({ success: false, error: "Schedule not found" });
+      if (target.recurrenceId) {
+        const today = new Date(new Date().toISOString().slice(0, 10));
+        const { count } = await prisma.schedule.deleteMany({
+          where: { recurrenceId: target.recurrenceId, date: { gte: today } },
+        });
+        return reply.send({ success: true, data: { deleted: count } });
+      }
+    }
+
     await prisma.schedule.delete({ where: { id } });
-    return reply.send({ success: true });
+    return reply.send({ success: true, data: { deleted: 1 } });
   });
 }
