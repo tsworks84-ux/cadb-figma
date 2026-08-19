@@ -5,6 +5,10 @@ import ExcelJS from "exceljs";
 import { getTeacherBatchIds } from "./teacherUtils.js";
 import { authenticate } from "../../middleware/authenticate.js";
 import { requireModulePermission } from "../../utils/permissions.js";
+import {
+  buildMarksTemplate, loadWorkbook, parseMarksWorkbook, slotKey,
+  type ExamSlot, type TemplateStudent,
+} from "../../utils/marksImport.js";
 
 const examInclude = {
   subjects: {
@@ -201,6 +205,20 @@ function styleDataRow(row: ExcelJS.Row, even: boolean) {
   row.height = 16;
 }
 
+const displayName = (s: { firstName: string; lastName: string | null }) =>
+  `${s.firstName} ${s.lastName ?? ""}`.trim();
+
+/**
+ * Alphabetical by the name shown on screen. Sorted in JS rather than by Prisma
+ * because the roll number came first before (leaving the list in no order a
+ * person could follow when roll numbers are blank) and because a DB sort would
+ * order ALL-CAPS names apart from Title Case ones under some collations.
+ */
+const byStudentName = (
+  a: { firstName: string; lastName: string | null },
+  b: { firstName: string; lastName: string | null },
+) => displayName(a).localeCompare(displayName(b), "en", { sensitivity: "base", numeric: true });
+
 export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
   // These routes previously had no auth hook at all — anyone could read/write
   // assessment data unauthenticated.
@@ -213,9 +231,57 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
     // only marks papers has no reason to hold.
     actionFor: (request) => {
       const url = request.routeOptions?.url ?? request.url;
-      return url.includes("/results") && request.method !== "GET" ? "canEdit" : null;
+      const writesResults = url.includes("/results") || url.includes("/marks-import");
+      return writesResults && request.method !== "GET" ? "canEdit" : null;
     },
   }));
+
+  /**
+   * Everything the template writer and the importer both need: the exam, its
+   * paper/subject slots in display order, its students (alphabetical, matching
+   * the marks grid) and whatever is already saved for them.
+   */
+  async function loadMarksContext(examId: string) {
+    const exam = await prisma.exam.findUnique({
+      where:  { id: examId },
+      select: {
+        id: true, name: true, examDate: true, totalMarks: true, numPapers: true, numSubjects: true,
+        batches:  { select: { batchId: true } },
+        subjects: {
+          select: { paperNum: true, subjectSlot: true, maxMarks: true, subject: { select: { name: true } } },
+          orderBy: [{ paperNum: "asc" }, { subjectSlot: "asc" }],
+        },
+      },
+    });
+    if (!exam) return null;
+
+    const batchIds = exam.batches.map((b) => b.batchId);
+    const students = await prisma.student.findMany({
+      where: { studentBatches: { some: { batchId: { in: batchIds } } }, isArchived: false },
+      select: {
+        id: true, firstName: true, lastName: true, rollNumber: true,
+        studentBatches: { where: { batchId: { in: batchIds } }, select: { batch: { select: { name: true } } }, take: 1 },
+      },
+    });
+    students.sort(byStudentName);
+
+    const results = await prisma.examResult.findMany({
+      where:  { examId },
+      select: { studentId: true, attended: true, isExcluded: true, marks: { select: { paperNum: true, subjectSlot: true, marks: true } } },
+    });
+    const resultMap = new Map(results.map((r) => [r.studentId, r]));
+    const excluded  = new Set(results.filter((r) => r.isExcluded).map((r) => r.studentId));
+
+    const slots: ExamSlot[] = exam.subjects.map((es) => ({
+      paperNum:    es.paperNum,
+      subjectSlot: es.subjectSlot,
+      subjectName: es.subject?.name ?? null,
+      maxMarks:    es.maxMarks,
+    }));
+
+    // Students taken off the exam aren't markable, so they stay out of the file.
+    return { exam, slots, students: students.filter((s) => !excluded.has(s.id)), resultMap, excluded };
+  }
 
   // ── GET /stats ────────────────────────────────────────────────────────────
   fastify.get("/stats", async (req, reply) => {
@@ -439,6 +505,7 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
       },
       orderBy: [{ rollNumber: "asc" }, { firstName: "asc" }],
     });
+    students.sort(byStudentName);
 
     if (students.length > 0) {
       await prisma.examResult.createMany({
@@ -505,6 +572,154 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
     });
 
     return reply.send({ success: true });
+  });
+
+  // ── GET /:id/marks-template — the xlsx the user fills in ──────────────────
+  // Pre-filled with this exam's students and whatever marks are already saved,
+  // so the file round-trips: download, edit a column, upload, nothing else moves.
+  fastify.get("/:id/marks-template", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const ctx = await loadMarksContext(id);
+    if (!ctx) return reply.status(404).send({ success: false, error: "Not found" });
+
+    const wb = buildMarksTemplate(
+      { name: ctx.exam.name, examDate: ctx.exam.examDate, totalMarks: ctx.exam.totalMarks, numPapers: ctx.exam.numPapers },
+      ctx.slots,
+      ctx.students.map<TemplateStudent>((s) => ({
+        id:         s.id,
+        rollNumber: s.rollNumber,
+        name:       displayName(s),
+        batchName:  s.studentBatches[0]?.batch?.name ?? "",
+        attended:   ctx.resultMap.get(s.id)?.attended ?? true,
+        marks:      Object.fromEntries(
+          (ctx.resultMap.get(s.id)?.marks ?? []).map((m) => [slotKey(m.paperNum, m.subjectSlot), m.marks]),
+        ),
+      })),
+    );
+
+    const buf = await wb.xlsx.writeBuffer();
+    const safeName = ctx.exam.name.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 60);
+    reply.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    reply.header("Content-Disposition", `attachment; filename="marks_${safeName}.xlsx"`);
+    return reply.send(Buffer.from(buf));
+  });
+
+  // ── POST /:id/marks-import — upload the filled template ───────────────────
+  // `dryRun` validates and previews without writing (the UI always calls it
+  // first). Without it the file is applied in one transaction; only the students
+  // named in the file are touched, so a partial sheet is a partial update, never
+  // a wipe of everyone else.
+  fastify.post("/:id/marks-import", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const q      = req.query as any;
+    const dryRun      = q.dryRun === "true" || q.dryRun === true;
+    const skipInvalid = q.skipInvalid === "true" || q.skipInvalid === true;
+
+    const ctx = await loadMarksContext(id);
+    if (!ctx) return reply.status(404).send({ success: false, error: "Not found" });
+
+    const upload = await req.file().catch(() => null);
+    if (!upload) return reply.status(400).send({ success: false, error: "No file was uploaded" });
+    if (!/\.(xlsx|csv)$/i.test(upload.filename)) {
+      return reply.status(400).send({ success: false, error: "Upload the .xlsx template (or a .csv with the same columns)" });
+    }
+
+    let buffer: Buffer;
+    try {
+      buffer = await upload.toBuffer();
+    } catch {
+      return reply.status(400).send({ success: false, error: "The file is larger than 5 MB" });
+    }
+
+    let workbook;
+    try {
+      workbook = await loadWorkbook(buffer, upload.filename);
+    } catch {
+      return reply.status(400).send({ success: false, error: "That file could not be read as a spreadsheet. Use the template from this exam." });
+    }
+
+    const { rows, errors, totalRows } = parseMarksWorkbook(
+      workbook, ctx.slots, ctx.exam.numPapers, ctx.exam.totalMarks,
+      ctx.students.map((s) => ({ id: s.id, rollNumber: s.rollNumber, name: displayName(s) })),
+    );
+
+    // A row naming a student who was taken off this exam gets a message that says
+    // so, rather than the parser's "not a student in this exam".
+    const kept = rows.filter((r) => {
+      if (!ctx.excluded.has(r.studentId)) return true;
+      errors.push({ row: r.row, column: "Student", message: `${r.name} was removed from this exam — restore them first` });
+      return false;
+    });
+    rows.length = 0;
+    rows.push(...kept);
+
+    if (dryRun) {
+      return reply.send({
+        success: true,
+        data: {
+          dryRun: true,
+          totalRows,
+          validRows: rows.length,
+          errors,
+          preview: rows.slice(0, 10).map((r) => ({
+            row: r.row, name: r.name, attended: r.attended, total: r.total,
+          })),
+        },
+      });
+    }
+
+    if (!totalRows) {
+      return reply.status(400).send({ success: false, error: "The sheet has no student rows" });
+    }
+    if (errors.length && !skipInvalid) {
+      return reply.status(400).send({
+        success: false,
+        error: `${errors.length} problem${errors.length === 1 ? "" : "s"} found — nothing was imported`,
+        data: { totalRows, validRows: rows.length, errors },
+      });
+    }
+    if (!rows.length) {
+      return reply.status(400).send({ success: false, error: "No valid rows to import", data: { totalRows, validRows: 0, errors } });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.examResult.createMany({
+        data: rows.map((r) => ({ examId: id, studentId: r.studentId })),
+        skipDuplicates: true,
+      });
+      await Promise.all(rows.map((r) =>
+        tx.examResult.updateMany({
+          where: { examId: id, studentId: r.studentId },
+          data:  { attended: r.attended },
+        })
+      ));
+
+      const results = await tx.examResult.findMany({
+        where:  { examId: id, studentId: { in: rows.map((r) => r.studentId) } },
+        select: { id: true, studentId: true },
+      });
+      const resultIdMap = new Map(results.map((r) => [r.studentId, r.id]));
+
+      await tx.examMark.deleteMany({ where: { examResultId: { in: results.map((r) => r.id) } } });
+      const markRows = rows.flatMap((r) => {
+        const resultId = resultIdMap.get(r.studentId);
+        if (!resultId) return [];
+        return r.marks
+          .filter((m) => m.marks != null)
+          .map((m) => ({ examResultId: resultId, paperNum: m.paperNum, subjectSlot: m.subjectSlot, marks: m.marks! }));
+      });
+      if (markRows.length > 0) await tx.examMark.createMany({ data: markRows });
+    });
+
+    return reply.send({
+      success: true,
+      data: {
+        imported: rows.length,
+        skipped:  totalRows - rows.length,
+        errors,
+        students: rows.map((r) => ({ name: r.name, total: r.total, attended: r.attended })),
+      },
+    });
   });
 
   // ── PATCH /:id/results/:studentId — toggle exclusion ──────────────────────

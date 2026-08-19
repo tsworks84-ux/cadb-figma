@@ -6,12 +6,13 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
-  ArrowLeft, Save, Loader2, Trash2, RotateCcw,
+  ArrowLeft, Save, Loader2, Trash2, RotateCcw, FileUp,
   Users, BookOpen, Calendar, Clock, FileCheck2, ChevronDown, ChevronUp,
   FileDown, TrendingUp, TrendingDown, Minus,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
+import ImportMarksModal from "../ImportMarksModal";
 import { hasAcademicsAction } from "@/lib/academicsAccess";
 import { format, parseISO } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
@@ -77,6 +78,7 @@ export default function ExamDetailPage() {
   const [search,         setSearch]         = useState("");
   const [showExcluded,   setShowExcluded]   = useState(false);
   const [tab,            setTab]            = useState<"marks" | "overview">("marks");
+  const [importOpen,     setImportOpen]     = useState(false);
 
   // ── Local marks + attendance state ──────────────────────────────────────
   // studentId → slotKey → value string
@@ -761,6 +763,12 @@ export default function ExamDetailPage() {
                 <span className="ml-2 text-red-400">· {excludedRows.length} excluded</span>
               )}
             </span>
+            {canEdit && (
+              <button onClick={() => setImportOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 transition-colors">
+                <FileUp className="h-3.5 w-3.5" /> Import Marks
+              </button>
+            )}
           </div>
 
           {/* Table area */}
@@ -950,6 +958,21 @@ export default function ExamDetailPage() {
             )}
           </div>
         </div>
+      )}
+
+      {importOpen && exam && (
+        <ImportMarksModal
+          examId={id}
+          examName={exam.name}
+          onClose={() => setImportOpen(false)}
+          onImported={() => {
+            // The grid keeps its own copy of every mark, so re-seed it from the
+            // server rather than leaving the imported rows showing stale values.
+            setInitialized(new Set());
+            qc.invalidateQueries({ queryKey: ["assessment-results", id] });
+            qc.invalidateQueries({ queryKey: ["assessment", id] });
+          }}
+        />
       )}
     </div>
   );
