@@ -1,15 +1,171 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { formatDate, getInitials } from "@/lib/utils";
-import { Plus, Search, Trash2, ChevronDown, X, AlertTriangle, UserCheck, UserX, Users, CalendarOff, UserPlus, LogOut, Upload, Download, MoreVertical, Filter } from "lucide-react";
+import { Plus, Search, Trash2, ChevronDown, X, AlertTriangle, UserCheck, UserX, Users, CalendarOff, UserPlus, LogOut, Upload, Download, MoreVertical, Filter, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import type { EmployeeListItem } from "@cadb/types";
 import { toast } from "sonner";
 import { useAuthStore } from "@/store/auth";
+
+// ── Stat card drill-down ──────────────────────────────────────────────────────
+
+/**
+ * The three headline numbers are questions ("who is out today?"), so each one
+ * opens the list behind it. The list comes from `/employees/stats/<metric>`,
+ * which reuses the where-clauses of `/employees/stats`, so the rows can never
+ * disagree with the count that was clicked.
+ */
+type StatMetric = "on-leave-today" | "onboarded-this-month" | "out-this-month";
+
+type StatEmployee = {
+  id: string;
+  employeeCode: string;
+  firstName: string;
+  lastName: string;
+  status: string;
+  joiningDate: string;
+  terminationDate: string | null;
+  department:  { name: string } | null;
+  designation: { title: string } | null;
+  leaveApplications?: {
+    id: string;
+    leaveType: string;
+    fromDate: string;
+    toDate: string;
+    totalDays: number;
+    status: string;
+  }[];
+};
+
+const STAT_MODAL: Record<StatMetric, { title: string; empty: string; icon: typeof Users; iconBg: string; iconColor: string }> = {
+  "on-leave-today":       { title: "On Leave Today",  empty: "Nobody is on leave today.",      icon: CalendarOff, iconBg: "bg-orange-50", iconColor: "text-orange-600" },
+  "onboarded-this-month": { title: "Onboarded",       empty: "Nobody joined this month.",      icon: UserPlus,    iconBg: "bg-green-50",  iconColor: "text-green-600"  },
+  "out-this-month":       { title: "Out",             empty: "Nobody left this month.",        icon: LogOut,      iconBg: "bg-red-50",    iconColor: "text-red-600"    },
+};
+
+function StatDetailModal({ metric, subtitle, onClose }: {
+  metric: StatMetric; subtitle: string; onClose: () => void;
+}) {
+  const cfg = STAT_MODAL[metric];
+
+  const { data: people = [], isLoading } = useQuery<StatEmployee[]>({
+    queryKey: ["employee-stats", metric],
+    queryFn: () => api.get(`/api/v1/employees/stats/${metric}`).then((r) => r.data.data),
+  });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm sm:p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full sm:max-w-2xl max-h-[85vh] sm:max-h-[80vh] flex flex-col rounded-t-2xl sm:rounded-2xl bg-white shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start gap-3 px-5 sm:px-6 py-4 border-b border-gray-100 shrink-0">
+          <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${cfg.iconBg}`}>
+            <cfg.icon className={`h-5 w-5 ${cfg.iconColor}`} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-base font-bold text-gray-900">{cfg.title}</h2>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {isLoading ? "Loading…" : `${people.length} ${people.length === 1 ? "employee" : "employees"} · ${subtitle}`}
+            </p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 shrink-0" aria-label="Close">
+            <X className="h-4 w-4 text-gray-500" />
+          </button>
+        </div>
+
+        {/* List */}
+        <div className="flex-1 overflow-y-auto">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="animate-spin h-5 w-5 border-2 border-gray-300 border-t-transparent rounded-full" />
+            </div>
+          ) : people.length === 0 ? (
+            <p className="px-6 py-12 text-center text-sm text-gray-500">{cfg.empty}</p>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {people.map((p) => {
+                const leave = p.leaveApplications?.[0];
+                return (
+                  <Link
+                    key={p.id}
+                    href={`/dashboard/employees/${p.id}`}
+                    onClick={onClose}
+                    className="flex items-center gap-3 px-5 sm:px-6 py-3.5 hover:bg-gray-50 transition-colors"
+                  >
+                    <div
+                      className="flex h-10 w-10 items-center justify-center rounded-full text-white text-sm font-medium shrink-0"
+                      style={{ backgroundColor: "#2C3E7C" }}
+                    >
+                      {getInitials(p.firstName, p.lastName)}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-medium text-gray-900 truncate">{p.firstName} {p.lastName}</p>
+                        <span className="text-xs text-gray-400 font-mono">{p.employeeCode}</span>
+                        {leave?.status === "CANCELLATION_PENDING" && (
+                          <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
+                            Withdrawal pending
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 truncate">
+                        {[p.designation?.title, p.department?.name].filter(Boolean).join(" · ") || "—"}
+                      </p>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      {metric === "on-leave-today" && leave && (
+                        <>
+                          <p className="text-xs font-semibold text-gray-700">{leave.leaveType.replace(/_/g, " ")}</p>
+                          <p className="text-xs text-gray-500">
+                            {formatDate(leave.fromDate)}
+                            {leave.fromDate.slice(0, 10) !== leave.toDate.slice(0, 10) && ` – ${formatDate(leave.toDate)}`}
+                          </p>
+                        </>
+                      )}
+                      {metric === "onboarded-this-month" && (
+                        <>
+                          <p className="text-xs text-gray-500">Joined</p>
+                          <p className="text-xs font-semibold text-gray-700">{formatDate(p.joiningDate)}</p>
+                        </>
+                      )}
+                      {metric === "out-this-month" && (
+                        <>
+                          <p className="text-xs text-gray-500">Left</p>
+                          <p className="text-xs font-semibold text-gray-700">
+                            {p.terminationDate ? formatDate(p.terminationDate) : "—"}
+                          </p>
+                        </>
+                      )}
+                    </div>
+
+                    <ChevronRight className="h-4 w-4 text-gray-300 shrink-0" />
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── Confirm modal ─────────────────────────────────────────────────────────────
 type ModalAction = "activate" | "deactivate" | "delete";
@@ -255,6 +411,8 @@ export default function EmployeesPage() {
     });
   }, [queryClient]);
 
+  const [statDetail, setStatDetail] = useState<StatMetric | null>(null);
+
   const incompleteCount = employees.filter((e) => !e.profileComplete).length;
 
   const selectedEmployees = employees.filter((e) => selected.has(e.id));
@@ -269,6 +427,17 @@ export default function EmployeesPage() {
 
   return (
     <>
+      {statDetail && (
+        <StatDetailModal
+          metric={statDetail}
+          subtitle={
+            statDetail === "on-leave-today"
+              ? new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })
+              : `${empStats?.monthName ?? new Date().toLocaleString("en-IN", { month: "long" })} ${new Date().getFullYear()}`
+          }
+          onClose={() => setStatDetail(null)}
+        />
+      )}
       {modal && (
         <ConfirmModal
           action={modal}
@@ -315,14 +484,14 @@ export default function EmployeesPage() {
       {/* Stats cards */}
       {isAdmin && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            { label: "Total Employees", value: empStats?.total ?? "—", sub: "active headcount", icon: Users, iconCls: "bg-blue-50", iconColor: "text-blue-600", numColor: "text-gray-900" },
-            { label: "On Leave Today",  value: empStats?.onLeaveToday ?? "—", sub: new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" }), icon: CalendarOff, iconCls: "bg-orange-50", iconColor: "text-orange-600", numColor: "text-gray-900" },
-            { label: `Onboarded in ${empStats?.monthName ?? new Date().toLocaleString("en-IN", { month: "long" })}`, value: empStats?.onboardedThisMonth ?? "—", sub: "joined this month", icon: UserPlus, iconCls: "bg-green-50", iconColor: "text-green-600", numColor: "text-gray-900" },
-            { label: `Out in ${empStats?.monthName ?? new Date().toLocaleString("en-IN", { month: "long" })}`, value: empStats?.quitThisMonth ?? "—", sub: "left this month", icon: LogOut, iconCls: "bg-red-50", iconColor: "text-red-600", numColor: "text-gray-900" },
-          ].map((s) => (
-            <div key={s.label} className="bg-white rounded-lg border border-gray-200 p-5">
-              <div className="flex items-center gap-3 mb-2">
+          {([
+            { label: "Total Employees", value: empStats?.total ?? "—", sub: "active headcount", icon: Users, iconCls: "bg-blue-50", iconColor: "text-blue-600", numColor: "text-gray-900", metric: null },
+            { label: "On Leave Today",  value: empStats?.onLeaveToday ?? "—", sub: new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" }), icon: CalendarOff, iconCls: "bg-orange-50", iconColor: "text-orange-600", numColor: "text-gray-900", metric: "on-leave-today" },
+            { label: `Onboarded in ${empStats?.monthName ?? new Date().toLocaleString("en-IN", { month: "long" })}`, value: empStats?.onboardedThisMonth ?? "—", sub: "joined this month", icon: UserPlus, iconCls: "bg-green-50", iconColor: "text-green-600", numColor: "text-gray-900", metric: "onboarded-this-month" },
+            { label: `Out in ${empStats?.monthName ?? new Date().toLocaleString("en-IN", { month: "long" })}`, value: empStats?.quitThisMonth ?? "—", sub: "left this month", icon: LogOut, iconCls: "bg-red-50", iconColor: "text-red-600", numColor: "text-gray-900", metric: "out-this-month" },
+          ] as { label: string; value: number | string; sub: string; icon: typeof Users; iconCls: string; iconColor: string; numColor: string; metric: StatMetric | null }[]).map((s) => {
+            const body = (
+              <div className="flex items-center gap-3">
                 <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${s.iconCls}`}>
                   <s.icon className={`h-5 w-5 ${s.iconColor}`} />
                 </div>
@@ -332,8 +501,31 @@ export default function EmployeesPage() {
                   <p className="text-xs text-gray-500 mt-0.5">{s.sub}</p>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+
+            // Total Employees isn't clickable — the table below already is that list.
+            if (!s.metric) {
+              return (
+                <div key={s.label} className="bg-white rounded-lg border border-gray-200 p-5">
+                  {body}
+                </div>
+              );
+            }
+
+            return (
+              <button
+                key={s.label}
+                type="button"
+                onClick={() => setStatDetail(s.metric)}
+                className="bg-white rounded-lg border border-gray-200 p-5 text-left w-full hover:border-gray-300 hover:shadow-sm transition-all group"
+              >
+                {body}
+                <span className="mt-2 flex items-center gap-1 text-xs font-medium text-gray-400 group-hover:text-gray-600">
+                  View list <ChevronRight className="h-3 w-3" />
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
 

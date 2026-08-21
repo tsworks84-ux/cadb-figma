@@ -225,6 +225,83 @@ export async function employeeRoutes(fastify: FastifyInstance) {
     });
   });
 
+  // ── The people behind each stat card ────────────────────────────────────────
+  //
+  // Deliberately shares the date windows and where-clauses with /stats above, so
+  // the list a user drills into can never disagree with the number they clicked.
+  fastify.get("/stats/:metric", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN") }, async (request, reply) => {
+    const { metric } = request.params as { metric: string };
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayEnd   = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+    const select = {
+      id: true, employeeCode: true, firstName: true, lastName: true, photoUrl: true,
+      joiningDate: true, terminationDate: true, status: true,
+      department:  { select: { name: true } },
+      designation: { select: { title: true } },
+    };
+
+    if (metric === "on-leave-today") {
+      const employees = await prisma.employee.findMany({
+        where: {
+          deletedAt: null,
+          status: { not: "TERMINATED" },
+          leaveApplications: {
+            some: {
+              status: { in: IN_FORCE_LEAVE_STATUSES },
+              fromDate: { lte: todayEnd },
+              toDate:   { gte: todayStart },
+            },
+          },
+        },
+        select: {
+          ...select,
+          // Only the leave that puts them out today — an employee with several
+          // approved leaves would otherwise show an unrelated future one.
+          leaveApplications: {
+            where: {
+              status: { in: IN_FORCE_LEAVE_STATUSES },
+              fromDate: { lte: todayEnd },
+              toDate:   { gte: todayStart },
+            },
+            select: { id: true, leaveType: true, fromDate: true, toDate: true, totalDays: true, status: true },
+            orderBy: { fromDate: "asc" },
+          },
+        },
+        orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+      });
+      return reply.send({ success: true, data: employees });
+    }
+
+    if (metric === "onboarded-this-month") {
+      const employees = await prisma.employee.findMany({
+        where: { deletedAt: null, joiningDate: { gte: monthStart, lte: monthEnd } },
+        select,
+        orderBy: { joiningDate: "asc" },
+      });
+      return reply.send({ success: true, data: employees });
+    }
+
+    if (metric === "out-this-month") {
+      const employees = await prisma.employee.findMany({
+        where: {
+          deletedAt: null,
+          status: "TERMINATED",
+          terminationDate: { gte: monthStart, lte: monthEnd },
+        },
+        select,
+        orderBy: { terminationDate: "asc" },
+      });
+      return reply.send({ success: true, data: employees });
+    }
+
+    return reply.status(400).send({ success: false, error: "Unknown metric", statusCode: 400 });
+  });
+
   // Name-only staff list for pickers (faculty mentor, subject teacher, PTM
   // attendees, reporting manager). Deliberately separate from the directory
   // below: it carries no contact, salary or personal fields, so it can be opened
