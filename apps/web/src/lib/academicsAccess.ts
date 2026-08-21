@@ -8,7 +8,7 @@ import type { PermMap } from "@/hooks/usePermissions";
 
 /** Every module that maps to a tab / section of Academics. */
 export const ACADEMICS_MODULES = [
-  "ACA_BATCH", "ACA_SUBJECT", "ACA_SETTINGS",
+  "ACA_OVERVIEW", "ACA_BATCH", "ACA_SUBJECT", "ACA_SETTINGS",
   "STU_PROFILE", "STU_ADMISSION", "STU_ATTENDANCE",
   "STU_ASSIGNMENT", "STU_ASSESSMENT", "STU_TIMETABLE",
 ] as const;
@@ -42,7 +42,7 @@ export interface AcademicsTab {
 }
 
 export const ACADEMICS_TABS: AcademicsTab[] = [
-  { name: "Overview",    href: "/dashboard/academics",             module: null,              exact: true  },
+  { name: "Overview",    href: "/dashboard/academics",             module: "ACA_OVERVIEW",    exact: true  },
   { name: "Students",    href: "/dashboard/academics/students",    module: "STU_PROFILE",     exact: false },
   { name: "Schedule",    href: "/dashboard/academics/schedule",    module: "STU_TIMETABLE",   exact: false },
   { name: "Batches",     href: "/dashboard/academics/batches",     module: "ACA_BATCH",       exact: false },
@@ -70,14 +70,34 @@ export function canViewAcademicsTab(
   module: string | null,
 ): boolean {
   if (isAcademicsAdmin(role)) return true;
-  // A `null` module means the page has no dedicated grant (Overview, Reports) —
+  // A `null` module means the page has no dedicated grant (Reports) —
   // any academics view permission is enough to open it.
   if (module === null) return canViewAcademics(role, permissions);
   return permissions[module]?.canView ?? false;
 }
 
+/**
+ * The first Academics page this role may open — Overview when it holds that
+ * grant, otherwise its first granted tab, `null` when it holds nothing.
+ * Every entry point into Academics uses this, so nobody is ever linked to a
+ * page their role can't open.
+ */
+export function firstAcademicsHref(
+  role: string | undefined,
+  permissions: PermMap,
+): string | null {
+  const tab = ACADEMICS_TABS.find(
+    (t) => t.module && canViewAcademicsTab(role, permissions, t.module),
+  );
+  return tab?.href ?? null;
+}
+
 /** Resolve a pathname inside /dashboard/academics to the module that guards it. */
 export function moduleForAcademicsPath(pathname: string): string | null {
+  // The overview lives at the section root, so it can only be matched exactly —
+  // every other academics route starts with the same prefix.
+  if (pathname === "/dashboard/academics") return "ACA_OVERVIEW";
+
   const extra = EXTRA_ROUTE_MODULES.find((r) => pathname.startsWith(r.prefix));
   if (extra) return extra.module;
 

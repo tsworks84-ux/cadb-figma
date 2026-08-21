@@ -16,7 +16,7 @@ import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import Image from "next/image";
 import { usePermissions, ADMIN_MODULES } from "@/hooks/usePermissions";
-import { canViewAcademics } from "@/lib/academicsAccess";
+import { canViewAcademics, firstAcademicsHref } from "@/lib/academicsAccess";
 
 // How long cached data stays fresh — must match each page's staleTime
 const STALE = {
@@ -93,10 +93,13 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
   });
   const openFeedbackCount = (feedbackSummary?.OPEN ?? 0) + (feedbackSummary?.RESPONDED ?? 0);
 
+  // Land on the first page the role may open — Overview is a grant of its own
+  // (ACA_OVERVIEW), so a role holding only, say, Students goes straight there.
+  const academicsLanding = firstAcademicsHref(role, permissions) ?? "/dashboard/academics";
   // For non-admin EMPLOYEE users (teachers), deep-link academics to their own filtered view
   const academicsHref = (!canViewAdmin && role === "EMPLOYEE" && user)
-    ? `/dashboard/academics?teacherId=${user.id}`
-    : "/dashboard/academics";
+    ? `${academicsLanding}?teacherId=${user.id}`
+    : academicsLanding;
   // Academics is only offered to roles that actually hold an academics grant
   const canViewAcademicsNav = canViewAcademics(role, permissions);
 

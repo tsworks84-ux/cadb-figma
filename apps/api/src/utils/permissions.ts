@@ -87,9 +87,15 @@ export const ADMIN_MODULES = [
 
 // ─── ACADEMICS MODULE GATING ────────────────────────────────────────────────
 
-/** Every module that maps to a tab / section of the Academics area. */
+/**
+ * Every module that maps to a tab / section of the Academics area.
+ *
+ * ACA_OVERVIEW guards the Academics landing dashboard. It aggregates org-wide
+ * figures (enrolment, revenue, today's lectures), so it is a grant of its own
+ * rather than something any academics permission implies.
+ */
 export const ACADEMICS_MODULES = [
-  "ACA_BATCH", "ACA_SUBJECT", "ACA_SETTINGS",
+  "ACA_OVERVIEW", "ACA_BATCH", "ACA_SUBJECT", "ACA_SETTINGS",
   "STU_PROFILE", "STU_ADMISSION", "STU_ATTENDANCE",
   "STU_ASSIGNMENT", "STU_ASSESSMENT", "STU_TIMETABLE",
 ] as const;

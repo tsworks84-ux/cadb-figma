@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
+import { firstAcademicsHref } from "@/lib/academicsAccess";
 import { toast } from "sonner";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -3680,6 +3681,9 @@ export default function EmployeeDetailPage() {
   const isSelfView = currentUser?.id === id;
   const canEditPhoto = isAdmin || isSelfView;
   const permissions = usePermissions();
+  // Opening a teacher's academics lands on Overview only if this viewer holds
+  // ACA_OVERVIEW; otherwise on the first academics page they may open.
+  const teacherAcademicsHref = firstAcademicsHref(currentUser?.role, permissions) ?? "/dashboard/academics";
 
   // Employee self-view: only Personal, Documents, Position, Salary
   const SELF_VIEW_TABS = new Set(["personal", "documents", "position", "salary"]);
@@ -5453,7 +5457,7 @@ export default function EmployeeDetailPage() {
                 </p>
               </div>
               <a
-                href={`/dashboard/academics?teacherId=${id}`}
+                href={`${teacherAcademicsHref}?teacherId=${id}`}
                 className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition-colors shrink-0 shadow-sm"
               >
                 Open View <ChevronRight className="h-4 w-4" />

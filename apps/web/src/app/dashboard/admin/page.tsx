@@ -49,6 +49,7 @@ const MODULE_ROWS: ModuleRow[] = [
   { key: "MIS_HOLIDAYS",       label: "Holidays List",            indent: true },
   { key: "MIS_CLAIMS",         label: "Claims Report",            indent: true },
   { key: "_ACA_HEADER",       label: "Academics",                isHeader: true },
+  { key: "ACA_OVERVIEW",      label: "Overview",                 indent: true },
   { key: "ACA_BATCH",         label: "Batches",                  indent: true },
   { key: "ACA_SUBJECT",       label: "Subjects",                 indent: true },
   { key: "STU_PROFILE",       label: "Students",                 indent: true },

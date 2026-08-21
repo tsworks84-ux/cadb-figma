@@ -1,13 +1,10 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useAuthStore } from "@/store/auth";
-import { usePermissionsState } from "@/hooks/usePermissions";
-import { ACADEMICS_TABS, canViewAcademicsTab, isAcademicsAdmin } from "@/lib/academicsAccess";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   BarChart2, X, ChevronRight, Clock, MapPin, BookOpen,
@@ -302,22 +299,12 @@ function ScheduleModal({ schedules, onClose }: { schedules: any[]; onClose: () =
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 function AcademicsOverviewPage() {
-  const router       = useRouter();
   const searchParams = useSearchParams();
   const teacherId    = searchParams.get("teacherId");
-  const { user }     = useAuthStore();
-  const { permissions, ready } = usePermissionsState();
 
-  // The overview aggregates org-wide figures, so it stays an admin (or explicitly
-  // teacher-scoped) view. Anyone else lands on the first tab they're granted.
-  const firstAllowedTab = ACADEMICS_TABS.find(
-    (t) => t.module && canViewAcademicsTab(user?.role, permissions, t.module),
-  );
-
-  useEffect(() => {
-    if (!ready || teacherId || isAcademicsAdmin(user?.role)) return;
-    if (firstAllowedTab) router.replace(firstAllowedTab.href);
-  }, [ready, teacherId, user?.role, firstAllowedTab, router]);
+  // Access is decided by the layout guard: the overview aggregates org-wide
+  // figures, so it needs the ACA_OVERVIEW grant. Roles without it are sent to
+  // their first granted tab before this component ever renders.
 
   const [revenueOpen,      setRevenueOpen]      = useState(false);
   const [scheduleOpen,     setScheduleOpen]     = useState(false);

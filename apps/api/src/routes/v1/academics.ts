@@ -57,10 +57,11 @@ export async function academicsRoutes(fastify: FastifyInstance) {
     const own = url.match(/^\/api\/v1\/academics\/employees\/([^/]+)\/batches$/);
     if (own && own[1] === (request.user as any)?.sub) return null;
 
+    // The overview dashboard is org-wide, so it has a grant of its own.
+    if (url.endsWith("/overview")) return "ACA_OVERVIEW";
     // Batch-scoped routes (incl. /batches/:id/subjects) belong to ACA_BATCH.
     if (url.includes("/batches"))  return "ACA_BATCH";
     if (url.includes("/subjects")) return "ACA_SUBJECT";
-    // Overview dashboard — any academics grant is enough to land on it.
     return [...ACADEMICS_MODULES];
   }));
 

@@ -14,7 +14,7 @@ import { canViewAcademicsTab } from "@/lib/academicsAccess";
 import Image from "next/image";
 
 const NAV_ITEMS = [
-  { name: "Overview",     href: "/dashboard/academics",             icon: LayoutDashboard, permKey: null,              exact: true  },
+  { name: "Overview",     href: "/dashboard/academics",             icon: LayoutDashboard, permKey: "ACA_OVERVIEW",    exact: true  },
   { name: "Students",     href: "/dashboard/academics/students",    icon: Users2,          permKey: "STU_PROFILE",     exact: false },
   { name: "Schedule",     href: "/dashboard/academics/schedule",    icon: CalendarDays,    permKey: "STU_TIMETABLE",   exact: false },
   { name: "Batches",      href: "/dashboard/academics/batches",     icon: School,          permKey: "ACA_BATCH",       exact: false },

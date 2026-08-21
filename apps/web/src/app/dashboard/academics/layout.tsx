@@ -1,13 +1,17 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ShieldOff, ArrowLeft } from "lucide-react";
 import { AcademicsTopNav, AcademicsMobileTabStrip } from "@/components/academics/AcademicsTopNav";
 import { useAuthStore } from "@/store/auth";
 import { usePermissionsState } from "@/hooks/usePermissions";
-import { canViewAcademics, canViewAcademicsTab, moduleForAcademicsPath } from "@/lib/academicsAccess";
+import {
+  canViewAcademics, canViewAcademicsTab, firstAcademicsHref, moduleForAcademicsPath,
+} from "@/lib/academicsAccess";
+
+const OVERVIEW_HREF = "/dashboard/academics";
 
 export default function AcademicsLayout({ children }: { children: React.ReactNode }) {
 
@@ -20,7 +24,9 @@ export default function AcademicsLayout({ children }: { children: React.ReactNod
         <AcademicsMobileTabStrip />
       </Suspense>
       <main className="flex-1 overflow-y-auto" style={{ background: "#f4f6fa" }}>
-        <AcademicsAccessGuard>{children}</AcademicsAccessGuard>
+        <Suspense fallback={null}>
+          <AcademicsAccessGuard>{children}</AcademicsAccessGuard>
+        </Suspense>
       </main>
     </div>
   );
@@ -32,16 +38,33 @@ export default function AcademicsLayout({ children }: { children: React.ReactNod
  * The API enforces the same rule — this is UX, not the security boundary.
  */
 function AcademicsAccessGuard({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
+  const pathname     = usePathname();
+  const router       = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuthStore();
   const { permissions, ready } = usePermissionsState();
 
   // Don't judge access until auth has hydrated and the permission fetch resolved
-  if (!user || !ready) return null;
+  const settled = !!user && ready;
 
-  const allowed = canViewAcademics(user?.role, permissions)
-    && canViewAcademicsTab(user?.role, permissions, moduleForAcademicsPath(pathname));
+  const allowed = settled
+    && canViewAcademics(user.role, permissions)
+    && canViewAcademicsTab(user.role, permissions, moduleForAcademicsPath(pathname));
 
+  // The overview is the section's landing page, so an old bookmark or a stale
+  // link can still drop a role without ACA_OVERVIEW here. Send it to the first
+  // tab it does hold; the denial screen is for roles with nothing in Academics.
+  const fallback = settled ? firstAcademicsHref(user.role, permissions) : null;
+  const teacherId = searchParams.get("teacherId");
+  const redirectTo = settled && !allowed && pathname === OVERVIEW_HREF && fallback
+    ? (teacherId ? `${fallback}?teacherId=${teacherId}` : fallback)
+    : null;
+
+  useEffect(() => {
+    if (redirectTo) router.replace(redirectTo);
+  }, [redirectTo, router]);
+
+  if (!settled || redirectTo) return null;
   if (!allowed) return <AcademicsAccessDenied />;
 
   return <>{children}</>;
