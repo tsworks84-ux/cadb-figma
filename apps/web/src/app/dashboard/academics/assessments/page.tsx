@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, Suspense } from "react";
+import { useState, useEffect, useRef, useMemo, Suspense } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -135,30 +135,54 @@ function BatchMultiSelect({ batches, selected, onChange }: {
   batches: any[]; selected: string[]; onChange: (ids: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!open) return;
     const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [open]);
+  useEffect(() => {
+    if (open) searchRef.current?.focus();
+    else setQuery("");
+  }, [open]);
   const toggle = (id: string) =>
     selected.includes(id) ? onChange(selected.filter((x) => x !== id)) : onChange([...selected, id]);
   const names = batches.filter((b) => selected.includes(b.id)).map((b) => b.name).join(", ");
+  const q = query.trim().toLowerCase();
+  const visible = q
+    ? batches.filter((b) => `${b.name} ${b.grade?.name ?? ""}`.toLowerCase().includes(q))
+    : batches;
   return (
     <div style={{ position: "relative" }} ref={ref}>
-      <button type="button" onClick={() => setOpen((v) => !v)}
-        style={{ ...inputBase, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, textAlign: "left", color: selected.length === 0 ? D.muted : D.ink }}>
-          {selected.length === 0 ? "Select batches…" : names}
-        </span>
-        <ChevronDown style={{ width: 16, height: 16, color: D.muted, flexShrink: 0, marginLeft: 6, transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
-      </button>
+      <div onClick={() => { setOpen(true); searchRef.current?.focus(); }}
+        style={{ ...inputBase, display: "flex", alignItems: "center", cursor: open ? "text" : "pointer" }}>
+        {open ? (
+          <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)}
+            placeholder="Type to search batches…"
+            onKeyDown={(e: React.KeyboardEvent) => {
+              if (e.key === "Escape") { e.preventDefault(); setOpen(false); }
+              if (e.key === "Enter") { e.preventDefault(); if (visible.length === 1) toggle(visible[0].id); }
+            }}
+            style={{ flex: 1, minWidth: 0, border: "none", outline: "none", background: "transparent", font: "inherit", fontSize: 14, color: D.ink, padding: 0 }} />
+        ) : (
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, textAlign: "left", color: selected.length === 0 ? D.muted : D.ink }}>
+            {selected.length === 0 ? "Select batches…" : names}
+          </span>
+        )}
+        <button type="button" onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+          style={{ border: "none", background: "none", padding: 0, cursor: "pointer", display: "flex", flexShrink: 0, marginLeft: 6 }}>
+          <ChevronDown style={{ width: 16, height: 16, color: D.muted, transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+        </button>
+      </div>
       {open && (
         <div style={{ position: "absolute", zIndex: 50, top: "100%", marginTop: 4, width: "100%", background: "white", border: `1px solid ${D.line}`, borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,.12)" }}>
           <div style={{ maxHeight: 200, overflowY: "auto" }}>
             {batches.length === 0 && <p style={{ padding: "10px 14px", fontSize: 13, color: D.muted }}>No batches for this year</p>}
-            {batches.map((b) => (
+            {batches.length > 0 && visible.length === 0 && <p style={{ padding: "10px 14px", fontSize: 13, color: D.muted }}>No batches match “{query.trim()}”</p>}
+            {visible.map((b) => (
               <label key={b.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", cursor: "pointer", fontSize: 14 }}>
                 <input type="checkbox" checked={selected.includes(b.id)} onChange={() => toggle(b.id)} style={{ accentColor: "#4f46e5" }} />
                 <span style={{ color: D.ink }}>{b.name}</span>
@@ -455,6 +479,7 @@ function ExamCard({ exam, canEdit, canDelete, onEdit, onDelete, onStatus }: {
 }) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [syllabusOpen, setSyllabusOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!menuOpen) return;
@@ -473,6 +498,24 @@ function ExamCard({ exam, canEdit, canDelete, onEdit, onDelete, onStatus }: {
         return ps ? `P${pi + 1}: ${ps}` : null;
       }).filter(Boolean).join(" · ")
     : uniqueNames.join(", ");
+
+  // Syllabus grouped subject-wise (one group per paper+subject, topics de-duped)
+  const syllabus = useMemo(() => {
+    const groups: { key: string; label: string; topics: string[] }[] = [];
+    examSubjects.forEach((es: any) => {
+      const list = es.topics ? es.topics.split(",").map((t: string) => t.trim()).filter(Boolean) : [];
+      if (list.length === 0) return;
+      const name = es.subject?.name ?? "Other";
+      const key = `${es.paperNum ?? 1}-${name}`;
+      const label = exam.numPapers > 1 ? `Paper ${es.paperNum ?? 1} · ${name}` : name;
+      const existing = groups.find((g) => g.key === key);
+      const target = existing ?? { key, label, topics: [] as string[] };
+      if (!existing) groups.push(target);
+      list.forEach((t: string) => { if (!target.topics.includes(t)) target.topics.push(t); });
+    });
+    return groups;
+  }, [examSubjects, exam.numPapers]);
+  const topicCount = syllabus.reduce((n, g) => n + g.topics.length, 0);
 
   // Status-only menu items (edit/archive/delete are separate visible buttons)
   const statusItems = [
@@ -524,14 +567,40 @@ function ExamCard({ exam, canEdit, canDelete, onEdit, onDelete, onStatus }: {
           )}
         </div>
 
-        {/* Topic chips */}
-        {examSubjects.some((es: any) => es.topics) && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 7 }}>
-            {examSubjects.flatMap((es: any) =>
-              es.topics ? es.topics.split(",").map((t: string) => t.trim()).filter(Boolean) : []
-            ).filter((t: string, i: number, arr: string[]) => arr.indexOf(t) === i).map((t: string) => (
-              <span key={t} style={{ borderRadius: 6, background: "#f1f5f9", border: "1px solid #e2e8f0", padding: "3px 10px", fontSize: 12, fontWeight: 700, color: "#475569" }}>{t}</span>
-            ))}
+        {/* Syllabus — subject-wise, collapsed until the tab is clicked */}
+        {syllabus.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <button type="button" onClick={() => setSyllabusOpen((v) => !v)}
+              aria-expanded={syllabusOpen}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer",
+                border: `1px solid ${syllabusOpen ? "#c7d2fe" : D.line}`, borderRadius: 8,
+                background: syllabusOpen ? "#eef2ff" : "white", padding: "4px 10px",
+                fontSize: 12, fontWeight: 800, color: syllabusOpen ? "#4338ca" : "#475569",
+              }}>
+              <BookOpen style={{ width: 12, height: 12, flexShrink: 0 }} />
+              Syllabus
+              <span style={{ fontWeight: 700, color: D.muted }}>
+                ({topicCount} {topicCount === 1 ? "topic" : "topics"})
+              </span>
+              <ChevronDown style={{ width: 12, height: 12, flexShrink: 0, transform: syllabusOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+            </button>
+            {syllabusOpen && (
+              <div style={{ display: "grid", gap: 10, marginTop: 8, paddingLeft: 2 }}>
+                {syllabus.map((g) => (
+                  <div key={g.key}>
+                    <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".4px", textTransform: "uppercase", color: "#64748b", marginBottom: 4 }}>
+                      {g.label}
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                      {g.topics.map((t) => (
+                        <span key={t} style={{ borderRadius: 6, background: "#f1f5f9", border: "1px solid #e2e8f0", padding: "3px 10px", fontSize: 12, fontWeight: 700, color: "#475569" }}>{t}</span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
         <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 5, fontWeight: 500 }}>created on {format(new Date(exam.createdAt), "d MMM yyyy")}</p>

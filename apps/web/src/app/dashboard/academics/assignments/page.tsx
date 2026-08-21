@@ -194,7 +194,9 @@ function BatchMultiSelect({ batches, selected, onChange }: {
   batches: any[]; selected: string[]; onChange: (ids: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -205,38 +207,70 @@ function BatchMultiSelect({ batches, selected, onChange }: {
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
+  useEffect(() => {
+    if (open) searchRef.current?.focus();
+    else setQuery("");
+  }, [open]);
+
   const toggle = (id: string) =>
     selected.includes(id) ? onChange(selected.filter((x) => x !== id)) : onChange([...selected, id]);
 
   const selectedNames = batches.filter((b) => selected.includes(b.id)).map((b) => b.name).join(", ");
+  const q = query.trim().toLowerCase();
+  const visible = q
+    ? batches.filter((b) => `${b.name} ${b.grade?.name ?? ""}`.toLowerCase().includes(q))
+    : batches;
 
   return (
     <div className="relative" ref={ref}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
+      <div
+        onClick={() => { setOpen(true); searchRef.current?.focus(); }}
         style={{
           ...inputBase, display: "flex", alignItems: "center",
-          justifyContent: "space-between", cursor: "pointer", textAlign: "left",
+          cursor: open ? "text" : "pointer", textAlign: "left",
         }}
       >
-        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {selected.length === 0
-            ? <span style={{ color: D.muted }}>Select batches…</span>
-            : selectedNames}
-        </span>
-        <ChevronDown style={{
-          width: 16, height: 16, color: D.muted, flexShrink: 0, marginLeft: 4,
-          transform: open ? "rotate(180deg)" : "none", transition: "transform .15s",
-        }} />
-      </button>
+        {open ? (
+          <input
+            ref={searchRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Type to search batches…"
+            onKeyDown={(e: React.KeyboardEvent) => {
+              if (e.key === "Escape") { e.preventDefault(); setOpen(false); }
+              if (e.key === "Enter") { e.preventDefault(); if (visible.length === 1) toggle(visible[0].id); }
+            }}
+            className="flex-1 min-w-0 border-none outline-none bg-transparent p-0 text-sm"
+            style={{ color: D.ink, font: "inherit", fontSize: 14 }}
+          />
+        ) : (
+          <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {selected.length === 0
+              ? <span style={{ color: D.muted }}>Select batches…</span>
+              : selectedNames}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+          className="shrink-0 ml-1 flex border-none bg-transparent p-0 cursor-pointer"
+        >
+          <ChevronDown style={{
+            width: 16, height: 16, color: D.muted,
+            transform: open ? "rotate(180deg)" : "none", transition: "transform .15s",
+          }} />
+        </button>
+      </div>
       {open && (
         <div className="absolute z-50 mt-1 w-full rounded-xl bg-white shadow-lg border" style={{ borderColor: D.line }}>
           <div className="max-h-48 overflow-y-auto">
             {batches.length === 0 && (
               <p className="px-3 py-2 text-xs" style={{ color: D.muted }}>No batches for this year</p>
             )}
-            {batches.map((b) => (
+            {batches.length > 0 && visible.length === 0 && (
+              <p className="px-3 py-2 text-xs" style={{ color: D.muted }}>No batches match “{query.trim()}”</p>
+            )}
+            {visible.map((b) => (
               <label key={b.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer">
                 <input type="checkbox" checked={selected.includes(b.id)} onChange={() => toggle(b.id)} className="accent-indigo-600" />
                 <span className="text-sm" style={{ color: D.ink }}>{b.name}</span>
