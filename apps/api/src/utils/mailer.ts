@@ -9,6 +9,19 @@ const transporter = nodemailer.createTransport({
     : undefined,
 });
 
+/**
+ * Opens a connection and authenticates, without sending anything. The fastest
+ * way to tell a wrong password from a blocked port from a working setup —
+ * nodemailer surfaces the provider's actual rejection here, whereas a failed
+ * send buries it behind a queued notification.
+ */
+export async function verifySmtp(): Promise<void> {
+  if (!process.env.SMTP_HOST) {
+    throw new Error("SMTP_HOST is not set");
+  }
+  await transporter.verify();
+}
+
 export interface MailOptions {
   to: string;
   cc?: string;
