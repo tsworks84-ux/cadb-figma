@@ -315,7 +315,9 @@ export async function employeeRoutes(fastify: FastifyInstance) {
     const q = request.query as Record<string, string>;
 
     const privileged = user.role === "SUPER_ADMIN" || user.role === "HR_ADMIN" || user.role === "DEPT_HEAD";
-    const allowedModules = [...ACADEMICS_MODULES, "EMP_PROFILE"];
+    // ADM_DEPARTMENTS is here for the HR-partner picker on the Administration
+    // tab: a role granted only that tab still has to be able to name a person.
+    const allowedModules = [...ACADEMICS_MODULES, "EMP_PROFILE", "ADM_DEPARTMENTS"];
     if (!privileged && !(await hasAnyPermission(user, allowedModules, "canView"))) {
       return reply.status(403).send({ success: false, error: "Forbidden", statusCode: 403 });
     }
@@ -627,6 +629,7 @@ export async function employeeRoutes(fastify: FastifyInstance) {
     // Employees can only update limited fields
     const allowedForEmployee = [
       "personalPhone", "officialPhone", "personalEmail",
+      "whatsappNumber", "whatsappOptIn",
       "dateOfBirth", "gender", "maritalStatus", "bloodGroup", "religion", "nationality",
       "currentAddress", "permanentAddress",
       "emergencyContactName", "emergencyContactPhone", "emergencyRelation",

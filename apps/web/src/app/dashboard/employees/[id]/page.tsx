@@ -634,6 +634,9 @@ const personalEditSchema = z.object({
     .optional().or(z.literal("")),
   personalPhone: phoneField,
   officialPhone: phoneField,
+  // Leave blank to use the official phone, then the personal one.
+  whatsappNumber: phoneField,
+  whatsappOptIn: z.boolean().optional(),
   personalEmail: z.string()
     .refine((v) => v === "" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()), "Enter a valid email address")
     .optional().or(z.literal("")),
@@ -670,6 +673,8 @@ function EditPersonalForm({
       uanNumber: emp.uanNumber ?? "",
       personalPhone: emp.personalPhone ?? "",
       officialPhone: emp.officialPhone ?? "",
+      whatsappNumber: emp.whatsappNumber ?? "",
+      whatsappOptIn: emp.whatsappOptIn ?? true,
       personalEmail: emp.personalEmail ?? "",
       maritalStatus: emp.maritalStatus ?? "",
       bloodGroup: emp.bloodGroup ?? "",
@@ -709,6 +714,10 @@ function EditPersonalForm({
       else payload.personalPhone = digitsOf(payload.personalPhone);
       if (!payload.officialPhone) delete payload.officialPhone;
       else payload.officialPhone = digitsOf(payload.officialPhone);
+      // Blank means "fall back to the phone fields", so send null to clear it
+      // rather than dropping the key. Keep any leading "+" — the server needs
+      // it to tell an international number from a local one.
+      payload.whatsappNumber = payload.whatsappNumber?.trim() || null;
       if (!payload.personalEmail) delete payload.personalEmail;
       else payload.personalEmail = payload.personalEmail.trim();
       if (!payload.maritalStatus) delete payload.maritalStatus;
@@ -876,6 +885,14 @@ function EditPersonalForm({
         <div>
           <FInput label="Official Phone" maxLength={15} {...register("officialPhone")} />
           <ErrMsg err={errors.officialPhone} />
+        </div>
+        <div>
+          <FInput label="WhatsApp Number" maxLength={16} placeholder="Defaults to official phone" {...register("whatsappNumber")} />
+          <ErrMsg err={errors.whatsappNumber} />
+          <label className="mt-2 flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" className="w-4 h-4 rounded border-gray-300" style={{ accentColor: "#2C3E7C" }} {...register("whatsappOptIn")} />
+            <span className="text-xs text-gray-600">Send leave notifications on WhatsApp</span>
+          </label>
         </div>
         <ReadField label="Official Email" value={emp.email} />
         <div>

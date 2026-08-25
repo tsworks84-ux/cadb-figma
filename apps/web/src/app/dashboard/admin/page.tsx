@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -81,26 +81,49 @@ const ROLE_META: Record<string, { label: string; color: string; description: str
 };
 
 // ── Departments Tab ──────────────────────────────────────────────────────────
+/** HR-partner picker. Module level, so changing the selection doesn't remount it. */
+function HrSelect({ people, value, onChange }: { people: any[]; value: string; onChange: (v: string) => void }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full min-w-[10rem] rounded-lg border border-gray-200 px-2 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+    >
+      <option value="">All HR Admins</option>
+      {people.map((p) => (
+        <option key={p.id} value={p.id}>{p.firstName} {p.lastName} ({p.employeeCode})</option>
+      ))}
+    </select>
+  );
+}
+
 function DepartmentsTab({ perms }: { perms: ModulePerms }) {
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", code: "" });
-  const [editForm, setEditForm] = useState({ name: "", code: "" });
+  const [form, setForm] = useState({ name: "", code: "", hrPartnerId: "" });
+  const [editForm, setEditForm] = useState({ name: "", code: "", hrPartnerId: "" });
 
   const { data: departments, isLoading } = useQuery({
     queryKey: ["departments-admin"],
     queryFn: () => api.get("/api/v1/departments").then((r) => r.data.data),
   });
 
+  // Name-only lookup: /api/v1/employees caps at 100 and needs department access,
+  // which an admin editing departments may not have.
+  const { data: people = [] } = useQuery<any[]>({
+    queryKey: ["employees-lookup"],
+    queryFn: () => api.get("/api/v1/employees/lookup").then((r) => r.data.data),
+  });
+
   const createMut = useMutation({
-    mutationFn: () => api.post("/api/v1/departments", { name: form.name, code: form.code.toUpperCase() }),
-    onSuccess: () => { toast.success("Department created"); setAdding(false); setForm({ name: "", code: "" }); qc.invalidateQueries({ queryKey: ["departments-admin"] }); qc.invalidateQueries({ queryKey: ["departments"] }); },
+    mutationFn: () => api.post("/api/v1/departments", { name: form.name, code: form.code.toUpperCase(), hrPartnerId: form.hrPartnerId || null }),
+    onSuccess: () => { toast.success("Department created"); setAdding(false); setForm({ name: "", code: "", hrPartnerId: "" }); qc.invalidateQueries({ queryKey: ["departments-admin"] }); qc.invalidateQueries({ queryKey: ["departments"] }); },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
   });
 
   const updateMut = useMutation({
-    mutationFn: (id: string) => api.patch(`/api/v1/departments/${id}`, { name: editForm.name, code: editForm.code.toUpperCase() }),
+    mutationFn: (id: string) => api.patch(`/api/v1/departments/${id}`, { name: editForm.name, code: editForm.code.toUpperCase(), hrPartnerId: editForm.hrPartnerId || null }),
     onSuccess: () => { toast.success("Updated"); setEditId(null); qc.invalidateQueries({ queryKey: ["departments-admin"] }); qc.invalidateQueries({ queryKey: ["departments"] }); },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
   });
@@ -111,11 +134,11 @@ function DepartmentsTab({ perms }: { perms: ModulePerms }) {
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Cannot delete"),
   });
 
-  function startEdit(d: any) { setEditId(d.id); setEditForm({ name: d.name, code: d.code }); }
+  function startEdit(d: any) { setEditId(d.id); setEditForm({ name: d.name, code: d.code, hrPartnerId: d.hrPartnerId ?? "" }); }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-gray-500">{departments?.length ?? 0} departments</p>
         {perms.canCreate && (
           <button
@@ -127,13 +150,20 @@ function DepartmentsTab({ perms }: { perms: ModulePerms }) {
         )}
       </div>
 
+      <p className="text-xs text-gray-500">
+        The HR partner receives leave and claim notifications for the department.
+        Leave it as <span className="font-medium">All HR Admins</span> to notify the whole HR team instead.
+      </p>
+
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-        <table className="w-full">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[40rem]">
           <thead>
             <tr className="border-b border-gray-100 bg-gray-50">
               <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Name</th>
               <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Code</th>
-              <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Employees</th>
+              <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">HR Partner</th>
+              <th className="hidden sm:table-cell px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Employees</th>
               <th className="px-5 py-3" />
             </tr>
           </thead>
@@ -147,20 +177,23 @@ function DepartmentsTab({ perms }: { perms: ModulePerms }) {
                 <td className="px-5 py-3">
                   <Input value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))} placeholder="CODE" className="font-mono uppercase" maxLength={10} />
                 </td>
-                <td className="px-5 py-3 text-sm text-gray-400">—</td>
+                <td className="px-5 py-3">
+                  <HrSelect people={people} value={form.hrPartnerId} onChange={(v) => setForm((f) => ({ ...f, hrPartnerId: v }))} />
+                </td>
+                <td className="hidden sm:table-cell px-5 py-3 text-sm text-gray-400">—</td>
                 <td className="px-5 py-3">
                   <div className="flex items-center gap-2 justify-end">
                     <button onClick={() => createMut.mutate()} disabled={!form.name || !form.code || createMut.isPending} className="rounded-md px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-60" style={{ backgroundColor: "#2C3E7C" }}>
                       {createMut.isPending ? "Saving…" : "Save"}
                     </button>
-                    <button onClick={() => { setAdding(false); setForm({ name: "", code: "" }); }} className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs hover:bg-gray-50">Cancel</button>
+                    <button onClick={() => { setAdding(false); setForm({ name: "", code: "", hrPartnerId: "" }); }} className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs hover:bg-gray-50">Cancel</button>
                   </div>
                 </td>
               </tr>
             )}
             {isLoading
               ? Array.from({ length: 3 }).map((_, i) => (
-                  <tr key={i}><td colSpan={4} className="px-5 py-4"><div className="h-4 bg-gray-100 rounded animate-pulse" /></td></tr>
+                  <tr key={i}><td colSpan={5} className="px-5 py-4"><div className="h-4 bg-gray-100 rounded animate-pulse" /></td></tr>
                 ))
               : departments?.map((d: any) => (
                   <tr key={d.id} className="hover:bg-gray-50">
@@ -176,7 +209,15 @@ function DepartmentsTab({ perms }: { perms: ModulePerms }) {
                         : <span className="text-sm font-mono text-gray-500">{d.code}</span>
                       }
                     </td>
-                    <td className="px-5 py-4 text-sm text-gray-500">{d._count?.employees ?? 0}</td>
+                    <td className="px-5 py-4">
+                      {editId === d.id
+                        ? <HrSelect people={people} value={editForm.hrPartnerId} onChange={(v) => setEditForm((f) => ({ ...f, hrPartnerId: v }))} />
+                        : d.hrPartner
+                          ? <span className="text-sm text-gray-900">{d.hrPartner.firstName} {d.hrPartner.lastName}</span>
+                          : <span className="text-sm italic text-gray-400">All HR Admins</span>
+                      }
+                    </td>
+                    <td className="hidden sm:table-cell px-5 py-4 text-sm text-gray-500">{d._count?.employees ?? 0}</td>
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-2 justify-end">
                         {editId === d.id ? (
@@ -210,6 +251,7 @@ function DepartmentsTab({ perms }: { perms: ModulePerms }) {
             }
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );
@@ -1571,6 +1613,164 @@ function ClaimTypesTab({ perms }: { perms: ModulePerms }) {
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
+// ── Notifications Tab (Super Admin only) ─────────────────────────────────────
+type NotifSetting = { event: string; emailEnabled: boolean; whatsappEnabled: boolean };
+type NotifEventMeta = { event: string; group: string; label: string; audience: string };
+
+function NotificationsTab() {
+  const qc = useQueryClient();
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["notification-settings"],
+    queryFn: () => api.get("/api/v1/notification-settings").then((r) => r.data.data),
+  });
+
+  const saveMut = useMutation({
+    mutationFn: (row: NotifSetting) => api.patch("/api/v1/notification-settings", row),
+    // Optimistic: a checkbox that waits for a round trip before moving feels broken.
+    onMutate: async (row) => {
+      await qc.cancelQueries({ queryKey: ["notification-settings"] });
+      const prev = qc.getQueryData<any>(["notification-settings"]);
+      qc.setQueryData<any>(["notification-settings"], (d: any) =>
+        d ? { ...d, settings: d.settings.map((s: NotifSetting) => (s.event === row.event ? row : s)) } : d,
+      );
+      return { prev };
+    },
+    onError: (e: any, _row, ctx) => {
+      qc.setQueryData(["notification-settings"], ctx?.prev);
+      toast.error(e.response?.data?.error ?? "Could not save");
+    },
+    onSuccess: () => toast.success("Saved"),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["notification-settings"] }),
+  });
+
+  if (isLoading || !data) {
+    return <div className="h-64 rounded-xl bg-gray-100 animate-pulse" />;
+  }
+
+  const settings: NotifSetting[] = data.settings;
+  const events: NotifEventMeta[] = data.events;
+  const globalKey: string = data.globalKey;
+  const byEvent = Object.fromEntries(settings.map((s) => [s.event, s]));
+  const master: NotifSetting = byEvent[globalKey] ?? { event: globalKey, emailEnabled: true, whatsappEnabled: true };
+
+  function toggle(event: string, channel: "emailEnabled" | "whatsappEnabled", value: boolean) {
+    const current = byEvent[event] ?? { event, emailEnabled: true, whatsappEnabled: true };
+    saveMut.mutate({ ...current, [channel]: value });
+  }
+
+  const groups = [...new Set(events.map((e) => e.group))];
+
+  function Check({
+    checked, disabled, onChange, label,
+  }: { checked: boolean; disabled?: boolean; onChange: (v: boolean) => void; label: string }) {
+    return (
+      <input
+        type="checkbox"
+        aria-label={label}
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        className="w-4 h-4 rounded border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed"
+        style={{ accentColor: "#2C3E7C" }}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-gray-500">
+        Controls which notifications leave the system. Unticking a box stops future notices only —
+        anything already queued still goes out.
+      </p>
+
+      {/* Master switches */}
+      <div className="rounded-xl border border-gray-200 bg-white p-5">
+        <h3 className="text-sm font-semibold text-gray-900">All notifications</h3>
+        <p className="text-xs text-gray-500 mt-0.5 mb-4">
+          Master switch. Turning a channel off here silences it everywhere, whatever the rows below say.
+        </p>
+        <div className="flex flex-wrap gap-x-8 gap-y-3">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <Check
+              label="Email — all notifications"
+              checked={master.emailEnabled}
+              onChange={(v) => toggle(globalKey, "emailEnabled", v)}
+            />
+            <span className="text-sm text-gray-700">Email</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <Check
+              label="WhatsApp — all notifications"
+              checked={master.whatsappEnabled}
+              onChange={(v) => toggle(globalKey, "whatsappEnabled", v)}
+            />
+            <span className="text-sm text-gray-700">WhatsApp</span>
+          </label>
+        </div>
+      </div>
+
+      {/* Per-event grid */}
+      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[36rem]">
+            <thead>
+              <tr className="border-b border-gray-100 bg-gray-50">
+                <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Event</th>
+                <th className="hidden md:table-cell px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Goes to</th>
+                <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Email</th>
+                <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">WhatsApp</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {groups.map((group) => (
+                <Fragment key={group}>
+                  <tr className="bg-gray-50/60">
+                    <td colSpan={4} className="px-5 py-2 text-xs font-semibold text-gray-600 uppercase tracking-wider">{group}</td>
+                  </tr>
+                  {events.filter((e) => e.group === group).map((e) => {
+                    const row = byEvent[e.event] ?? { event: e.event, emailEnabled: true, whatsappEnabled: true };
+                    return (
+                      <tr key={e.event} className="hover:bg-gray-50">
+                        <td className="px-5 py-3">
+                          <span className="text-sm font-medium text-gray-900">{e.label}</span>
+                          <span className="block md:hidden text-xs text-gray-400 mt-0.5">{e.audience}</span>
+                        </td>
+                        <td className="hidden md:table-cell px-5 py-3 text-sm text-gray-500">{e.audience}</td>
+                        <td className="px-5 py-3 text-center">
+                          <Check
+                            label={`Email — ${e.label}`}
+                            checked={row.emailEnabled}
+                            disabled={!master.emailEnabled}
+                            onChange={(v) => toggle(e.event, "emailEnabled", v)}
+                          />
+                        </td>
+                        <td className="px-5 py-3 text-center">
+                          <Check
+                            label={`WhatsApp — ${e.label}`}
+                            checked={row.whatsappEnabled}
+                            disabled={!master.whatsappEnabled}
+                            onChange={(v) => toggle(e.event, "whatsappEnabled", v)}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p className="text-xs text-gray-400">
+        A channel also needs to be configured on the server — SMTP for email, a WhatsApp Business
+        account for WhatsApp. Ticking a box here has no effect until that is in place.
+      </p>
+    </div>
+  );
+}
+
 /**
  * Each tab maps to its own permission module, so the Super Admin can hand out one
  * tab at a time. The two role-management tabs carry no module: editing the matrix
@@ -1584,6 +1784,7 @@ const TABS = [
   { id: "claim-types",    label: "Claim Types",         module: "ADM_CLAIM_TYPES" },
   { id: "custom-roles",   label: "Custom Roles",        superAdminOnly: true },
   { id: "roles",          label: "Roles & Permissions", superAdminOnly: true },
+  { id: "notifications",  label: "Notifications",       superAdminOnly: true },
 ] as const;
 
 type Tab = typeof TABS[number]["id"];
@@ -1657,6 +1858,7 @@ export default function AdminPage() {
       {activeTab === "claim-types"    && <ClaimTypesTab    perms={permsFor("ADM_CLAIM_TYPES")} />}
       {activeTab === "custom-roles"   && <CustomRolesTab />}
       {activeTab === "roles"          && <RolesTab isSA={isSA} />}
+      {activeTab === "notifications"  && <NotificationsTab />}
     </div>
   );
 }

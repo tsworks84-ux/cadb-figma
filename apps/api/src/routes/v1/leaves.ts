@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@cadb/db";
 import { authenticate } from "../../middleware/authenticate.js";
 import type { JwtPayload } from "@cadb/types";
-import { sendMail } from "../../utils/mailer.js";
+import { notifyLeaveEvent } from "../../utils/notify/index.js";
 import { getFiscalYear, computeAccrued, computeCarryForward, countLeaveDays, IN_FORCE_LEAVE_STATUSES } from "../../utils/leave.js";
 import { hasPermission, isCustomRole } from "../../utils/permissions.js";
 import { recordAudit, describeEmployee } from "../../utils/auditLog.js";
@@ -166,8 +166,10 @@ export async function leaveRoutes(fastify: FastifyInstance) {
       }),
     ]);
 
-    // Send email to supervisor (CC HR) — non-blocking
-    sendEmailForLeave(user.sub, application, "APPLIED").catch(() => {});
+    // Queue the supervisor / department head / HR notices. Awaited because it
+    // is only a handful of inserts, and a failure to queue is worth knowing
+    // about — but it never throws, so it cannot fail an accepted leave.
+    await notifyLeaveEvent("LEAVE_APPLIED", application);
 
     return reply.status(201).send({ success: true, data: application, message: "Leave application submitted" });
   });
@@ -221,7 +223,7 @@ export async function leaveRoutes(fastify: FastifyInstance) {
           cancelRejectionNote: null,
         },
       });
-      sendEmailForLeave(user.sub, updated, "CANCEL_REQUESTED").catch(() => {});
+      await notifyLeaveEvent("LEAVE_CANCEL_REQUESTED", updated);
       return reply.send({
         success: true,
         data: updated,
@@ -754,6 +756,11 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     }
 
     const [updated] = await prisma.$transaction(updates);
+
+    // Close the loop with the applicant. Until now a decision was silent — the
+    // employee had to open the dashboard to discover it either way.
+    await notifyLeaveEvent(body.action === "APPROVED" ? "LEAVE_APPROVED" : "LEAVE_REJECTED", updated);
+
     return reply.send({ success: true, data: updated, message: `Leave ${body.action.toLowerCase()}${lopDays > 0 ? ` (${lopDays} day${lopDays !== 1 ? "s" : ""} LoP)` : ""}` });
   });
 
@@ -789,58 +796,4 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true, data });
   });
 
-}
-
-async function sendEmailForLeave(employeeId: string, application: any, action: "APPLIED" | "CANCEL_REQUESTED") {
-  const employee = await prisma.employee.findUnique({
-    where: { id: employeeId },
-    include: {
-      reportingTo: { select: { email: true, firstName: true, lastName: true } },
-      department: { select: { name: true } },
-    },
-  });
-  if (!employee) return;
-
-  const hrEmails = await prisma.employee.findMany({
-    where: { employeeCode: { startsWith: "HR" }, deletedAt: null },
-    select: { email: true },
-  });
-  const hrCc = hrEmails.map((e) => e.email).join(",");
-
-  const supervisorEmail = employee.reportingTo?.email;
-  if (!supervisorEmail) return;
-
-  const from = application.fromDate.toDateString?.() ?? application.fromDate;
-  const to = application.toDate.toDateString?.() ?? application.toDate;
-  const isCancelRequest = action === "CANCEL_REQUESTED";
-
-  await sendMail({
-    to: supervisorEmail,
-    cc: hrCc || undefined,
-    subject: isCancelRequest
-      ? `Leave Cancellation Request: ${employee.firstName} ${employee.lastName} (${application.leaveType})`
-      : `Leave Request: ${employee.firstName} ${employee.lastName} (${application.leaveType})`,
-    html: `
-      <p>Dear ${employee.reportingTo?.firstName},</p>
-      <p><strong>${employee.firstName} ${employee.lastName}</strong> (${employee.employeeCode}, ${employee.department?.name}) ${
-        isCancelRequest
-          ? "wants to cancel a leave you have already approved."
-          : "has applied for leave."
-      }</p>
-      <table style="border-collapse:collapse;margin:16px 0">
-        <tr><td style="padding:4px 12px 4px 0;color:#666">Leave Type</td><td><strong>${application.leaveType}</strong></td></tr>
-        <tr><td style="padding:4px 12px 4px 0;color:#666">From</td><td>${from}</td></tr>
-        <tr><td style="padding:4px 12px 4px 0;color:#666">To</td><td>${to}</td></tr>
-        <tr><td style="padding:4px 12px 4px 0;color:#666">Days</td><td>${application.totalDays}</td></tr>
-        <tr><td style="padding:4px 12px 4px 0;color:#666">Reason</td><td>${application.reason}</td></tr>
-        ${isCancelRequest ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Cancellation Reason</td><td>${application.cancelReason ?? "—"}</td></tr>` : ""}
-      </table>
-      <p>${
-        isCancelRequest
-          ? "Please log in to the dashboard to approve or decline this cancellation."
-          : "Please log in to the dashboard to approve or reject this request."
-      }</p>
-      <p style="color:#999;font-size:12px">— Centum Academy HR System</p>
-    `,
-  });
 }

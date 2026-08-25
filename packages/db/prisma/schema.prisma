@@ -265,15 +265,21 @@ model Department {
   name        String   @unique
   code        String   @unique
   headId      String?
+  // The HR business partner who owns this department's people processes. Leave
+  // and claim notifications go to them; when unset the whole HR_ADMIN pool is
+  // notified instead, so a department nobody has configured never goes silent.
+  hrPartnerId String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   employees       Employee[]
   head            Employee?              @relation("DeptHead", fields: [headId], references: [id])
+  hrPartner       Employee?              @relation("DeptHrPartner", fields: [hrPartnerId], references: [id])
   memberships     EmployeeDepartment[]
   roleAccess      RoleDepartmentAccess[]
 
   @@index([code])
+  @@index([hrPartnerId])
 }
 
 // ─── CUSTOM ROLES ─────────────────────────────────────────────────────────────
@@ -333,6 +339,11 @@ model Employee {
   personalPhone   String?
   officialPhone   String?
   personalEmail   String?
+  // WhatsApp delivery. `whatsappNumber` is an explicit E.164 override; when null
+  // the dispatcher normalises officialPhone, then personalPhone. `whatsappOptIn`
+  // is the kill switch a person controls — false means never message this number.
+  whatsappNumber  String?
+  whatsappOptIn   Boolean          @default(true)
 
   // Address
   currentAddress  Json?
@@ -423,6 +434,8 @@ model Employee {
   mentorBatches        Batch[]             @relation("BatchFacultyMentor")
   ptmsCreated          PTM[]               @relation("PTMCreatedBy")
   ptmAttendances       PTMAttendee[]
+  hrPartnerOf          Department[]        @relation("DeptHrPartner")
+  notifications        Notification[]      @relation("NotificationRecipient")
 
   @@index([departmentId])
   @@index([designationId])
@@ -1867,4 +1880,73 @@ model FeedbackMessage {
   createdAt      DateTime        @default(now())
 
   @@index([feedbackId])
+}
+
+// ─── NOTIFICATIONS ───────────────────────────────────────────────────────────
+
+enum NotificationChannel {
+  EMAIL
+  WHATSAPP
+}
+
+enum NotificationStatus {
+  PENDING   // queued, waiting for the dispatcher
+  SENDING   // claimed by a dispatcher run — guards against double delivery
+  SENT
+  FAILED    // gave up: permanent rejection, or attempts exhausted
+  SKIPPED   // channel not configured, or the recipient opted out
+}
+
+/**
+ * Super-Admin kill switches for the outbox, one row per event plus a reserved
+ * `GLOBAL` row that gates everything.
+ *
+ * Checked at ENQUEUE time, not at dispatch: a disabled channel writes no row at
+ * all. That keeps the outbox a record of what was genuinely attempted, and means
+ * re-enabling a channel starts the next event rather than flushing a backlog of
+ * stale notices nobody wants any more.
+ *
+ * A missing row means enabled — new events light up by default rather than
+ * silently going nowhere until someone notices the table is short a row.
+ */
+model NotificationSetting {
+  event           String   @id   // "GLOBAL" | "LEAVE_APPLIED" | "CLAIM_SUBMITTED" | ...
+  emailEnabled    Boolean  @default(true)
+  whatsappEnabled Boolean  @default(true)
+  updatedById     String?
+  updatedAt       DateTime @updatedAt
+}
+
+/**
+ * Delivery outbox. Every notification is written here inside the same request
+ * that causes it, then delivered out-of-band by the dispatcher. Persisting
+ * first is the point: it survives a crash mid-send, gives retries somewhere to
+ * live, and leaves a queryable record of who was told what and when.
+ *
+ * `destination` is frozen at enqueue time on purpose — the address the message
+ * actually went to, not whatever the employee record says today.
+ */
+model Notification {
+  id            String              @id @default(cuid())
+  channel       NotificationChannel
+  event         String              // LEAVE_APPLIED | LEAVE_CANCEL_REQUESTED | LEAVE_APPROVED | LEAVE_REJECTED
+  recipientId   String?
+  destination   String
+  payload       Json
+  status        NotificationStatus  @default(PENDING)
+  attempts      Int                 @default(0)
+  lastError     String?
+  nextAttemptAt DateTime            @default(now())
+  sentAt        DateTime?
+  entityType    String?             // "LeaveApplication"
+  entityId      String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  recipient     Employee?           @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: SetNull)
+
+  @@index([status, nextAttemptAt])
+  @@index([recipientId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
 }

@@ -8,6 +8,8 @@ const upsertSchema = z.object({
   name: z.string().min(1),
   code: z.string().min(1).toUpperCase(),
   headId: z.string().cuid().optional().nullable(),
+  // The HR business partner notified about this department's leaves and claims.
+  hrPartnerId: z.string().cuid().optional().nullable(),
 });
 
 export async function departmentRoutes(fastify: FastifyInstance) {
@@ -16,7 +18,10 @@ export async function departmentRoutes(fastify: FastifyInstance) {
   fastify.get("/", async (_request, reply) => {
     const data = await prisma.department.findMany({
       orderBy: { name: "asc" },
-      include: { _count: { select: { employees: { where: { deletedAt: null } } } } },
+      include: {
+        hrPartner: { select: { id: true, firstName: true, lastName: true, employeeCode: true } },
+        _count: { select: { employees: { where: { deletedAt: null } } } },
+      },
     });
     return reply.send({ success: true, data });
   });

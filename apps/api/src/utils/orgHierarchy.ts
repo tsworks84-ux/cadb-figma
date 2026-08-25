@@ -85,3 +85,42 @@ export async function buildReportingScopeFilter(viewerId: string) {
 
   return { OR: or, NOT: { id: viewerId } };
 }
+
+/** Every department `employeeId` belongs to — primary plus secondary memberships. */
+export async function getDepartmentIdsFor(employeeId: string): Promise<string[]> {
+  const employee = await prisma.employee.findUnique({
+    where: { id: employeeId },
+    select: {
+      departmentId: true,
+      deptMemberships: { select: { departmentId: true } },
+    },
+  });
+  if (!employee) return [];
+  return [...new Set([
+    employee.departmentId,
+    ...employee.deptMemberships.map((m) => m.departmentId),
+  ])];
+}
+
+/**
+ * Everyone who heads any of `deptIds` — the inverse of `getHeadedDepartmentIds`.
+ * Reads both the junction table and the legacy `Department.headId`, for the same
+ * reason `getHeadedDepartmentIds` does.
+ */
+export async function getDepartmentHeadIds(deptIds: string[]): Promise<string[]> {
+  if (deptIds.length === 0) return [];
+  const [memberships, legacy] = await Promise.all([
+    prisma.employeeDepartment.findMany({
+      where: { departmentId: { in: deptIds }, isHead: true },
+      select: { employeeId: true },
+    }),
+    prisma.department.findMany({
+      where: { id: { in: deptIds }, headId: { not: null } },
+      select: { headId: true },
+    }),
+  ]);
+  return [...new Set([
+    ...memberships.map((m) => m.employeeId),
+    ...legacy.map((d) => d.headId!),
+  ])];
+}

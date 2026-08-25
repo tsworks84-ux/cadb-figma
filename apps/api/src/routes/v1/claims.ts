@@ -5,6 +5,7 @@ import { authenticate, requireRole } from "../../middleware/authenticate.js";
 import { generateClaimNumber } from "../../utils/claimNumber.js";
 import { hasAnyPermission, isCustomRole } from "../../utils/permissions.js";
 import { recordAudit, describeEmployee } from "../../utils/auditLog.js";
+import { notifyClaimEvent } from "../../utils/notify/index.js";
 import type { JwtPayload } from "@cadb/types";
 import { createWriteStream, mkdirSync, unlinkSync } from "fs";
 import { join, dirname } from "path";
@@ -285,6 +286,8 @@ export async function claimRoutes(fastify: FastifyInstance) {
         },
         include: { receipts: true },
       });
+      await notifyClaimEvent("CLAIM_CANCEL_REQUESTED", updated);
+
       return reply.send({
         success: true,
         data: updated,
@@ -464,6 +467,11 @@ export async function claimRoutes(fastify: FastifyInstance) {
       data: { status: "SUBMITTED" },
       include: { receipts: true },
     });
+
+    // Notified on submit, not on create: a DRAFT is private to its author and
+    // nobody needs to hear about one.
+    await notifyClaimEvent("CLAIM_SUBMITTED", updated);
+
     return reply.send({ success: true, data: updated, message: "Claim submitted for approval" });
   });
 
@@ -511,6 +519,9 @@ export async function claimRoutes(fastify: FastifyInstance) {
         receipts: true,
       },
     });
+
+    await notifyClaimEvent(body.action === "APPROVED" ? "CLAIM_APPROVED" : "CLAIM_REJECTED", updated);
+
     return reply.send({ success: true, data: updated });
   });
 
@@ -524,6 +535,9 @@ export async function claimRoutes(fastify: FastifyInstance) {
       where: { id },
       data: { status: "PAID", paidAt: new Date() },
     });
+
+    await notifyClaimEvent("CLAIM_PAID", updated);
+
     return reply.send({ success: true, data: updated });
   });
 }
