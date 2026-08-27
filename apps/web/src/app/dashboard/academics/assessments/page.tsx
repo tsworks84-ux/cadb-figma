@@ -93,7 +93,7 @@ function StatusBadge({ status }: { status: string }) {
     ARCHIVED:  { background: "#f1f5f9", color: "#64748b", border: "1px solid #e2e8f0" },
   };
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", borderRadius: 999, padding: "2px 10px", fontSize: 12, fontWeight: 700, ...(s[status] ?? { background: "#f1f5f9", color: "#64748b" }) }}>
+    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box", minWidth: 88, borderRadius: 999, padding: "2px 10px", fontSize: 12, fontWeight: 700, ...(s[status] ?? { background: "#f1f5f9", color: "#64748b" }) }}>
       {STATUS_LABEL[status] ?? status}
     </span>
   );
