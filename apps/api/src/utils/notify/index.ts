@@ -73,6 +73,43 @@ export async function notifyLeaveEvent(event: NotifyEvent, leave: LeaveLike): Pr
   });
 }
 
+type CompOffLike = {
+  id: string;
+  employeeId: string;
+  workDate: Date;
+  days: number;
+  reason: string;
+  rejectionNote?: string | null;
+  approverId?: string | null;
+};
+
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+export async function notifyCompOffEvent(event: NotifyEvent, compOff: CompOffLike): Promise<void> {
+  // The weekday is the whole point of the notice — an approver deciding whether
+  // a day was really an off day needs to see "Sunday", not a date they have to
+  // look up. Read in UTC: comp-off dates are stored at UTC midnight, and local
+  // accessors report the previous day west of Greenwich.
+  const weekday = WEEKDAYS[compOff.workDate.getUTCDay()];
+  const isWeeklyOff = compOff.workDate.getUTCDay() === 0;
+
+  await enqueue(event, {
+    entityType: "CompOffRequest",
+    entityId: compOff.id,
+    employeeId: compOff.employeeId,
+    approverId: compOff.approverId ?? null,
+    path: "/dashboard/leaves",
+    fields: {
+      workDate: fmtDate(compOff.workDate),
+      weekday,
+      dayContext: isWeeklyOff ? `${weekday} — weekly off` : weekday,
+      compOffDays: String(compOff.days),
+      reason: compOff.reason,
+      decisionNote: compOff.rejectionNote ?? undefined,
+    },
+  });
+}
+
 type ClaimLike = {
   id: string;
   claimNumber: string;

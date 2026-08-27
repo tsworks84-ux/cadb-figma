@@ -99,6 +99,14 @@ enum LeaveStatus {
 }
 
 
+enum CompOffStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  // Withdrawn by the employee before anyone decided on it.
+  CANCELLED
+}
+
 enum ClaimStatus {
   DRAFT
   SUBMITTED
@@ -408,6 +416,8 @@ model Employee {
   claimsApproved    ReimbursementClaim[] @relation("ClaimApprover")
   policyAcks        PolicyAcknowledgement[]
   trainingEnrollments TrainingEnrollment[]
+  compOffRequests   CompOffRequest[]     @relation("CompOffEmployee")
+  compOffsApproved  CompOffRequest[]     @relation("CompOffApprover")
   leavesApproved    LeaveApplication[]   @relation("LeaveApprover")
   leaveCancelsDecided LeaveApplication[] @relation("LeaveCancelApprover")
   claimCancelsDecided ReimbursementClaim[] @relation("ClaimCancelApprover")
@@ -597,6 +607,11 @@ model LeaveBalance {
   used        Float     @default(0)
   pending     Float     @default(0)
   carried     Float     @default(0)
+  // Days credited outside the monthly accrual — today that means approved
+  // compensatory offs. Kept apart from `allocated` because accrual pro-rates
+  // an annual entitlement across twelve months, and a comp-off is not an
+  // entitlement: it is earned in full on the day it is approved.
+  earned      Float     @default(0)
 
   employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
@@ -637,6 +652,44 @@ model LeaveApplication {
   @@index([employeeId])
   @@index([status])
   @@index([fromDate, toDate])
+  @@index([approverId])
+}
+
+/**
+ * A claim that the employee worked on a day they were not due to work, and the
+ * supervisor's decision on it.
+ *
+ * Approval is the only thing that mints comp-off days: it increments the
+ * COMPENSATORY `earned` bucket of the employee's leave balance for the FY the
+ * work fell in, and the employee spends those days through the ordinary leave
+ * flow. The row stays as the audit trail of where each credited day came from.
+ *
+ * `workDate` is deliberately unconstrained — the office works Mon–Sat, but shift
+ * staff, exam duty and declared holidays all make "was this really an off day?"
+ * a judgement the approver is better placed to make than a date check. The API
+ * surfaces the weekday and any matching holiday so they can make it informed.
+ */
+model CompOffRequest {
+  id            String        @id @default(cuid())
+  employeeId    String
+  workDate      DateTime      // the day worked, stored at UTC midnight like leave dates
+  days          Float         @default(1)  // 1 for a full day, 0.5 for a half
+  reason        String
+  status        CompOffStatus @default(PENDING)
+  approverId    String?
+  approvedAt    DateTime?
+  rejectedAt    DateTime?
+  rejectionNote String?
+  cancelledAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  employee      Employee      @relation("CompOffEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  approver      Employee?     @relation("CompOffApprover", fields: [approverId], references: [id])
+
+  @@index([employeeId])
+  @@index([status])
+  @@index([workDate])
   @@index([approverId])
 }
 

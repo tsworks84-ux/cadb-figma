@@ -806,6 +806,7 @@ export async function reportRoutes(fastify: FastifyInstance) {
           used: true,
           pending: true,
           carried: true,
+          earned: true,
         },
       }),
 
@@ -833,7 +834,7 @@ export async function reportRoutes(fastify: FastifyInstance) {
     ]);
 
     // Index balances by employeeId
-    const balancesByEmp: Record<string, Record<string, { allocated: number; used: number; pending: number; carried: number }>> = {};
+    const balancesByEmp: Record<string, Record<string, { allocated: number; used: number; pending: number; carried: number; earned: number }>> = {};
     for (const b of balances) {
       if (!balancesByEmp[b.employeeId]) balancesByEmp[b.employeeId] = {};
       balancesByEmp[b.employeeId][b.leaveType] = {
@@ -841,13 +842,14 @@ export async function reportRoutes(fastify: FastifyInstance) {
         used:      b.used,
         pending:   b.pending,
         carried:   b.carried,
+        earned:    b.earned,
       };
     }
 
     const rows = employees.map((emp) => {
       const empBalances = balancesByEmp[emp.id] ?? {};
       const byType = LEAVE_TYPES.map((lt) => {
-        const b = empBalances[lt] ?? { allocated: 0, used: 0, pending: 0, carried: 0 };
+        const b = empBalances[lt] ?? { allocated: 0, used: 0, pending: 0, carried: 0, earned: 0 };
         return {
           leaveType: lt,
           leaveTypeLabel: LEAVE_TYPE_LABELS[lt],
@@ -855,7 +857,9 @@ export async function reportRoutes(fastify: FastifyInstance) {
           used:      b.used,
           pending:   b.pending,
           carried:   b.carried,
-          available: Math.max(0, b.allocated + b.carried - b.used - b.pending),
+          // Approved comp-off days sit in `earned` — outside the annual
+          // allocation, but just as spendable.
+          available: Math.max(0, b.allocated + b.carried + b.earned - b.used - b.pending),
         };
       });
 

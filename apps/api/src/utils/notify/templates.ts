@@ -26,6 +26,12 @@ export type NotifyPayload = {
   totalDays?: string;
   lopDays?: string;
 
+  // Comp-off events
+  workDate?: string;
+  weekday?: string;
+  compOffDays?: string;
+  dayContext?: string;   // "Sunday — weekly off" / "Republic Day (holiday)" / "Tuesday"
+
   // Claim events
   claimNumber?: string;
   claimType?: string;
@@ -81,6 +87,12 @@ export function renderEmail(event: NotifyEvent, p: NotifyPayload): { subject: st
     row("Days", p.totalDays) +
     row("Reason", p.reason);
 
+  const compOffRows =
+    row("Date Worked", p.workDate) +
+    row("Day", p.dayContext) +
+    row("Days Claimed", p.compOffDays) +
+    row("Reason", p.reason);
+
   const claimRows =
     row("Claim No.", p.claimNumber) +
     row("Type", p.claimType) +
@@ -133,6 +145,42 @@ export function renderEmail(event: NotifyEvent, p: NotifyPayload): { subject: st
           `Dear ${esc(p.recipientName)}, ${esc(p.approverName)} rejected your leave request.`,
           leaveRows + row("Note", p.decisionNote),
           "View leave →",
+          p.link,
+        ),
+      };
+
+    case "COMP_OFF_REQUESTED":
+      return {
+        subject: `Comp-off Request: ${p.applicantName} (${p.workDate})`,
+        html: shell(
+          "Comp-off request awaiting your decision",
+          `Dear ${esc(p.recipientName)}, ${who} has claimed a compensatory off for a day worked outside their normal week. Approving it credits the day to their comp-off balance.`,
+          compOffRows,
+          "Review request →",
+          p.link,
+        ),
+      };
+
+    case "COMP_OFF_APPROVED":
+      return {
+        subject: `Comp-off Approved: ${p.workDate}`,
+        html: shell(
+          "Your comp-off has been approved",
+          `Dear ${esc(p.recipientName)}, ${esc(p.approverName)} approved your comp-off. The days are now in your Comp-off leave balance and can be applied for like any other leave.`,
+          compOffRows + row("Days Credited", p.compOffDays),
+          "View balance →",
+          p.link,
+        ),
+      };
+
+    case "COMP_OFF_REJECTED":
+      return {
+        subject: `Comp-off Rejected: ${p.workDate}`,
+        html: shell(
+          "Your comp-off request was not approved",
+          `Dear ${esc(p.recipientName)}, ${esc(p.approverName)} rejected your comp-off request.`,
+          compOffRows + row("Note", p.decisionNote),
+          "View request →",
           p.link,
         ),
       };
@@ -217,6 +265,12 @@ export function renderEmail(event: NotifyEvent, p: NotifyPayload): { subject: st
  *                             {{4}} days       {{5}} approver
  *   leave_decision_rejected   {{1}} recipient  {{2}} type       {{3}} dates
  *                             {{4}} days       {{5}} approver   {{6}} note
+ *   comp_off_request_alert    {{1}} recipient  {{2}} applicant  {{3}} date worked
+ *                             {{4}} day        {{5}} days       {{6}} reason
+ *   comp_off_approved         {{1}} recipient  {{2}} date worked {{3}} days credited
+ *                             {{4}} approver
+ *   comp_off_rejected         {{1}} recipient  {{2}} date worked {{3}} days
+ *                             {{4}} approver   {{5}} note
  *   claim_request_alert       {{1}} recipient  {{2}} applicant  {{3}} claim no.
  *                             {{4}} type       {{5}} amount     {{6}} for
  *   claim_cancel_alert        {{1}} recipient  {{2}} applicant  {{3}} claim no.
@@ -236,6 +290,9 @@ const TEMPLATE_ENV: Record<NotifyEvent, { env: string; fallback: string }> = {
   LEAVE_CANCEL_REQUESTED: { env: "WHATSAPP_TEMPLATE_LEAVE_CANCEL",   fallback: "leave_cancel_alert" },
   LEAVE_APPROVED:         { env: "WHATSAPP_TEMPLATE_LEAVE_APPROVED", fallback: "leave_decision_approved" },
   LEAVE_REJECTED:         { env: "WHATSAPP_TEMPLATE_LEAVE_REJECTED", fallback: "leave_decision_rejected" },
+  COMP_OFF_REQUESTED:     { env: "WHATSAPP_TEMPLATE_COMP_OFF_REQUESTED", fallback: "comp_off_request_alert" },
+  COMP_OFF_APPROVED:      { env: "WHATSAPP_TEMPLATE_COMP_OFF_APPROVED",  fallback: "comp_off_approved" },
+  COMP_OFF_REJECTED:      { env: "WHATSAPP_TEMPLATE_COMP_OFF_REJECTED",  fallback: "comp_off_rejected" },
   CLAIM_SUBMITTED:        { env: "WHATSAPP_TEMPLATE_CLAIM_SUBMITTED", fallback: "claim_request_alert" },
   CLAIM_CANCEL_REQUESTED: { env: "WHATSAPP_TEMPLATE_CLAIM_CANCEL",    fallback: "claim_cancel_alert" },
   CLAIM_APPROVED:         { env: "WHATSAPP_TEMPLATE_CLAIM_APPROVED",  fallback: "claim_decision_approved" },
@@ -268,6 +325,12 @@ export function whatsappTemplate(event: NotifyEvent, p: NotifyPayload): { name: 
       return build(p.recipientName, p.leaveType, p.dateRange, p.totalDays, p.approverName);
     case "LEAVE_REJECTED":
       return build(p.recipientName, p.leaveType, p.dateRange, p.totalDays, p.approverName, p.decisionNote);
+    case "COMP_OFF_REQUESTED":
+      return build(p.recipientName, p.applicantName, p.workDate, p.dayContext, p.compOffDays, p.reason);
+    case "COMP_OFF_APPROVED":
+      return build(p.recipientName, p.workDate, p.compOffDays, p.approverName);
+    case "COMP_OFF_REJECTED":
+      return build(p.recipientName, p.workDate, p.compOffDays, p.approverName, p.decisionNote);
     case "CLAIM_SUBMITTED":
       return build(p.recipientName, p.applicantName, p.claimNumber, p.claimType, p.claimedAmount, p.title);
     case "CLAIM_CANCEL_REQUESTED":

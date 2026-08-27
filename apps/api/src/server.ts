@@ -10,6 +10,7 @@ import swaggerUi from "@fastify/swagger-ui";
 import { authRoutes } from "./routes/v1/auth.js";
 import { employeeRoutes } from "./routes/v1/employees.js";
 import { leaveRoutes } from "./routes/v1/leaves.js";
+import { compOffRoutes } from "./routes/v1/compOff.js";
 import { claimRoutes } from "./routes/v1/claims.js";
 import { auditLogRoutes } from "./routes/v1/auditLogs.js";
 import { claimTypeRoutes } from "./routes/v1/claimTypes.js";
@@ -108,6 +109,7 @@ server.get("/health", async () => ({ status: "ok", timestamp: new Date().toISOSt
 await server.register(authRoutes, { prefix: "/api/v1/auth" });
 await server.register(employeeRoutes, { prefix: "/api/v1/employees" });
 await server.register(leaveRoutes, { prefix: "/api/v1/leaves" });
+await server.register(compOffRoutes, { prefix: "/api/v1/comp-off" });
 await server.register(claimRoutes, { prefix: "/api/v1/claims" });
 await server.register(claimTypeRoutes, { prefix: "/api/v1/claim-types" });
 await server.register(auditLogRoutes, { prefix: "/api/v1/audit-logs" });

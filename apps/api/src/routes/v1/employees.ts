@@ -1143,8 +1143,12 @@ export async function employeeRoutes(fastify: FastifyInstance) {
       orderBy: { leaveType: "asc" },
     });
 
-    // Auto-provision from the applicable leave policy if no records exist yet
-    if (balances.length === 0 && emp?.designation?.grade) {
+    // Auto-provision from the applicable leave policy if no policy-derived
+    // records exist yet. Mirrors /leaves/balances: an approved comp-off leaves a
+    // COMPENSATORY row with a zero allocation behind, and that lone row must not
+    // be read as "this year is already provisioned".
+    const isProvisioned = balances.some((b) => b.allocated > 0);
+    if (!isProvisioned && emp?.designation?.grade) {
       const policy = await prisma.leavePolicy.findFirst({
         where: {
           isActive: true,
@@ -1190,7 +1194,9 @@ export async function employeeRoutes(fastify: FastifyInstance) {
         ...b,
         accrued,
         availed,
-        balance: Math.max(0, accrued + b.carried - availed),
+        // `earned` — approved comp-off days — is added whole: it is credited on
+        // approval rather than accrued across the year like an allocation.
+        balance: Math.max(0, accrued + b.carried + b.earned - availed),
       };
     });
 

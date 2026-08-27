@@ -11,6 +11,9 @@ export const NOTIFY_EVENTS = [
   "LEAVE_CANCEL_REQUESTED",
   "LEAVE_APPROVED",
   "LEAVE_REJECTED",
+  "COMP_OFF_REQUESTED",
+  "COMP_OFF_APPROVED",
+  "COMP_OFF_REJECTED",
   "CLAIM_SUBMITTED",
   "CLAIM_CANCEL_REQUESTED",
   "CLAIM_APPROVED",
@@ -23,11 +26,14 @@ export type NotifyEvent = (typeof NOTIFY_EVENTS)[number];
 export const GLOBAL_SETTING_KEY = "GLOBAL";
 
 /** Labels for the Administration grid, so the API and UI can't drift apart. */
-export const EVENT_META: Record<NotifyEvent, { group: "Leaves" | "Claims"; label: string; audience: string }> = {
+export const EVENT_META: Record<NotifyEvent, { group: "Leaves" | "Comp-off" | "Claims"; label: string; audience: string }> = {
   LEAVE_APPLIED:          { group: "Leaves", label: "Leave applied",              audience: "Supervisor, department head, HR" },
   LEAVE_CANCEL_REQUESTED: { group: "Leaves", label: "Leave cancellation request", audience: "Supervisor, department head, HR" },
   LEAVE_APPROVED:         { group: "Leaves", label: "Leave approved",             audience: "The employee" },
   LEAVE_REJECTED:         { group: "Leaves", label: "Leave rejected",             audience: "The employee" },
+  COMP_OFF_REQUESTED:     { group: "Comp-off", label: "Comp-off claimed",  audience: "Supervisor, department head, HR" },
+  COMP_OFF_APPROVED:      { group: "Comp-off", label: "Comp-off approved", audience: "The employee" },
+  COMP_OFF_REJECTED:      { group: "Comp-off", label: "Comp-off rejected", audience: "The employee" },
   CLAIM_SUBMITTED:        { group: "Claims", label: "Claim submitted",            audience: "Supervisor, department head, HR" },
   CLAIM_CANCEL_REQUESTED: { group: "Claims", label: "Claim cancellation request", audience: "Supervisor, department head, HR" },
   CLAIM_APPROVED:         { group: "Claims", label: "Claim approved",             audience: "The employee" },
@@ -39,6 +45,8 @@ export const EVENT_META: Record<NotifyEvent, { group: "Leaves" | "Claims"; label
 export const GOES_TO_APPLICANT: ReadonlySet<NotifyEvent> = new Set<NotifyEvent>([
   "LEAVE_APPROVED",
   "LEAVE_REJECTED",
+  "COMP_OFF_APPROVED",
+  "COMP_OFF_REJECTED",
   "CLAIM_APPROVED",
   "CLAIM_REJECTED",
   "CLAIM_PAID",

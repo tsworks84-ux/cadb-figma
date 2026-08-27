@@ -75,6 +75,9 @@ interface LeaveBalance {
   availed:   number;
   balance:   number;
   carried:   number;
+  // Days credited outside the accrual curve — approved comp-offs. Counted whole
+  // in `balance`, so this is only ever shown for context.
+  earned:    number;
 }
 
 interface LeaveBalancesResponse {
@@ -935,8 +938,8 @@ function BalanceSection({ balances, lopDays }: { balances: LeaveBalance[]; lopDa
   const totalAllocated = balances.reduce((s, b) => s + b.allocated, 0);
   // Always show at least Casual and Sick as the first two cards, even with no policy
   const DEFAULT_CARDS: LeaveBalance[] = [
-    { leaveType: "CASUAL", allocated: 0, accrued: 0, availed: 0, pending: 0, balance: 0, used: 0, carried: 0 },
-    { leaveType: "SICK",   allocated: 0, accrued: 0, availed: 0, pending: 0, balance: 0, used: 0, carried: 0 },
+    { leaveType: "CASUAL", allocated: 0, accrued: 0, availed: 0, pending: 0, balance: 0, used: 0, carried: 0, earned: 0 },
+    { leaveType: "SICK",   allocated: 0, accrued: 0, availed: 0, pending: 0, balance: 0, used: 0, carried: 0, earned: 0 },
   ];
   const cardTypes = balances.length >= 2
     ? balances.slice(0, 2)
@@ -1023,7 +1026,11 @@ function BalanceSection({ balances, lopDays }: { balances: LeaveBalance[]; lopDa
                       {LEAVE_LABEL[b.leaveType]}
                     </span>
                     <span className={`text-xl font-bold ${c.text}`}>{b.balance}</span>
-                    <span className="text-xs text-gray-400">/ {b.allocated}</span>
+                    {/* Comp-off has no annual entitlement — it is only ever earned, so
+                        the denominator is the days credited, not an allocation of 0. */}
+                    <span className="text-xs text-gray-400">
+                      {b.allocated > 0 ? `/ ${b.allocated}` : `of ${b.earned} earned`}
+                    </span>
                   </div>
                 );
               })}
@@ -1098,6 +1105,14 @@ function ApplyForm({
   const isInsufficient = !!selectedBalance && previewDays > 0 && previewDays > selectedBalance.balance;
   const balanceAfter = selectedBalance ? selectedBalance.balance - previewDays : 0;
 
+  // Comp-off is a credit ledger, not an entitlement: the days exist only because
+  // an approved comp-off request minted them, so there is nothing for a
+  // supervisor to stretch. The server refuses these too — this just says so
+  // before the round trip.
+  const isCompOff = form.leaveType === "COMPENSATORY";
+  const compOffAvailable = selectedBalance?.balance ?? 0;
+  const compOffOverdrawn = isCompOff && previewDays > 0 && previewDays > compOffAvailable;
+
   const applyMut = useMutation({
     mutationFn: async () => {
       let documentUrl: string | undefined;
@@ -1148,6 +1163,10 @@ function ApplyForm({
     }
     if (!form.reason.trim() || form.reason.trim().length < 5) {
       toast.error("Please enter a reason (at least 5 characters)");
+      return;
+    }
+    if (compOffOverdrawn) {
+      toast.error(`You have ${compOffAvailable} comp-off day${compOffAvailable === 1 ? "" : "s"} available`);
       return;
     }
     applyMut.mutate();
@@ -1301,7 +1320,19 @@ function ApplyForm({
                 </p>
               </div>
             )}
-            {isInsufficient && (
+            {compOffOverdrawn ? (
+              <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+                <AlertTriangle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-red-800">Not enough comp-off days</p>
+                  <p className="text-xs text-red-700 mt-0.5">
+                    You have {compOffAvailable} comp-off {compOffAvailable === 1 ? "day" : "days"} available but are
+                    requesting {previewDays}. Comp-off can only be taken against days already approved — claim the
+                    days you worked on your weekly off first.
+                  </p>
+                </div>
+              </div>
+            ) : isInsufficient && (
               <div className="flex items-start gap-2.5 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3">
                 <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0 mt-0.5" />
                 <div>
@@ -1320,7 +1351,7 @@ function ApplyForm({
         <div className="flex justify-end">
           <button
             onClick={handleSubmit}
-            disabled={applyMut.isPending || uploading}
+            disabled={applyMut.isPending || uploading || compOffOverdrawn}
             className="px-6 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors"
           >
             {uploading ? "Uploading…" : applyMut.isPending ? "Submitting…" : "Submit Request"}
@@ -1328,6 +1359,438 @@ function ApplyForm({
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Comp-off ──────────────────────────────────────────────────────────────────
+
+/**
+ * Compensatory offs: the day-back an employee earns by working a day they were
+ * not due to work — a Sunday under the Mon–Sat week, a declared holiday, an
+ * exam duty. Nothing is credited until the supervisor approves; approval moves
+ * the days into the Comp-off leave balance, which is then spent through the
+ * ordinary Apply for Leave flow.
+ */
+
+interface CompOffRequest {
+  id:            string;
+  workDate:      string;
+  days:          number;
+  reason:        string;
+  status:        string;
+  approvedAt?:   string | null;
+  rejectedAt?:   string | null;
+  rejectionNote?: string | null;
+  createdAt:     string;
+  weekday:       string;
+  isWeeklyOff:   boolean;
+  holidayName:   string | null;
+  approver?:     { firstName: string; lastName: string } | null;
+  employee?:     { id: string; employeeCode: string; firstName: string; lastName: string; department: { name: string } | null };
+}
+
+/** "Sun 17 Aug" — the weekday is the whole point, so it leads. */
+function fmtWorkDate(r: { workDate: string; weekday: string }) {
+  return `${r.weekday.slice(0, 3)} ${fmtShort(r.workDate)}`;
+}
+
+/** What kind of day this was, in the approver's terms. */
+function dayContext(r: CompOffRequest) {
+  if (r.holidayName) return `${r.holidayName} · holiday`;
+  if (r.isWeeklyOff) return "Weekly off";
+  return "Working day";
+}
+
+function ClaimCompOffModal({ onClose }: { onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [workDate, setWorkDate] = useState("");
+  const [days, setDays] = useState<0.5 | 1>(1);
+  const [reason, setReason] = useState("");
+
+  // The claim is for work already done, so tomorrow is never valid. Built from
+  // local date parts rather than toISOString(), which would shift the cap a day
+  // back for anyone east of Greenwich.
+  const now = new Date();
+  const todayIsoLocal = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+  // Date inputs give YYYY-MM-DD, i.e. UTC midnight — read the weekday in UTC to
+  // match, exactly as the server does.
+  const weekdayHint = useMemo(() => {
+    if (!workDate) return null;
+    const d = new Date(`${workDate}T00:00:00.000Z`);
+    const name = d.toLocaleDateString("en-IN", { weekday: "long", timeZone: "UTC" });
+    return { name, isSunday: d.getUTCDay() === 0 };
+  }, [workDate]);
+
+  const claimMut = useMutation({
+    mutationFn: () => api.post("/api/v1/comp-off", { workDate, days, reason: reason.trim() }),
+    onSuccess: (res) => {
+      toast.success(res.data?.message ?? "Comp-off request submitted");
+      queryClient.invalidateQueries({ queryKey: ["my-comp-offs"] });
+      onClose();
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.error ?? "Failed to submit comp-off request"),
+  });
+
+  function handleSubmit() {
+    if (!workDate) { toast.error("Pick the date you worked"); return; }
+    if (reason.trim().length < 5) { toast.error("Please say what you worked on (at least 5 characters)"); return; }
+    claimMut.mutate();
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">Claim a Comp-off</h2>
+            <p className="text-xs text-gray-500 mt-0.5">For a day you worked when you were not due to</p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+            <X size={20} className="text-gray-500" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1.5">Date worked</label>
+              <input
+                type="date"
+                value={workDate}
+                max={todayIsoLocal}
+                min="1900-01-01"
+                onChange={(e) => setWorkDate(e.target.value)}
+                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {weekdayHint && (
+                <p className={`text-xs mt-1.5 ${weekdayHint.isSunday ? "text-green-600" : "text-gray-400"}`}>
+                  {weekdayHint.name}{weekdayHint.isSunday ? " — your weekly off" : ""}
+                </p>
+              )}
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1.5">How much you worked</label>
+              <div className="flex rounded-xl overflow-hidden border border-gray-200">
+                {([1, 0.5] as const).map((d, i) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setDays(d)}
+                    className={`flex-1 py-2.5 text-xs font-medium transition-colors ${
+                      days === d ? "bg-blue-600 text-white" : "bg-white text-gray-500 hover:bg-gray-50"
+                    } ${i > 0 ? "border-l border-gray-200" : ""}`}
+                  >
+                    {d === 1 ? "Full day" : "Half day"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">What you worked on</label>
+            <textarea
+              rows={3}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="e.g. Sunday admission-test duty at the Salt Lake centre"
+              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div className="flex items-start gap-2.5 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+            <Info className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />
+            <p className="text-xs text-blue-700">
+              Your supervisor decides. Once approved, {days === 1 ? "1 day" : "half a day"} is credited to your
+              Comp-off balance and you can apply for it like any other leave.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 px-6 pb-6">
+          <button onClick={onClose} className="px-4 py-2 text-sm border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={claimMut.isPending}
+            className="px-6 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors"
+          >
+            {claimMut.isPending ? "Submitting…" : "Submit Request"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CompOffSection({ available }: { available: number }) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(true);
+  const [claiming, setClaiming] = useState(false);
+
+  const { data } = useQuery<{ data: CompOffRequest[]; summary: { earned: number; awaiting: number } }>({
+    queryKey: ["my-comp-offs"],
+    queryFn: () => api.get("/api/v1/comp-off/my").then((r) => ({ data: r.data.data, summary: r.data.summary })),
+  });
+  const requests = data?.data ?? [];
+  const summary  = data?.summary ?? { earned: 0, awaiting: 0 };
+
+  const withdrawMut = useMutation({
+    mutationFn: (id: string) => api.patch(`/api/v1/comp-off/${id}/cancel`),
+    onSuccess: () => {
+      toast.success("Comp-off request withdrawn");
+      queryClient.invalidateQueries({ queryKey: ["my-comp-offs"] });
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.error ?? "Failed to withdraw request"),
+  });
+
+  return (
+    <>
+      {claiming && <ClaimCompOffModal onClose={() => setClaiming(false)} />}
+
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="w-full flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors"
+        >
+          <div className="flex items-center gap-2 text-left">
+            <CalendarOff className="h-4 w-4 text-orange-400 shrink-0" />
+            <div>
+              <h2 className="font-semibold text-gray-900">Comp-offs</h2>
+              <p className="text-xs text-gray-400 mt-0.5">Worked on your weekly off? Claim the day back.</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-gray-500 hidden sm:inline">
+              {available} available{summary.awaiting > 0 ? ` · ${summary.awaiting} awaiting approval` : ""}
+            </span>
+            <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 shrink-0 ${open ? "rotate-180" : ""}`} />
+          </div>
+        </button>
+
+        {open && (
+          <>
+            <div className="px-6 pb-4 grid grid-cols-3 gap-3">
+              {[
+                { label: "Available", value: available, tone: "text-orange-600 bg-orange-50 border-orange-100" },
+                { label: "Earned", value: summary.earned, tone: "text-gray-700 bg-gray-50 border-gray-100" },
+                { label: "Awaiting", value: summary.awaiting, tone: "text-yellow-700 bg-yellow-50 border-yellow-100" },
+              ].map((s) => (
+                <div key={s.label} className={`border rounded-xl px-4 py-3 ${s.tone}`}>
+                  <p className="text-xs font-bold uppercase tracking-wider opacity-70">{s.label}</p>
+                  <p className="text-2xl font-bold mt-1">{s.value}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="px-6 pb-4">
+              <button
+                onClick={() => setClaiming(true)}
+                className="w-full flex items-center justify-center gap-2 border border-dashed border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-500 hover:border-blue-400 hover:text-blue-600 transition-colors"
+              >
+                <Plus className="h-4 w-4" />
+                Claim a comp-off for a day worked
+              </button>
+            </div>
+
+            {requests.length > 0 && (
+              <div className="border-t border-gray-50 divide-y divide-gray-50 max-h-80 overflow-y-auto">
+                {requests.map((r) => (
+                  <div key={r.id} className="px-6 py-3 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-semibold text-gray-800">{fmtWorkDate(r)}</p>
+                        <span className="text-xs text-gray-400">{dayContext(r)}</span>
+                        <span className="text-xs text-gray-400">· {r.days === 1 ? "1 day" : "Half day"}</span>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-0.5 truncate">{r.reason}</p>
+                      {r.status === "REJECTED" && r.rejectionNote && (
+                        <p className="text-xs text-red-500 mt-0.5">Note: {r.rejectionNote}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[r.status] ?? "bg-gray-100 text-gray-500"}`}>
+                        {statusLabel(r.status)}
+                      </span>
+                      {r.status === "PENDING" && (
+                        <button
+                          onClick={() => withdrawMut.mutate(r.id)}
+                          disabled={withdrawMut.isPending}
+                          className="text-xs text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
+                        >
+                          Withdraw
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+/**
+ * The approver's side. A comp-off decision is not a leave decision: it does not
+ * grant time away, it mints the days the employee can later ask for — so it
+ * lives in its own panel rather than in the Pending Approvals list.
+ */
+function CompOffApprovalsPanel() {
+  const queryClient = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [rejecting, setRejecting] = useState<CompOffRequest | null>(null);
+
+  const { data: requests = [], isLoading } = useQuery<CompOffRequest[]>({
+    queryKey: ["team-comp-offs"],
+    queryFn: () => api.get("/api/v1/comp-off/team").then((r) => r.data.data),
+  });
+
+  const decideMut = useMutation({
+    mutationFn: ({ id, action, note }: { id: string; action: "APPROVED" | "REJECTED"; note?: string }) =>
+      api.patch(`/api/v1/comp-off/${id}/decision`, { action, note }),
+    onSuccess: (res) => {
+      toast.success(res.data?.message ?? "Decision recorded");
+      queryClient.invalidateQueries({ queryKey: ["team-comp-offs"] });
+      queryClient.invalidateQueries({ queryKey: ["my-comp-offs"] });
+      queryClient.invalidateQueries({ queryKey: ["my-leave-balances"] });
+      setRejecting(null);
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.error ?? "Failed to record decision"),
+  });
+
+  const pending = requests.filter((r) => r.status === "PENDING");
+  const decided = requests.filter((r) => r.status !== "PENDING").slice(0, 25);
+
+  const matching = pending.filter((r) =>
+    matchesLeaveSearch(search, [
+      r.employee?.firstName,
+      r.employee?.lastName,
+      r.employee?.employeeCode,
+      r.employee?.department?.name,
+      r.reason,
+    ]),
+  );
+
+  return (
+    <>
+      {rejecting && (
+        <ReasonPromptModal
+          title="Reject this comp-off"
+          description={`${rejecting.employee?.firstName} ${rejecting.employee?.lastName} claimed ${rejecting.days === 1 ? "a day" : "half a day"} for ${fmtWorkDate(rejecting)}. Nothing will be credited, and they will see your note.`}
+          label="Why"
+          placeholder="e.g. The centre was closed that Sunday"
+          confirmLabel="Reject request"
+          tone="danger"
+          isPending={decideMut.isPending}
+          onConfirm={(note) => decideMut.mutate({ id: rejecting.id, action: "REJECTED", note })}
+          onClose={() => setRejecting(null)}
+        />
+      )}
+
+      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+        <div className="flex flex-col gap-3 p-5 border-b border-gray-200 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            <CalendarOff className="text-orange-500" size={20} />
+            <h3 className="text-base font-semibold text-gray-900">Comp-off Requests</h3>
+            {pending.length > 0 && (
+              <span className="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full font-medium">{pending.length}</span>
+            )}
+          </div>
+          {pending.length > 0 && (
+            <LeaveSearchInput value={search} onChange={setSearch} placeholder="Search name, code, department…" />
+          )}
+        </div>
+
+        {isLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin h-5 w-5 border-2 border-orange-400 border-t-transparent rounded-full" />
+          </div>
+        ) : matching.length === 0 ? (
+          <div className="p-10 text-center">
+            <CalendarOff className="mx-auto text-gray-300 mb-3" size={40} />
+            <p className="text-sm text-gray-500">
+              {search.trim() && pending.length > 0
+                ? "No comp-off requests match your search."
+                : "No comp-off requests awaiting a decision."}
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {matching.map((r) => (
+              <div key={r.id} className="p-5 hover:bg-gray-50 transition-colors">
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <p className="font-medium text-gray-900">{r.employee?.firstName} {r.employee?.lastName}</p>
+                      <span className="text-xs text-gray-400">{r.employee?.employeeCode}</span>
+                      <span className="text-xs text-gray-400">{r.employee?.department?.name}</span>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-1">
+                      <span className="font-medium">{fmtWorkDate(r)}</span>
+                      {" · "}{r.days === 1 ? "1 day" : "Half day"}
+                      {" · "}
+                      <span className={r.isWeeklyOff || r.holidayName ? "text-green-600" : "text-amber-600"}>
+                        {dayContext(r)}
+                      </span>
+                    </p>
+                    <p className="text-xs text-gray-400 truncate">{r.reason}</p>
+                    {!r.isWeeklyOff && !r.holidayName && (
+                      <p className="text-xs text-amber-600 mt-1 flex items-start gap-1.5">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-px" />
+                        That was an ordinary working day — approve only if they were genuinely off duty.
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      onClick={() => setRejecting(r)}
+                      disabled={decideMut.isPending}
+                      className="flex-1 sm:flex-initial px-4 py-2 rounded-md text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      Reject
+                    </button>
+                    <button
+                      onClick={() => decideMut.mutate({ id: r.id, action: "APPROVED" })}
+                      disabled={decideMut.isPending}
+                      className="flex-1 sm:flex-initial px-4 py-2 rounded-md text-sm font-medium text-white whitespace-nowrap disabled:opacity-50"
+                      style={{ backgroundColor: "#2C3E7C" }}
+                    >
+                      Approve &amp; credit
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {decided.length > 0 && (
+          <div className="border-t border-gray-100">
+            <p className="px-5 pt-4 pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Recently decided</p>
+            <div className="divide-y divide-gray-50 max-h-72 overflow-y-auto">
+              {decided.map((r) => (
+                <div key={r.id} className="px-5 py-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm text-gray-800 truncate">
+                      {r.employee?.firstName} {r.employee?.lastName}
+                      <span className="text-gray-400"> · {fmtWorkDate(r)} · {r.days === 1 ? "1 day" : "Half day"}</span>
+                    </p>
+                  </div>
+                  <span className={`shrink-0 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[r.status] ?? "bg-gray-100 text-gray-500"}`}>
+                    {statusLabel(r.status)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -2662,6 +3125,10 @@ export default function LeavesPage() {
           <div className="lg:col-span-2 space-y-5">
             <BalanceSection balances={balances} lopDays={lopDays} />
 
+            <CompOffSection
+              available={balances.find((b) => b.leaveType === "COMPENSATORY")?.balance ?? 0}
+            />
+
             {/* Apply for Leave — opens modal */}
             <div className="bg-white rounded-lg border border-gray-200">
               <button
@@ -2701,6 +3168,7 @@ export default function LeavesPage() {
 
           <WhoIsOnLeavePanel />
           <PendingApprovalsPanel />
+          <CompOffApprovalsPanel />
           <CancellationRequestsPanel />
           <DecisionHistory />
           {authority?.canOverride && <AllLeavesPanel />}

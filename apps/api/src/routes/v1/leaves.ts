@@ -145,6 +145,30 @@ export async function leaveRoutes(fastify: FastifyInstance) {
       where: { employeeId_leaveType_year: { employeeId: user.sub, leaveType, year } },
     });
 
+    // Comp-off is the one type with a hard ceiling. Every other balance is an
+    // entitlement the approver can stretch; a comp-off day exists only because
+    // an approved CompOffRequest minted it, so there is nothing to stretch —
+    // applying for days nobody earned would credit a leave out of thin air.
+    if (leaveType === "COMPENSATORY") {
+      const employee = await prisma.employee.findUnique({
+        where: { id: user.sub },
+        select: { joiningDate: true },
+      });
+      const available = balance
+        ? computeAccrued(balance.allocated, year, employee?.joiningDate ?? null)
+          + balance.carried + balance.earned - balance.used - balance.pending
+        : 0;
+      if (totalDays > available) {
+        return reply.status(400).send({
+          success: false,
+          error: available > 0
+            ? `You have ${available} comp-off day${available !== 1 ? "s" : ""} available but are applying for ${totalDays}. Comp-off can only be taken against days already approved.`
+            : "You have no comp-off days available. Claim the days you worked on your weekly off first — they are credited once your supervisor approves.",
+          statusCode: 400,
+        });
+      }
+    }
+
     // Allow application even with insufficient balance — supervisor decides
     const [application] = await prisma.$transaction([
       prisma.leaveApplication.create({
@@ -434,8 +458,12 @@ export async function leaveRoutes(fastify: FastifyInstance) {
       orderBy: { leaveType: "asc" },
     });
 
-    // Auto-provision from the applicable leave policy if no records exist yet
-    if (balances.length === 0 && employee?.designation?.grade) {
+    // Auto-provision from the applicable leave policy if no policy-derived
+    // records exist yet. The test is "no row carries an allocation" rather than
+    // "no rows at all": an approved comp-off creates a COMPENSATORY row with a
+    // zero allocation, and that must not be mistaken for a provisioned year.
+    const isProvisioned = balances.some((b) => b.allocated > 0);
+    if (!isProvisioned && employee?.designation?.grade) {
       const policy = await prisma.leavePolicy.findFirst({
         where: {
           isActive: true,
@@ -501,8 +529,11 @@ export async function leaveRoutes(fastify: FastifyInstance) {
         used: b.used,
         pending: b.pending,
         availed,
-        balance: Math.max(0, accrued + b.carried - availed),
+        // `earned` (approved comp-offs) is added whole — it is credited on
+        // approval, not accrued month by month like an allocation.
+        balance: Math.max(0, accrued + b.carried + b.earned - availed),
         carried: b.carried,
+        earned: b.earned,
       };
     });
 
