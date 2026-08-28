@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@cadb/db";
 import { authenticate, requireRole } from "../../middleware/authenticate.js";
 import type { JwtPayload } from "@cadb/types";
-import { NOTIFY_EVENTS, GLOBAL_SETTING_KEY, EVENT_META } from "../../utils/notify/events.js";
+import { NOTIFY_EVENTS, NOTIFY_CHANNELS, GLOBAL_SETTING_KEY, EVENT_META } from "../../utils/notify/events.js";
 import { readSettingsGrid } from "../../utils/notify/settings.js";
 
 /**
@@ -21,6 +21,7 @@ const updateSchema = z.object({
   event: z.string().refine((e) => VALID_KEYS.has(e), "Unknown notification event"),
   emailEnabled: z.boolean(),
   whatsappEnabled: z.boolean(),
+  inAppEnabled: z.boolean(),
 });
 
 export async function notificationSettingRoutes(fastify: FastifyInstance) {
@@ -33,6 +34,7 @@ export async function notificationSettingRoutes(fastify: FastifyInstance) {
       success: true,
       data: {
         globalKey: GLOBAL_SETTING_KEY,
+        channels: NOTIFY_CHANNELS,
         events: NOTIFY_EVENTS.map((event) => ({ event, ...EVENT_META[event] })),
         settings,
       },
@@ -51,11 +53,11 @@ export async function notificationSettingRoutes(fastify: FastifyInstance) {
       });
     }
 
-    const { event, emailEnabled, whatsappEnabled } = parsed.data;
+    const { event, emailEnabled, whatsappEnabled, inAppEnabled } = parsed.data;
     const data = await prisma.notificationSetting.upsert({
       where: { event },
-      create: { event, emailEnabled, whatsappEnabled, updatedById: user.sub },
-      update: { emailEnabled, whatsappEnabled, updatedById: user.sub },
+      create: { event, emailEnabled, whatsappEnabled, inAppEnabled, updatedById: user.sub },
+      update: { emailEnabled, whatsappEnabled, inAppEnabled, updatedById: user.sub },
     });
 
     return reply.send({ success: true, data });

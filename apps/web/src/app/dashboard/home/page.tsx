@@ -5,13 +5,13 @@ import { api } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
 import { formatDate, formatCurrency, getInitials } from "@/lib/utils";
 import Link from "next/link";
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import {
   CalendarOff, Receipt, GraduationCap, Shield, Clock,
   CheckCircle, AlertCircle, User, Pencil, AlertTriangle,
-  Megaphone, Info, Pin, Bell, TrendingUp, TrendingDown,
+  Megaphone, Info, Pin, TrendingUp, TrendingDown,
   Users, Briefcase, Headphones, BarChart2, UserCheck, FileText,
-  Activity, Star, ChevronRight, X, CalendarDays,
+  Activity, Star, ChevronRight, CalendarDays,
 } from "lucide-react";
 
 // ── Super Admin Dashboard ──────────────────────────────────────────────────────
@@ -61,8 +61,6 @@ function SectionHeader({ icon: Icon, title, subtitle, linkLabel = "View Details"
 
 function SuperAdminDashboard() {
   const { user } = useAuthStore();
-  const [bellOpen, setBellOpen] = useState(false);
-  const bellRef = useRef<HTMLDivElement>(null);
 
   const now = new Date();
   const greeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 17 ? "Good afternoon" : "Good evening";
@@ -76,83 +74,13 @@ function SuperAdminDashboard() {
     return `${start}-${String(start + 1).slice(-2)}`;
   })();
 
-  const { data: annResult } = useQuery({
-    queryKey: ["announcements"],
-    queryFn: () => api.get<{ data: Announcement[] }>("/api/v1/announcements").then((r) => r.data.data),
-    staleTime: 0,
-    refetchOnWindowFocus: true,
-    refetchInterval: 60 * 1000,
-  });
-  const announcements: Announcement[] = (annResult as any) ?? [];
-
-  // Close bell dropdown on outside click
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (bellRef.current && !bellRef.current.contains(e.target as Node)) setBellOpen(false);
-    }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
   return (
     <div className="-m-6 bg-white min-h-screen">
-      {/* Top bar */}
+      {/* Top bar — the bell lives in the app header now, so this is the clock */}
       <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-4 sm:px-6 py-3 flex items-center gap-3">
-        <div className="flex items-center gap-3 ml-auto">
-          {/* Bell */}
-          <div className="relative" ref={bellRef}>
-            <button
-              onClick={() => setBellOpen((v) => !v)}
-              className="relative p-2 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              <Bell className="h-5 w-5 text-gray-500" />
-              {announcements.length > 0 && (
-                <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-red-500" />
-              )}
-            </button>
-            {bellOpen && (
-              <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl border border-gray-200 shadow-xl z-50 overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-                  <span className="text-sm font-semibold text-gray-900">Notifications</span>
-                  <button onClick={() => setBellOpen(false)} className="text-gray-400 hover:text-gray-600">
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-                {announcements.length === 0 ? (
-                  <p className="px-4 py-6 text-sm text-gray-400 text-center">No notifications</p>
-                ) : (
-                  <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto">
-                    {announcements.slice(0, 6).map((a) => {
-                      const meta = ANN_META[a.type];
-                      const Icon = meta.icon;
-                      return (
-                        <div key={a.id} className={`flex items-start gap-3 px-4 py-3 border-l-4 ${meta.border} ${meta.bg}`}>
-                          {a.pinned && <Pin className="h-3.5 w-3.5 text-blue-400 shrink-0 mt-0.5" />}
-                          <Icon className={`h-4 w-4 shrink-0 mt-0.5 ${meta.iconColor}`} />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-gray-900 truncate">{a.title}</p>
-                            <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{a.body}</p>
-                            <p className="text-[11px] text-gray-400 mt-1">{formatDate(a.createdAt)}</p>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                <Link
-                  href="/dashboard/announcements"
-                  onClick={() => setBellOpen(false)}
-                  className="flex items-center justify-center px-4 py-2.5 text-xs text-blue-600 hover:bg-blue-50 transition-colors border-t border-gray-100"
-                >
-                  View all announcements →
-                </Link>
-              </div>
-            )}
-          </div>
-          <div className="hidden sm:flex items-center gap-1.5 text-xs text-gray-500">
-            <Clock className="h-4 w-4" />
-            <span>{dateStr}, {timeStr}</span>
-          </div>
+        <div className="hidden sm:flex items-center gap-1.5 ml-auto text-xs text-gray-500">
+          <Clock className="h-4 w-4" />
+          <span>{dateStr}, {timeStr}</span>
         </div>
       </div>
 

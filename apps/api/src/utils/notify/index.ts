@@ -1,7 +1,9 @@
 import { prisma } from "@cadb/db";
 import { whatsappNumberFor } from "../phone.js";
-import { resolveApprovalRecipients, resolveSelfRecipient, type Recipient } from "./recipients.js";
-import { GOES_TO_APPLICANT, type NotifyEvent } from "./events.js";
+import {
+  resolveApprovalRecipients, resolveSelfRecipient, resolveEveryoneElse, type Recipient,
+} from "./recipients.js";
+import { EVENT_META, GOES_TO_APPLICANT, type NotifyChannel, type NotifyEvent } from "./events.js";
 import { channelsEnabledFor } from "./settings.js";
 import type { NotifyPayload } from "./templates.js";
 import { emailConfigured } from "./channels/email.js";
@@ -49,11 +51,12 @@ type LeaveLike = {
   approverId?: string | null;
 };
 
-export async function notifyLeaveEvent(event: NotifyEvent, leave: LeaveLike): Promise<void> {
+export async function notifyLeaveEvent(event: NotifyEvent, leave: LeaveLike, opts?: NotifyOptions): Promise<void> {
   const from = fmtDate(leave.fromDate);
   const to = fmtDate(leave.toDate);
 
   await enqueue(event, {
+    ...opts,
     entityType: "LeaveApplication",
     entityId: leave.id,
     employeeId: leave.employeeId,
@@ -85,7 +88,7 @@ type CompOffLike = {
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-export async function notifyCompOffEvent(event: NotifyEvent, compOff: CompOffLike): Promise<void> {
+export async function notifyCompOffEvent(event: NotifyEvent, compOff: CompOffLike, opts?: NotifyOptions): Promise<void> {
   // The weekday is the whole point of the notice — an approver deciding whether
   // a day was really an off day needs to see "Sunday", not a date they have to
   // look up. Read in UTC: comp-off dates are stored at UTC midnight, and local
@@ -94,6 +97,7 @@ export async function notifyCompOffEvent(event: NotifyEvent, compOff: CompOffLik
   const isWeeklyOff = compOff.workDate.getUTCDay() === 0;
 
   await enqueue(event, {
+    ...opts,
     entityType: "CompOffRequest",
     entityId: compOff.id,
     employeeId: compOff.employeeId,
@@ -123,8 +127,43 @@ type ClaimLike = {
   approverId?: string | null;
 };
 
-export async function notifyClaimEvent(event: NotifyEvent, claim: ClaimLike): Promise<void> {
+type AnnouncementLike = {
+  id: string;
+  title: string;
+  body: string;
+  type: string;
+  postedById: string;
+};
+
+/**
+ * Fans a published notice out to every active employee's bell.
+ *
+ * Unlike the leave and claim events this has no approval chain — the audience
+ * is the whole company — so it resolves its own recipients rather than going
+ * through `enqueue`'s supervisor/HR routing.
+ */
+export async function notifyAnnouncementPosted(announcement: AnnouncementLike): Promise<void> {
+  await enqueue("ANNOUNCEMENT_POSTED", {
+    entityType: "Announcement",
+    entityId: announcement.id,
+    // The poster is the "applicant" for payload purposes; they are excluded
+    // from their own fan-out, same as an applicant never notifies themselves.
+    employeeId: announcement.postedById,
+    approverId: null,
+    path: "/dashboard/announcements",
+    audience: "EVERYONE",
+    fields: {
+      announcementTitle: announcement.title,
+      // The bell shows two clamped lines; the full text is one click away.
+      announcementBody: announcement.body.replace(/\s+/g, " ").trim().slice(0, 300),
+      announcementType: announcement.type,
+    },
+  });
+}
+
+export async function notifyClaimEvent(event: NotifyEvent, claim: ClaimLike, opts?: NotifyOptions): Promise<void> {
   await enqueue(event, {
+    ...opts,
     entityType: "ReimbursementClaim",
     entityId: claim.id,
     employeeId: claim.employeeId,
@@ -144,13 +183,31 @@ export async function notifyClaimEvent(event: NotifyEvent, claim: ClaimLike): Pr
 
 // ─── SHARED CORE ─────────────────────────────────────────────────────────────
 
-type EnqueueSpec = {
+/**
+ * Overrides for a one-off enqueue. Normal application code passes nothing —
+ * these exist for the bell backfill, which has to reach the in-app channel for
+ * requests raised weeks ago without re-emailing anyone about them.
+ */
+export type NotifyOptions = {
+  /** Narrow delivery to these channels, on top of the event's own list. */
+  onlyChannels?: NotifyChannel[];
+  /** Skip a recipient who already has a row for this event and entity. */
+  dedupe?: boolean;
+};
+
+type EnqueueSpec = NotifyOptions & {
   entityType: string;
   entityId: string;
   employeeId: string;
   approverId: string | null;
   path: string;
   fields: Partial<NotifyPayload>;
+  /**
+   * Who hears about it. The default routes by event: decisions go back to the
+   * applicant, everything else up the approval chain. `EVERYONE` is for
+   * company-wide notices that have no chain at all.
+   */
+  audience?: "EVERYONE";
 };
 
 /**
@@ -165,9 +222,16 @@ async function enqueue(event: NotifyEvent, spec: EnqueueSpec): Promise<void> {
     // Two independent gates: what the Super Admin allows, and what the server
     // is actually able to send. A channel needs both.
     const allowed = await channelsEnabledFor(event);
-    const channels = [
-      ...(allowed.emailEnabled && emailConfigured() ? ["EMAIL" as const] : []),
-      ...(allowed.whatsappEnabled && whatsappConfigured() ? ["WHATSAPP" as const] : []),
+    // An event only ever uses the channels its metadata claims — an
+    // announcement is bell-only however the Super-Admin toggles are set.
+    const supported = new Set<NotifyChannel>(EVENT_META[event].channels);
+    const wanted = spec.onlyChannels ? new Set(spec.onlyChannels) : null;
+    const on = (c: NotifyChannel) => supported.has(c) && (!wanted || wanted.has(c));
+    const channels: NotifyChannel[] = [
+      ...(on("EMAIL") && allowed.emailEnabled && emailConfigured() ? ["EMAIL" as const] : []),
+      ...(on("WHATSAPP") && allowed.whatsappEnabled && whatsappConfigured() ? ["WHATSAPP" as const] : []),
+      // In-app needs nothing configured: writing the row *is* the delivery.
+      ...(on("IN_APP") && allowed.inAppEnabled ? ["IN_APP" as const] : []),
     ];
     if (channels.length === 0) return;
 
@@ -180,8 +244,9 @@ async function enqueue(event: NotifyEvent, spec: EnqueueSpec): Promise<void> {
     });
     if (!applicant) return;
 
-    const recipients = GOES_TO_APPLICANT.has(event)
-      ? await resolveSelfRecipient(spec.employeeId)
+    const recipients =
+      spec.audience === "EVERYONE" ? await resolveEveryoneElse(spec.employeeId)
+      : GOES_TO_APPLICANT.has(event) ? await resolveSelfRecipient(spec.employeeId)
       : await resolveApprovalRecipients(spec.employeeId);
 
     if (recipients.length === 0) {
@@ -204,10 +269,21 @@ async function enqueue(event: NotifyEvent, spec: EnqueueSpec): Promise<void> {
       department: applicant.department?.name ?? "—",
       approverName: approver ? `${approver.firstName} ${approver.lastName}` : "Your approver",
       link: `${APP_URL}${spec.path}`,
+      path: spec.path,
       ...spec.fields,
     };
 
-    const rows = recipients.flatMap((r) => buildRows(event, spec, r, base, channels));
+    let rows = recipients.flatMap((r) => buildRows(event, spec, r, base, channels));
+
+    if (spec.dedupe && rows.length > 0) {
+      const existing = await prisma.notification.findMany({
+        where: { event, entityType: spec.entityType, entityId: spec.entityId },
+        select: { recipientId: true, channel: true },
+      });
+      const seen = new Set(existing.map((e) => `${e.recipientId}:${e.channel}`));
+      rows = rows.filter((r) => !seen.has(`${r.recipientId}:${r.channel}`));
+    }
+
     if (rows.length === 0) return;
 
     await prisma.notification.createMany({ data: rows });
@@ -221,7 +297,7 @@ function buildRows(
   spec: EnqueueSpec,
   recipient: Recipient,
   base: Omit<NotifyPayload, "recipientName">,
-  channels: Array<"EMAIL" | "WHATSAPP">,
+  channels: NotifyChannel[],
 ) {
   const payload: NotifyPayload = { ...base, recipientName: recipient.firstName };
   const common = {
@@ -245,6 +321,18 @@ function buildRows(
     if (number) {
       rows.push({ ...common, channel: "WHATSAPP" as const, destination: number });
     }
+  }
+
+  if (channels.includes("IN_APP")) {
+    // Born SENT: the bell reads this table, so the row is the delivery. Leaving
+    // it PENDING would park an undeliverable row in the dispatcher's queue.
+    rows.push({
+      ...common,
+      channel: "IN_APP" as const,
+      destination: recipient.id,
+      status: "SENT" as const,
+      sentAt: new Date(),
+    });
   }
 
   return rows;

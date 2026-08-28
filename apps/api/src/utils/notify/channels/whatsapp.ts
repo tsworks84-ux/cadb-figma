@@ -39,7 +39,11 @@ export async function sendWhatsappNotification(
     return { status: "SKIPPED", error: "WhatsApp is not configured (WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_TOKEN unset)" };
   }
 
-  const { name, params } = whatsappTemplate(event, payload);
+  const template = whatsappTemplate(event, payload);
+  if (!template) {
+    return { status: "SKIPPED", error: `${event} has no WhatsApp template` };
+  }
+  const { name, params } = template;
   const url = `https://graph.facebook.com/${API_VERSION}/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
 
   const body = {

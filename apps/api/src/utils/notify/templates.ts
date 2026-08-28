@@ -17,6 +17,8 @@ export type NotifyPayload = {
   applicantCode: string;
   department: string;
   link: string;
+  /** The same destination as `link`, app-relative — what the bell navigates to. */
+  path?: string;
 
   // Leave events
   leaveType?: string;
@@ -31,6 +33,11 @@ export type NotifyPayload = {
   weekday?: string;
   compOffDays?: string;
   dayContext?: string;   // "Sunday — weekly off" / "Republic Day (holiday)" / "Tuesday"
+
+  // Announcement events
+  announcementTitle?: string;
+  announcementBody?: string;
+  announcementType?: string;   // GENERAL | IMPORTANT | URGENT
 
   // Claim events
   claimNumber?: string;
@@ -77,7 +84,12 @@ function shell(heading: string, lead: string, rows: string, cta: string, link: s
 
 // ─── EMAIL ───────────────────────────────────────────────────────────────────
 
-export function renderEmail(event: NotifyEvent, p: NotifyPayload): { subject: string; html: string } {
+/**
+ * Returns null for events this channel does not carry — announcements reach
+ * everyone through the bell and the Notice Board, and mailing all staff every
+ * time one is posted would be a new kind of spam, not a feature.
+ */
+export function renderEmail(event: NotifyEvent, p: NotifyPayload): { subject: string; html: string } | null {
   const who = `${esc(p.applicantName)} (${esc(p.applicantCode)}, ${esc(p.department)})`;
 
   const leaveRows =
@@ -244,6 +256,9 @@ export function renderEmail(event: NotifyEvent, p: NotifyPayload): { subject: st
           p.link,
         ),
       };
+
+    case "ANNOUNCEMENT_POSTED":
+      return null;
   }
 }
 
@@ -285,7 +300,7 @@ export function renderEmail(event: NotifyEvent, p: NotifyPayload): { subject: st
  * The dashboard link belongs in a URL button on the template, not in the body:
  * a button survives wording changes without re-approval.
  */
-const TEMPLATE_ENV: Record<NotifyEvent, { env: string; fallback: string }> = {
+const TEMPLATE_ENV: Partial<Record<NotifyEvent, { env: string; fallback: string }>> = {
   LEAVE_APPLIED:          { env: "WHATSAPP_TEMPLATE_LEAVE_APPLIED",  fallback: "leave_request_alert" },
   LEAVE_CANCEL_REQUESTED: { env: "WHATSAPP_TEMPLATE_LEAVE_CANCEL",   fallback: "leave_cancel_alert" },
   LEAVE_APPROVED:         { env: "WHATSAPP_TEMPLATE_LEAVE_APPROVED", fallback: "leave_decision_approved" },
@@ -311,9 +326,11 @@ function param(value: string | undefined, max = 200): string {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
-export function whatsappTemplate(event: NotifyEvent, p: NotifyPayload): { name: string; params: string[] } {
-  const { env, fallback } = TEMPLATE_ENV[event];
-  const name = process.env[env] ?? fallback;
+/** Null for events with no registered template — see `renderEmail`. */
+export function whatsappTemplate(event: NotifyEvent, p: NotifyPayload): { name: string; params: string[] } | null {
+  const entry = TEMPLATE_ENV[event];
+  if (!entry) return null;
+  const name = process.env[entry.env] ?? entry.fallback;
   const build = (...values: Array<string | undefined>) => ({ name, params: values.map((v) => param(v)) });
 
   switch (event) {
@@ -341,5 +358,52 @@ export function whatsappTemplate(event: NotifyEvent, p: NotifyPayload): { name: 
       return build(p.recipientName, p.claimNumber, p.claimedAmount, p.approverName, p.decisionNote);
     case "CLAIM_PAID":
       return build(p.recipientName, p.claimNumber, p.approvedAmount ?? p.claimedAmount);
+    case "ANNOUNCEMENT_POSTED":
+      return null;
+  }
+}
+
+// ─── IN-APP (THE BELL) ───────────────────────────────────────────────────────
+
+/**
+ * A feed entry, not a letter. The title has to survive being truncated to one
+ * line in a 20rem dropdown, so it leads with what happened and who to — no
+ * greeting, no sign-off, and the detail lives behind the link.
+ */
+export function renderInApp(event: NotifyEvent, p: NotifyPayload): { title: string; body: string } {
+  const who = `${p.applicantName} (${p.applicantCode})`;
+  const dates = p.dateRange ?? `${p.fromDate} – ${p.toDate}`;
+  const days = (n: string | undefined) => `${n ?? "?"} day${n === "1" ? "" : "s"}`;
+
+  switch (event) {
+    case "LEAVE_APPLIED":
+      return { title: `${who} applied for leave`, body: `${p.leaveType} · ${dates} · ${days(p.totalDays)}` };
+    case "LEAVE_CANCEL_REQUESTED":
+      return { title: `${who} wants to cancel a leave`, body: `${p.leaveType} · ${dates} · ${p.cancelReason ?? ""}`.trim() };
+    case "LEAVE_APPROVED":
+      return { title: "Your leave was approved", body: `${p.leaveType} · ${dates} · approved by ${p.approverName}` };
+    case "LEAVE_REJECTED":
+      return { title: "Your leave was rejected", body: `${p.leaveType} · ${dates}${p.decisionNote ? ` · ${p.decisionNote}` : ""}` };
+
+    case "COMP_OFF_REQUESTED":
+      return { title: `${who} claimed a comp-off`, body: `${p.workDate} · ${p.dayContext} · ${days(p.compOffDays)}` };
+    case "COMP_OFF_APPROVED":
+      return { title: "Your comp-off was approved", body: `${days(p.compOffDays)} credited for ${p.workDate}` };
+    case "COMP_OFF_REJECTED":
+      return { title: "Your comp-off was rejected", body: `${p.workDate}${p.decisionNote ? ` · ${p.decisionNote}` : ""}` };
+
+    case "CLAIM_SUBMITTED":
+      return { title: `${who} submitted a claim`, body: `${p.claimNumber} · ${p.claimType} · ${p.claimedAmount}` };
+    case "CLAIM_CANCEL_REQUESTED":
+      return { title: `${who} wants to cancel a claim`, body: `${p.claimNumber} · ${p.claimedAmount} · ${p.cancelReason ?? ""}`.trim() };
+    case "CLAIM_APPROVED":
+      return { title: "Your claim was approved", body: `${p.claimNumber} · ${p.approvedAmount ?? p.claimedAmount} · approved by ${p.approverName}` };
+    case "CLAIM_REJECTED":
+      return { title: "Your claim was rejected", body: `${p.claimNumber} · ${p.claimedAmount}${p.decisionNote ? ` · ${p.decisionNote}` : ""}` };
+    case "CLAIM_PAID":
+      return { title: "Your claim has been paid", body: `${p.claimNumber} · ${p.approvedAmount ?? p.claimedAmount}` };
+
+    case "ANNOUNCEMENT_POSTED":
+      return { title: p.announcementTitle ?? "New announcement", body: p.announcementBody ?? "" };
   }
 }

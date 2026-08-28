@@ -8,6 +8,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { ACADEMICS_TABS, canViewAcademicsTab } from "@/lib/academicsAccess";
 import Image from "next/image";
 import { ArrowLeft } from "lucide-react";
+import { NotificationBell } from "@/components/layout/NotificationBell";
 
 const NAV_BG   = "#141735";
 const NAV2     = "#28245f";
@@ -102,6 +103,8 @@ export function AcademicsTopNav() {
         >
           <ArrowLeft className="h-4 w-4" />
         </Link>
+
+        <NotificationBell tone="dark" />
 
         {/* Avatar */}
         <div

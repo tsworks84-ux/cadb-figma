@@ -46,6 +46,7 @@ import { academicReportsRoutes } from "./routes/v1/academicReports.js";
 import { adminFeedbackRoutes } from "./routes/v1/adminFeedback.js";
 import { revenueRoutes } from "./routes/v1/revenue.js";
 import { notificationSettingRoutes } from "./routes/v1/notificationSettings.js";
+import { notificationRoutes } from "./routes/v1/notifications.js";
 import { confirmExpiredProbations } from "./utils/probation.js";
 import { drainNotifications } from "./utils/notify/dispatcher.js";
 import { createReadStream, existsSync } from "fs";
@@ -147,6 +148,7 @@ await server.register(academicReportsRoutes,    { prefix: "/api/v1/academics/rep
 await server.register(adminFeedbackRoutes,      { prefix: "/api/v1/feedback" });
 await server.register(revenueRoutes,            { prefix: "/api/v1/revenue" });
 await server.register(notificationSettingRoutes, { prefix: "/api/v1/notification-settings" });
+await server.register(notificationRoutes,        { prefix: "/api/v1/notifications" });
 const MIME: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",

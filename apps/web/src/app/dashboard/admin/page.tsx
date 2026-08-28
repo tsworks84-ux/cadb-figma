@@ -1614,8 +1614,19 @@ function ClaimTypesTab({ perms }: { perms: ModulePerms }) {
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 // ── Notifications Tab (Super Admin only) ─────────────────────────────────────
-type NotifSetting = { event: string; emailEnabled: boolean; whatsappEnabled: boolean };
-type NotifEventMeta = { event: string; group: string; label: string; audience: string };
+type NotifChannel = "EMAIL" | "WHATSAPP" | "IN_APP";
+type NotifFlag = "emailEnabled" | "whatsappEnabled" | "inAppEnabled";
+type NotifSetting = { event: string; emailEnabled: boolean; whatsappEnabled: boolean; inAppEnabled: boolean };
+type NotifEventMeta = { event: string; group: string; label: string; audience: string; channels: NotifChannel[] };
+
+/** Column order, and the flag each column writes. */
+const NOTIF_COLUMNS: { channel: NotifChannel; flag: NotifFlag; label: string }[] = [
+  { channel: "IN_APP",   flag: "inAppEnabled",    label: "In-app" },
+  { channel: "EMAIL",    flag: "emailEnabled",    label: "Email" },
+  { channel: "WHATSAPP", flag: "whatsappEnabled", label: "WhatsApp" },
+];
+
+const NOTIF_DEFAULTS = { emailEnabled: true, whatsappEnabled: true, inAppEnabled: true };
 
 function NotificationsTab() {
   const qc = useQueryClient();
@@ -1652,11 +1663,11 @@ function NotificationsTab() {
   const events: NotifEventMeta[] = data.events;
   const globalKey: string = data.globalKey;
   const byEvent = Object.fromEntries(settings.map((s) => [s.event, s]));
-  const master: NotifSetting = byEvent[globalKey] ?? { event: globalKey, emailEnabled: true, whatsappEnabled: true };
+  const master: NotifSetting = byEvent[globalKey] ?? { event: globalKey, ...NOTIF_DEFAULTS };
 
-  function toggle(event: string, channel: "emailEnabled" | "whatsappEnabled", value: boolean) {
-    const current = byEvent[event] ?? { event, emailEnabled: true, whatsappEnabled: true };
-    saveMut.mutate({ ...current, [channel]: value });
+  function toggle(event: string, flag: NotifFlag, value: boolean) {
+    const current = byEvent[event] ?? { event, ...NOTIF_DEFAULTS };
+    saveMut.mutate({ ...current, [flag]: value });
   }
 
   const groups = [...new Set(events.map((e) => e.group))];
@@ -1691,22 +1702,16 @@ function NotificationsTab() {
           Master switch. Turning a channel off here silences it everywhere, whatever the rows below say.
         </p>
         <div className="flex flex-wrap gap-x-8 gap-y-3">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <Check
-              label="Email — all notifications"
-              checked={master.emailEnabled}
-              onChange={(v) => toggle(globalKey, "emailEnabled", v)}
-            />
-            <span className="text-sm text-gray-700">Email</span>
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <Check
-              label="WhatsApp — all notifications"
-              checked={master.whatsappEnabled}
-              onChange={(v) => toggle(globalKey, "whatsappEnabled", v)}
-            />
-            <span className="text-sm text-gray-700">WhatsApp</span>
-          </label>
+          {NOTIF_COLUMNS.map((col) => (
+            <label key={col.channel} className="flex items-center gap-2 cursor-pointer">
+              <Check
+                label={`${col.label} — all notifications`}
+                checked={master[col.flag]}
+                onChange={(v) => toggle(globalKey, col.flag, v)}
+              />
+              <span className="text-sm text-gray-700">{col.label}</span>
+            </label>
+          ))}
         </div>
       </div>
 
@@ -1718,18 +1723,19 @@ function NotificationsTab() {
               <tr className="border-b border-gray-100 bg-gray-50">
                 <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Event</th>
                 <th className="hidden md:table-cell px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Goes to</th>
-                <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Email</th>
-                <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">WhatsApp</th>
+                {NOTIF_COLUMNS.map((col) => (
+                  <th key={col.channel} className="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">{col.label}</th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {groups.map((group) => (
                 <Fragment key={group}>
                   <tr className="bg-gray-50/60">
-                    <td colSpan={4} className="px-5 py-2 text-xs font-semibold text-gray-600 uppercase tracking-wider">{group}</td>
+                    <td colSpan={2 + NOTIF_COLUMNS.length} className="px-5 py-2 text-xs font-semibold text-gray-600 uppercase tracking-wider">{group}</td>
                   </tr>
                   {events.filter((e) => e.group === group).map((e) => {
-                    const row = byEvent[e.event] ?? { event: e.event, emailEnabled: true, whatsappEnabled: true };
+                    const row = byEvent[e.event] ?? { event: e.event, ...NOTIF_DEFAULTS };
                     return (
                       <tr key={e.event} className="hover:bg-gray-50">
                         <td className="px-5 py-3">
@@ -1737,22 +1743,22 @@ function NotificationsTab() {
                           <span className="block md:hidden text-xs text-gray-400 mt-0.5">{e.audience}</span>
                         </td>
                         <td className="hidden md:table-cell px-5 py-3 text-sm text-gray-500">{e.audience}</td>
-                        <td className="px-5 py-3 text-center">
-                          <Check
-                            label={`Email — ${e.label}`}
-                            checked={row.emailEnabled}
-                            disabled={!master.emailEnabled}
-                            onChange={(v) => toggle(e.event, "emailEnabled", v)}
-                          />
-                        </td>
-                        <td className="px-5 py-3 text-center">
-                          <Check
-                            label={`WhatsApp — ${e.label}`}
-                            checked={row.whatsappEnabled}
-                            disabled={!master.whatsappEnabled}
-                            onChange={(v) => toggle(e.event, "whatsappEnabled", v)}
-                          />
-                        </td>
+                        {NOTIF_COLUMNS.map((col) => (
+                          <td key={col.channel} className="px-5 py-3 text-center">
+                            {/* An event this channel never carries gets a dash,
+                                not a switch that would do nothing. */}
+                            {e.channels.includes(col.channel) ? (
+                              <Check
+                                label={`${col.label} — ${e.label}`}
+                                checked={row[col.flag]}
+                                disabled={!master[col.flag]}
+                                onChange={(v) => toggle(e.event, col.flag, v)}
+                              />
+                            ) : (
+                              <span className="text-gray-300" title={`Not sent over ${col.label.toLowerCase()}`}>—</span>
+                            )}
+                          </td>
+                        ))}
                       </tr>
                     );
                   })}
@@ -1764,8 +1770,9 @@ function NotificationsTab() {
       </div>
 
       <p className="text-xs text-gray-400">
-        A channel also needs to be configured on the server — SMTP for email, a WhatsApp Business
-        account for WhatsApp. Ticking a box here has no effect until that is in place.
+        Email and WhatsApp also need configuring on the server — SMTP for email, a WhatsApp
+        Business account for WhatsApp — and ticking a box here has no effect until that is in
+        place. In-app needs nothing: it is delivered to the bell as the row is written.
       </p>
     </div>
   );

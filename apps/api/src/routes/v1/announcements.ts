@@ -5,6 +5,7 @@ import { authenticate, requireRole } from "../../middleware/authenticate.js";
 import type { JwtPayload } from "@cadb/types";
 import { randomUUID } from "crypto";
 import { uploadFile } from "../../utils/s3.js";
+import { notifyAnnouncementPosted } from "../../utils/notify/index.js";
 
 const POSTER_ROLES = ["SUPER_ADMIN", "HR_ADMIN"] as const;
 
@@ -31,6 +32,19 @@ const announcementSchema = z.object({
 
 async function getNotifiedCount(audience: string): Promise<number> {
   return prisma.employee.count({ where: { deletedAt: null, status: { not: "TERMINATED" } } });
+}
+
+/**
+ * Push a freshly published notice into everyone's bell.
+ *
+ * Student-facing notices are skipped: they never appear in the employee list
+ * either, so a row in a staff member's bell would be a notice they cannot open.
+ */
+async function fanOutToBells(announcement: {
+  id: string; title: string; body: string; type: string; audience: string; postedById: string;
+}): Promise<void> {
+  if (announcement.audience === "STUDENTS") return;
+  await notifyAnnouncementPosted(announcement);
 }
 
 export async function announcementRoutes(fastify: FastifyInstance) {
@@ -226,6 +240,8 @@ export async function announcementRoutes(fastify: FastifyInstance) {
         include: { postedBy: { select: AUTHOR_SELECT }, _count: { select: { views: true } } },
       });
 
+      if (publish) await fanOutToBells(announcement);
+
       return reply.status(201).send({ success: true, data: announcement });
     }
   );
@@ -268,6 +284,11 @@ export async function announcementRoutes(fastify: FastifyInstance) {
         data: { status: "PUBLISHED", publishedAt: new Date(), notifiedCount },
         include: { postedBy: { select: AUTHOR_SELECT }, _count: { select: { views: true } } },
       });
+
+      // Only on the transition. Re-publishing an already-published notice —
+      // which un-archiving does — must not ring everyone's bell a second time.
+      if (existing.status !== "PUBLISHED") await fanOutToBells(announcement);
+
       return reply.send({ success: true, data: announcement });
     }
   );

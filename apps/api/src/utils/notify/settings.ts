@@ -1,7 +1,7 @@
 import { prisma } from "@cadb/db";
 import { NOTIFY_EVENTS, GLOBAL_SETTING_KEY, type NotifyEvent } from "./events.js";
 
-export type ChannelFlags = { emailEnabled: boolean; whatsappEnabled: boolean };
+export type ChannelFlags = { emailEnabled: boolean; whatsappEnabled: boolean; inAppEnabled: boolean };
 
 /**
  * Whether each channel may fire for `event`, per the Super-Admin toggles.
@@ -21,6 +21,7 @@ export async function channelsEnabledFor(event: NotifyEvent): Promise<ChannelFla
   return {
     emailEnabled: (global?.emailEnabled ?? true) && (own?.emailEnabled ?? true),
     whatsappEnabled: (global?.whatsappEnabled ?? true) && (own?.whatsappEnabled ?? true),
+    inAppEnabled: (global?.inAppEnabled ?? true) && (own?.inAppEnabled ?? true),
   };
 }
 
@@ -32,12 +33,12 @@ export async function readSettingsGrid(): Promise<Array<{ event: string } & Chan
   const stored = new Map(
     (await prisma.notificationSetting.findMany()).map((r) => [
       r.event,
-      { emailEnabled: r.emailEnabled, whatsappEnabled: r.whatsappEnabled },
+      { emailEnabled: r.emailEnabled, whatsappEnabled: r.whatsappEnabled, inAppEnabled: r.inAppEnabled },
     ]),
   );
   const withDefaults = (event: string) => ({
     event,
-    ...(stored.get(event) ?? { emailEnabled: true, whatsappEnabled: true }),
+    ...(stored.get(event) ?? { emailEnabled: true, whatsappEnabled: true, inAppEnabled: true }),
   });
   return [GLOBAL_SETTING_KEY, ...NOTIFY_EVENTS].map(withDefaults);
 }

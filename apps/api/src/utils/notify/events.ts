@@ -19,26 +19,48 @@ export const NOTIFY_EVENTS = [
   "CLAIM_APPROVED",
   "CLAIM_REJECTED",
   "CLAIM_PAID",
+  "ANNOUNCEMENT_POSTED",
 ] as const;
 
 export type NotifyEvent = (typeof NOTIFY_EVENTS)[number];
 
 export const GLOBAL_SETTING_KEY = "GLOBAL";
 
+/** Every channel an event can be delivered on. */
+export const NOTIFY_CHANNELS = ["EMAIL", "WHATSAPP", "IN_APP"] as const;
+export type NotifyChannel = (typeof NOTIFY_CHANNELS)[number];
+
+const ALL_CHANNELS: readonly NotifyChannel[] = NOTIFY_CHANNELS;
+
+type EventMeta = {
+  group: "Leaves" | "Comp-off" | "Claims" | "Announcements";
+  label: string;
+  audience: string;
+  /**
+   * Which channels this event may ever use. The Administration grid renders a
+   * dash instead of a checkbox for the rest, so nobody toggles a switch that
+   * cannot do anything.
+   */
+  channels: readonly NotifyChannel[];
+};
+
 /** Labels for the Administration grid, so the API and UI can't drift apart. */
-export const EVENT_META: Record<NotifyEvent, { group: "Leaves" | "Comp-off" | "Claims"; label: string; audience: string }> = {
-  LEAVE_APPLIED:          { group: "Leaves", label: "Leave applied",              audience: "Supervisor, department head, HR" },
-  LEAVE_CANCEL_REQUESTED: { group: "Leaves", label: "Leave cancellation request", audience: "Supervisor, department head, HR" },
-  LEAVE_APPROVED:         { group: "Leaves", label: "Leave approved",             audience: "The employee" },
-  LEAVE_REJECTED:         { group: "Leaves", label: "Leave rejected",             audience: "The employee" },
-  COMP_OFF_REQUESTED:     { group: "Comp-off", label: "Comp-off claimed",  audience: "Supervisor, department head, HR" },
-  COMP_OFF_APPROVED:      { group: "Comp-off", label: "Comp-off approved", audience: "The employee" },
-  COMP_OFF_REJECTED:      { group: "Comp-off", label: "Comp-off rejected", audience: "The employee" },
-  CLAIM_SUBMITTED:        { group: "Claims", label: "Claim submitted",            audience: "Supervisor, department head, HR" },
-  CLAIM_CANCEL_REQUESTED: { group: "Claims", label: "Claim cancellation request", audience: "Supervisor, department head, HR" },
-  CLAIM_APPROVED:         { group: "Claims", label: "Claim approved",             audience: "The employee" },
-  CLAIM_REJECTED:         { group: "Claims", label: "Claim rejected",             audience: "The employee" },
-  CLAIM_PAID:             { group: "Claims", label: "Claim paid out",             audience: "The employee" },
+export const EVENT_META: Record<NotifyEvent, EventMeta> = {
+  LEAVE_APPLIED:          { group: "Leaves", label: "Leave applied",              audience: "Supervisor, department head, HR", channels: ALL_CHANNELS },
+  LEAVE_CANCEL_REQUESTED: { group: "Leaves", label: "Leave cancellation request", audience: "Supervisor, department head, HR", channels: ALL_CHANNELS },
+  LEAVE_APPROVED:         { group: "Leaves", label: "Leave approved",             audience: "The employee",                    channels: ALL_CHANNELS },
+  LEAVE_REJECTED:         { group: "Leaves", label: "Leave rejected",             audience: "The employee",                    channels: ALL_CHANNELS },
+  COMP_OFF_REQUESTED:     { group: "Comp-off", label: "Comp-off claimed",  audience: "Supervisor, department head, HR", channels: ALL_CHANNELS },
+  COMP_OFF_APPROVED:      { group: "Comp-off", label: "Comp-off approved", audience: "The employee",                    channels: ALL_CHANNELS },
+  COMP_OFF_REJECTED:      { group: "Comp-off", label: "Comp-off rejected", audience: "The employee",                    channels: ALL_CHANNELS },
+  CLAIM_SUBMITTED:        { group: "Claims", label: "Claim submitted",            audience: "Supervisor, department head, HR", channels: ALL_CHANNELS },
+  CLAIM_CANCEL_REQUESTED: { group: "Claims", label: "Claim cancellation request", audience: "Supervisor, department head, HR", channels: ALL_CHANNELS },
+  CLAIM_APPROVED:         { group: "Claims", label: "Claim approved",             audience: "The employee",                    channels: ALL_CHANNELS },
+  CLAIM_REJECTED:         { group: "Claims", label: "Claim rejected",             audience: "The employee",                    channels: ALL_CHANNELS },
+  CLAIM_PAID:             { group: "Claims", label: "Claim paid out",             audience: "The employee",                    channels: ALL_CHANNELS },
+  // Bell only. A notice already reaches everyone on the Notice Board, so
+  // mailing all staff on every announcement would be a new kind of spam.
+  ANNOUNCEMENT_POSTED:    { group: "Announcements", label: "Announcement published", audience: "Everyone",                     channels: ["IN_APP"] },
 };
 
 /** Events whose notice goes back to the person who raised the request. */

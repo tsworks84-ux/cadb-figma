@@ -42,7 +42,10 @@ export async function drainNotifications(): Promise<DrainSummary> {
     await reclaimStaleClaims();
 
     const candidates = await prisma.notification.findMany({
-      where: { status: "PENDING", nextAttemptAt: { lte: new Date() } },
+      // IN_APP rows are written already SENT — the bell reads the table
+      // directly, so there is nothing to deliver. Excluded explicitly so a
+      // future status change can never hand one to an email transport.
+      where: { status: "PENDING", channel: { not: "IN_APP" }, nextAttemptAt: { lte: new Date() } },
       orderBy: { nextAttemptAt: "asc" },
       take: BATCH_SIZE,
     });

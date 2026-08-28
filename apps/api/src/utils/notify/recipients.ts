@@ -23,7 +23,7 @@ export type Recipient = {
   officialPhone: string | null;
   personalPhone: string | null;
   /** Why this person is being told — used in the greeting and for debugging. */
-  reason: "SUPERVISOR" | "DEPT_HEAD" | "HR_PARTNER" | "HR_POOL" | "SELF";
+  reason: "SUPERVISOR" | "DEPT_HEAD" | "HR_PARTNER" | "HR_POOL" | "SELF" | "EVERYONE";
 };
 
 /** Roles that constitute the HR pool when no department HR partner is set. */
@@ -89,6 +89,23 @@ export async function resolveApprovalRecipients(employeeId: string): Promise<Rec
 /** The applicant themselves — for decision notices, which go back to them. */
 export async function resolveSelfRecipient(employeeId: string): Promise<Recipient[]> {
   return hydrate([{ id: employeeId, reason: "SELF" }], null);
+}
+
+/**
+ * Every active employee except `excludeId` — for company-wide notices, which
+ * have no approval chain to walk.
+ *
+ * Terminated staff are dropped as well as soft-deleted ones: the same rule the
+ * announcement audience count already uses, so the bell and the "notified N
+ * people" figure on the announcement can't disagree.
+ */
+export async function resolveEveryoneElse(excludeId: string): Promise<Recipient[]> {
+  const rows = await prisma.employee.findMany({
+    where: { deletedAt: null, status: { not: "TERMINATED" }, id: { not: excludeId } },
+    select: RECIPIENT_SELECT,
+    orderBy: { id: "asc" },
+  });
+  return rows.map((row) => ({ ...row, reason: "EVERYONE" as const }));
 }
 
 /**

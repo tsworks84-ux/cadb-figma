@@ -21,7 +21,12 @@ export async function sendEmailNotification(
     return { status: "SKIPPED", error: "SMTP is not configured (SMTP_HOST unset)" };
   }
 
-  const { subject, html } = renderEmail(event, payload);
+  const rendered = renderEmail(event, payload);
+  if (!rendered) {
+    return { status: "SKIPPED", error: `${event} is not carried on email` };
+  }
+
+  const { subject, html } = rendered;
   try {
     await sendMail({ to, subject, html });
     return { status: "SENT" };

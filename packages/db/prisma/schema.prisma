@@ -1940,6 +1940,7 @@ model FeedbackMessage {
 enum NotificationChannel {
   EMAIL
   WHATSAPP
+  IN_APP    // the bell in the app — "delivered" the moment the row is written
 }
 
 enum NotificationStatus {
@@ -1966,6 +1967,7 @@ model NotificationSetting {
   event           String   @id   // "GLOBAL" | "LEAVE_APPLIED" | "CLAIM_SUBMITTED" | ...
   emailEnabled    Boolean  @default(true)
   whatsappEnabled Boolean  @default(true)
+  inAppEnabled    Boolean  @default(true)
   updatedById     String?
   updatedAt       DateTime @updatedAt
 }
@@ -1993,6 +1995,11 @@ model Notification {
   sentAt        DateTime?
   entityType    String?             // "LeaveApplication"
   entityId      String?
+  // IN_APP only: when the recipient opened it, and when they cleared it from
+  // their bell. Clearing is a soft dismiss — the delivery record is the same
+  // row every other channel writes, and losing it to a tidy-up would be wrong.
+  readAt        DateTime?
+  dismissedAt   DateTime?
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
 
@@ -2002,4 +2009,5 @@ model Notification {
   @@index([recipientId])
   @@index([entityType, entityId])
   @@index([createdAt])
+  @@index([recipientId, channel, dismissedAt, createdAt])
 }
