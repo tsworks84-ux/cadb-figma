@@ -11,6 +11,8 @@ import {
   Camera, X,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
+import { usePermissionsState } from "@/hooks/usePermissions";
+import { hasAcademicsAction } from "@/lib/academicsAccess";
 import { cn } from "@/lib/utils";
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -42,12 +44,25 @@ function FInput({ className = "", ...props }: React.InputHTMLAttributes<HTMLInpu
   );
 }
 
-function FSelect({ className = "", children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+// Native select chrome (macOS/Safari especially) ignores border, radius and
+// padding, which left the dropdowns visibly shorter than the text inputs beside
+// them. appearance-none + a drawn chevron keeps every control the same box.
+const SELECT_CHEVRON =
+  "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%239ca3af' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5'/%3E%3C/svg%3E\")";
+
+function FSelect({ className = "", children, style, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select
       {...props}
+      style={{
+        backgroundImage: SELECT_CHEVRON,
+        backgroundRepeat: "no-repeat",
+        backgroundPosition: "right 0.9rem center",
+        backgroundSize: "12px 8px",
+        ...style,
+      }}
       className={cn(
-        "w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-base text-gray-700 shadow-sm",
+        "w-full appearance-none rounded-xl border border-gray-200 bg-white px-4 py-3 pr-10 text-base text-gray-700 shadow-sm",
         "transition-all duration-150 focus:border-indigo-400 focus:outline-none focus:ring-4 focus:ring-indigo-50",
         className
       )}
@@ -88,6 +103,9 @@ function FieldWarn({ msg }: { msg: string }) {
 const OCCUPATION_OPTIONS = ["Service", "Self-Employed", "Business-Owner", "Professional", "Retired", "Other", "NA"];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Mirrors the API default; the field is pre-filled with it but stays editable.
+const DEFAULT_PASSWORD = "Welcome@123";
+
 const TODAY = new Date().toISOString().split("T")[0];
 
 function DOBInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -122,12 +140,13 @@ type FormState = {
   communicationContact: "FATHER" | "MOTHER" | "BOTH" | "OTHER";
   communicationContactName: string; communicationContactPhone: string;
   courseId: string; programmeType: string;
-  admissionDate: string; academicYear: string;
+  admissionNumber: string; admissionDate: string; academicYear: string;
   totalFee: string; discountType: "percent" | "amount"; discountValue: string;
   paidFee: string; paymentDate: string; paymentMode: string; receiptNumber: string; paymentNote: string;
   instalmentPlan: string; customInstalmentCount: string; firstDueDate: string;
   customItems: { dueDate: string; amount: string }[];
   batchId: string;
+  loginPassword: string;
 };
 
 const INITIAL: FormState = {
@@ -140,12 +159,13 @@ const INITIAL: FormState = {
   motherName: "", motherPhone: "", motherEmail: "", motherOccupation: "",
   communicationContact: "FATHER", communicationContactName: "", communicationContactPhone: "",
   courseId: "", programmeType: "",
-  admissionDate: "", academicYear: "",
+  admissionNumber: "", admissionDate: "", academicYear: "",
   totalFee: "", discountType: "amount", discountValue: "",
   paidFee: "", paymentDate: "", paymentMode: "", receiptNumber: "", paymentNote: "",
   instalmentPlan: "NONE", customInstalmentCount: "3", firstDueDate: "",
   customItems: [{ dueDate: "", amount: "" }, { dueDate: "", amount: "" }, { dueDate: "", amount: "" }],
   batchId: "",
+  loginPassword: DEFAULT_PASSWORD,
 };
 
 const PAYMENT_MODES = ["Cash", "UPI", "Bank Transfer", "Cheque", "DD", "Card", "Online"];
@@ -250,7 +270,7 @@ function PersonalSection({ form, set, schools, grades }: {
           <div>
             <Label>Mobile</Label>
             <div className="flex gap-2">
-              <FSelect className="w-[80px] shrink-0 px-2"><option>+91</option></FSelect>
+              <FSelect className="w-[86px] shrink-0 px-3 pr-7"><option>+91</option></FSelect>
               <FInput placeholder="10-digit mobile" value={form.phone} inputMode="numeric"
                 onChange={(e) => set("phone", e.target.value.replace(/\D/g, "").slice(0, 10))} className="flex-1 min-w-0" />
             </div>
@@ -338,7 +358,7 @@ function PhoneField({ value, onChange }: { value: string; onChange: (v: string) 
   return (
     <div>
       <div className="flex gap-2">
-        <FSelect className="w-[90px] shrink-0 px-2"><option>+91</option></FSelect>
+        <FSelect className="w-[86px] shrink-0 px-3 pr-7"><option>+91</option></FSelect>
         <FInput placeholder="10-digit number" value={value} inputMode="numeric"
           onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 10))} />
       </div>
@@ -534,7 +554,8 @@ function AdmissionSection({ form, set, courses, academicYears, instalmentPlans }
         <div className="grid grid-cols-3 gap-[14px]">
           <div>
             <Label>Admission Number</Label>
-            <FInput readOnly placeholder="Auto-generated on save" value="" className="bg-gray-50 text-gray-400 cursor-default font-mono" />
+            <FInput placeholder="Auto-generated if left blank" value={form.admissionNumber}
+              onChange={(e) => set("admissionNumber", e.target.value)} className="font-mono" />
           </div>
           <div>
             <Label>Admission Date</Label>
@@ -810,7 +831,7 @@ const CHOICE_OPTIONS = [
   { label: "SMS / WhatsApp later" },
 ] as const;
 
-function LoginInfoSection({ form }: { form: FormState }) {
+function LoginInfoSection({ form, set }: { form: FormState; set: (k: keyof FormState, v: any) => void }) {
   const [active, setActive] = useState<Record<string, boolean>>({
     "Force password change":  true,
     "Prevent password reuse": true,
@@ -829,13 +850,19 @@ function LoginInfoSection({ form }: { form: FormState }) {
           <div className="grid grid-cols-2 gap-[14px]">
             <div>
               <Label>Login Email</Label>
-              <FInput readOnly placeholder="Auto from student email" value={form.email || ""}
-                className="bg-gray-50 text-gray-500 cursor-default" />
+              <FInput type="email" placeholder="student@email.com" value={form.email}
+                onChange={(e) => set("email", e.target.value)} />
+              {form.email && !EMAIL_RE.test(form.email)
+                ? <FieldWarn msg="Enter a valid email address" />
+                : <p className="mt-1.5 text-xs text-gray-400">Same as the student&apos;s email — editing it here updates both.</p>}
             </div>
             <div>
-              <Label>Default Password</Label>
-              <FInput readOnly value="Welcome@123"
-                className="bg-gray-50 font-mono text-gray-700 cursor-default tracking-wider" />
+              <Label>Initial Password</Label>
+              <FInput value={form.loginPassword} onChange={(e) => set("loginPassword", e.target.value)}
+                className="font-mono tracking-wider" />
+              {form.loginPassword.length < 8
+                ? <FieldWarn msg="Password must be at least 8 characters" />
+                : <p className="mt-1.5 text-xs text-gray-400">The student must change this on first login.</p>}
             </div>
           </div>
 
@@ -893,6 +920,7 @@ function LoginInfoSection({ form }: { form: FormState }) {
 export default function NewStudentPage() {
   const router = useRouter();
   const { user } = useAuthStore();
+  const { permissions, ready } = usePermissionsState();
   const [section, setSection] = useState(0);
   const [form, setFormState] = useState<FormState>(INITIAL);
 
@@ -955,6 +983,7 @@ export default function NewStudentPage() {
       communicationContact: form.communicationContact || undefined,
       communicationContactName: form.communicationContactName || undefined,
       communicationContactPhone: form.communicationContactPhone || undefined,
+      admissionNumber: form.admissionNumber.trim() || undefined,
       admissionDate: form.admissionDate || undefined, academicYear: form.academicYear || undefined,
       totalFee: totalFeeNum > 0 ? totalFeeNum : undefined,
       discountType: discountAmount ? "AMOUNT" as const : undefined,
@@ -965,6 +994,8 @@ export default function NewStudentPage() {
       receiptNumber: form.receiptNumber || undefined,
       paymentNote: form.paymentNote || undefined,
       batchId: form.batchId || undefined,
+      // Only sent when changed — the API falls back to its own default otherwise
+      initialPassword: form.loginPassword && form.loginPassword !== DEFAULT_PASSWORD ? form.loginPassword : undefined,
       instalments: instalments.length > 0 ? instalments : undefined,
     };
   };
@@ -988,8 +1019,9 @@ export default function NewStudentPage() {
   });
 
   const hasContact = hasContactFn(form);
-  const canSubmit  = !!form.firstName && !!form.lastName && !!form.email && !!hasContact;
-  const canDraft   = !!form.firstName && !!form.lastName && !!form.email;
+  const passwordOk = form.loginPassword.length >= 8;
+  const canSubmit  = !!form.firstName && !!form.lastName && !!form.email && !!hasContact && passwordOk;
+  const canDraft   = !!form.firstName && !!form.lastName && !!form.email && passwordOk;
   const completedCount = SECTIONS.filter((s) => isComplete(s.id, form)).length;
 
   // Validate phone/email fields before save; clear invalid ones if user declines to proceed
@@ -1015,6 +1047,33 @@ export default function NewStudentPage() {
 
   // Initials for nav avatar
   const initials = ((form.firstName[0] ?? "") + (form.lastName[0] ?? "")).toUpperCase() || "ST";
+
+  // The list page already hides the entry points; this covers deep links and
+  // bookmarks so nobody fills the whole form only to be 403'd on save.
+  // The API enforces the same grant — this is UX, not the security boundary.
+  const settled   = !!user && ready;
+  const canCreate = hasAcademicsAction(user?.role, permissions, "STU_PROFILE", "canCreate");
+  if (!settled) return null;
+  if (!canCreate) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center px-5 py-12">
+        <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white px-6 py-10 text-center shadow-sm sm:px-10">
+          <p className="text-lg font-bold text-gray-900">Access denied</p>
+          <p className="mt-2 text-sm leading-relaxed text-gray-500">
+            Your role doesn&apos;t have permission to add students. Ask an
+            administrator to grant it under Roles &amp; Permissions.
+          </p>
+          <button
+            onClick={() => router.push("/dashboard/academics/students")}
+            className="mt-6 inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-gray-700"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to students
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full" style={{ background: "#f4f6fa" }}>
@@ -1153,7 +1212,7 @@ export default function NewStudentPage() {
             {section === 1 && <ParentsSection   form={form} set={set} />}
             {section === 2 && <AdmissionSection form={form} set={set} courses={courses} academicYears={academicYears} instalmentPlans={instalmentPlans} />}
             {section === 3 && <BatchSection     form={form} set={set} batches={batches} />}
-            {section === 4 && <LoginInfoSection form={form} />}
+            {section === 4 && <LoginInfoSection form={form} set={set} />}
           </div>
         </main>
       </div>

@@ -22,11 +22,23 @@ import ImportStudentsModal from "./ImportStudentsModal";
 const NAV2 = "#28245f";
 const PRIMARY_GRADIENT = "linear-gradient(135deg, #28245f, #4f46e5)";
 
-function FSelect({ className = "", children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+// Native select chrome ignores border/radius/padding on some browsers, which
+// left the filter dropdowns a different height from everything beside them.
+const SELECT_CHEVRON =
+  "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%239ca3af' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5'/%3E%3C/svg%3E\")";
+
+function FSelect({ className = "", children, style, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select
       {...props}
-      className={`w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none bg-white text-gray-700 ${className}`}
+      style={{
+        backgroundImage: SELECT_CHEVRON,
+        backgroundRepeat: "no-repeat",
+        backgroundPosition: "right 0.75rem center",
+        backgroundSize: "12px 8px",
+        ...style,
+      }}
+      className={`w-full appearance-none rounded-xl border border-gray-200 px-3 py-2.5 pr-9 text-sm focus:outline-none bg-white text-gray-700 ${className}`}
     >
       {children}
     </select>
@@ -43,9 +55,10 @@ const STATUS_COLORS: Record<string, string> = {
 
 // ── Student Row ────────────────────────────────────────────────────────────────
 
-function StudentRow({ student, canEdit, onArchive, onDelete, onResetPassword, onView }: {
+function StudentRow({ student, canEdit, canDelete, onArchive, onDelete, onResetPassword, onView }: {
   student: any;
   canEdit: boolean;
+  canDelete: boolean;
   onArchive: (id: string) => void;
   onDelete: (id: string, name: string) => void;
   onResetPassword: (id: string, name: string) => void;
@@ -103,7 +116,7 @@ function StudentRow({ student, canEdit, onArchive, onDelete, onResetPassword, on
       </div>
 
       {/* Actions menu */}
-      {canEdit && (
+      {(canEdit || canDelete) && (
         <div className="relative shrink-0" ref={menuRef}>
           <button
             onClick={() => setMenuOpen((v) => !v)}
@@ -115,20 +128,28 @@ function StudentRow({ student, canEdit, onArchive, onDelete, onResetPassword, on
             <>
               <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
               <div className="absolute right-0 top-8 z-20 w-44 rounded-xl bg-white shadow-lg border border-gray-100 py-1 text-sm">
-                <button onClick={() => { setMenuOpen(false); onResetPassword(student.id, `${student.firstName} ${student.lastName}`); }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-gray-600 hover:bg-gray-50">
-                  <KeyRound className="h-3.5 w-3.5" /> Reset Password
-                </button>
-                <button onClick={() => { setMenuOpen(false); onArchive(student.id); }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-gray-600 hover:bg-gray-50">
-                  {student.isArchived ? <ArchiveRestore className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}
-                  {student.isArchived ? "Unarchive" : "Archive"}
-                </button>
-                <div className="border-t border-gray-100 my-1" />
-                <button onClick={() => { setMenuOpen(false); onDelete(student.id, `${student.firstName} ${student.lastName}`); }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50">
-                  <Trash2 className="h-3.5 w-3.5" /> Delete
-                </button>
+                {canEdit && (
+                  <>
+                    <button onClick={() => { setMenuOpen(false); onResetPassword(student.id, `${student.firstName} ${student.lastName}`); }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-gray-600 hover:bg-gray-50">
+                      <KeyRound className="h-3.5 w-3.5" /> Reset Password
+                    </button>
+                    <button onClick={() => { setMenuOpen(false); onArchive(student.id); }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-gray-600 hover:bg-gray-50">
+                      {student.isArchived ? <ArchiveRestore className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}
+                      {student.isArchived ? "Unarchive" : "Archive"}
+                    </button>
+                  </>
+                )}
+                {canDelete && (
+                  <>
+                    {canEdit && <div className="border-t border-gray-100 my-1" />}
+                    <button onClick={() => { setMenuOpen(false); onDelete(student.id, `${student.firstName} ${student.lastName}`); }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50">
+                      <Trash2 className="h-3.5 w-3.5" /> Delete
+                    </button>
+                  </>
+                )}
               </div>
             </>
           )}
@@ -175,8 +196,11 @@ function StudentsPage() {
   const permissions  = usePermissions();
   const qc           = useQueryClient();
 
-  const canEdit =
-    hasAcademicsAction(user?.role, permissions, "STU_PROFILE", "canCreate");
+  // Each action reads its own grant, so the Super Admin can hand out (say) edit
+  // without delete. SUPER_ADMIN bypasses the matrix inside hasAcademicsAction.
+  const canCreate = hasAcademicsAction(user?.role, permissions, "STU_PROFILE", "canCreate");
+  const canEdit   = hasAcademicsAction(user?.role, permissions, "STU_PROFILE", "canEdit");
+  const canDelete = hasAcademicsAction(user?.role, permissions, "STU_PROFILE", "canDelete");
 
   // ── Filter state ─────────────────────────────────────────────────────────────
   const [search, setSearch]             = useState("");
@@ -288,7 +312,7 @@ function StudentsPage() {
           </div>
         </div>
         <div className="flex items-center gap-2.5">
-          {canEdit && (
+          {canCreate && (
             <button
               onClick={() => setImportOpen(true)}
               className="min-h-[42px] rounded-xl border border-gray-200 bg-white px-4 text-sm font-extrabold text-gray-600 hover:bg-gray-50 flex items-center gap-2"
@@ -296,7 +320,7 @@ function StudentsPage() {
               <Upload className="h-4 w-4" /> Import
             </button>
           )}
-          {canEdit && (
+          {canCreate && (
             <button
               onClick={() => router.push("/dashboard/academics/students/new")}
               className="min-h-[42px] rounded-xl px-4 text-sm font-extrabold text-white flex items-center gap-2"
@@ -419,7 +443,7 @@ function StudentsPage() {
             <span className="text-sm font-extrabold text-gray-400 shrink-0 tabular-nums">
               {stats.total} student{stats.total !== 1 ? "s" : ""}
             </span>
-            {canEdit && (
+            {canCreate && (
               <button
                 onClick={() => router.push("/dashboard/academics/students/new")}
                 className="md:hidden min-h-[42px] rounded-xl px-4 text-sm font-extrabold text-white flex items-center gap-2 shrink-0"
@@ -492,7 +516,7 @@ function StudentsPage() {
                       ? "Try adjusting your filters to see more results."
                       : "Add the first student or adjust filters. Once records exist, this area switches to a dense table with status, school, grade, batch, and last activity."}
                   </p>
-                  {canEdit && !hasActiveFilters && (
+                  {canCreate && !hasActiveFilters && (
                     <button
                       onClick={() => router.push("/dashboard/academics/students/new")}
                       className="min-h-[42px] rounded-xl px-5 text-sm font-extrabold text-white"
@@ -517,6 +541,7 @@ function StudentsPage() {
                   key={s.id}
                   student={s}
                   canEdit={canEdit}
+                  canDelete={canDelete}
                   onView={(id) => router.push(`/dashboard/academics/students/${id}`)}
                   onArchive={(id) => archiveMut.mutate(id)}
                   onDelete={(id, name) => { if (confirm(`Delete student "${name}"? This cannot be undone.`)) deleteMut.mutate(id); }}

@@ -94,8 +94,17 @@ const updateSchema = createSchema.partial().extend({
 
 export async function studentRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", authenticate);
-  // Students tab — gated on the STU_PROFILE grant (SUPER_ADMIN / HR_ADMIN bypass).
-  fastify.addHook("preHandler", requireModulePermission("STU_PROFILE"));
+  // Students tab — every action is gated on the matching STU_PROFILE grant
+  // (view/create/edit/delete follow the verb). Only SUPER_ADMIN bypasses it, so
+  // edit and delete are handed out from Roles & Permissions like any other grant.
+  fastify.addHook("preHandler", requireModulePermission("STU_PROFILE", {
+    // A password reset is a POST but is an *edit* of an existing student, so
+    // requiring canCreate for it would lock out roles granted edit-only.
+    actionFor: (request) =>
+      request.method === "POST" && /\/reset-password$/.test(request.url.split("?")[0])
+        ? "canEdit"
+        : null,
+  }));
 
   // ── LIST ───────────────────────────────────────────────────────────────────
 
@@ -234,7 +243,12 @@ export async function studentRoutes(fastify: FastifyInstance) {
     const emailExists = await prisma.student.findUnique({ where: { email } });
     if (emailExists) return reply.status(400).send({ success: false, error: `Email "${email}" is already registered` });
 
-    // Auto-generate admission number if not supplied
+    // Auto-generate admission number if not supplied. It is unique, so a
+    // hand-typed clash gets a readable 400 rather than a Prisma constraint 500.
+    if (rest.admissionNumber) {
+      const admExists = await prisma.student.findUnique({ where: { admissionNumber: rest.admissionNumber } });
+      if (admExists) return reply.status(400).send({ success: false, error: `Admission number "${rest.admissionNumber}" is already in use` });
+    }
     const admissionNumber = rest.admissionNumber || await generateAdmissionNumber();
     const { admissionNumber: _ignored, ...restWithoutAdm } = rest;
 
@@ -464,6 +478,11 @@ export async function studentRoutes(fastify: FastifyInstance) {
     if (email) {
       const conflict = await prisma.student.findFirst({ where: { email, NOT: { id } } });
       if (conflict) return reply.status(400).send({ success: false, error: `Email "${email}" is already in use` });
+    }
+
+    if (rest.admissionNumber) {
+      const admConflict = await prisma.student.findFirst({ where: { admissionNumber: rest.admissionNumber, NOT: { id } } });
+      if (admConflict) return reply.status(400).send({ success: false, error: `Admission number "${rest.admissionNumber}" is already in use` });
     }
 
     const student = await prisma.student.update({

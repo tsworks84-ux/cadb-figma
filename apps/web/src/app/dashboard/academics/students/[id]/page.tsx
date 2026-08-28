@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
+import { hasAcademicsAction } from "@/lib/academicsAccess";
 import {
   ArrowLeft, User, ClipboardList, GraduationCap, CalendarCheck,
   BookOpenCheck, BarChart2, MessageSquare, Bell, FolderOpen,
@@ -19,6 +20,11 @@ import {
 import { formatDate } from "@/lib/utils";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
+// Native select chrome ignores border/radius/padding on some browsers, leaving
+// dropdowns a different height from the inputs next to them.
+const SELECT_CHEVRON =
+  "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%239ca3af' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5'/%3E%3C/svg%3E\")";
 
 function FInput({ label, value, onChange, type = "text", disabled = false, className = "", ...rest }: {
   label: string; value: string; onChange?: (v: string) => void;
@@ -60,7 +66,13 @@ function FSelect({ label, value, onChange, disabled = false, children, className
         <select
           value={value}
           onChange={(e) => onChange?.(e.target.value)}
-          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none bg-white text-gray-700"
+          style={{
+            backgroundImage: SELECT_CHEVRON,
+            backgroundRepeat: "no-repeat",
+            backgroundPosition: "right 0.65rem center",
+            backgroundSize: "11px 7px",
+          }}
+          className="w-full appearance-none rounded-lg border border-gray-200 px-3 py-2 pr-8 text-sm focus:border-indigo-500 focus:outline-none bg-white text-gray-700"
         >
           {children}
         </select>
@@ -2856,10 +2868,9 @@ export default function StudentDetailPage() {
     if (t && TABS.some((tb) => tb.id === t)) setTab(t);
   }, []);
 
-  const canEdit =
-    user?.role === "SUPER_ADMIN" ||
-    user?.role === "HR_ADMIN" ||
-    (permissions["STU_PROFILE"]?.canEdit ?? false);
+  // Matrix-driven, exactly like the API: only SUPER_ADMIN bypasses it. HR_ADMIN
+  // used to be hard-coded here, which showed edit controls the API then rejected.
+  const canEdit = hasAcademicsAction(user?.role, permissions, "STU_PROFILE", "canEdit");
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["student", id],
