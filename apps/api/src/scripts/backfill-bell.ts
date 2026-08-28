@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { prisma } from "@cadb/db";
-import { notifyLeaveEvent, notifyClaimEvent, notifyCompOffEvent } from "../src/utils/notify/index.js";
+import { notifyLeaveEvent, notifyClaimEvent, notifyCompOffEvent } from "../utils/notify/index.js";
 
 /**
  * Seeds the bell with the requests that are already waiting for a decision.
@@ -17,8 +17,12 @@ import { notifyLeaveEvent, notifyClaimEvent, notifyCompOffEvent } from "../src/u
  *
  * Prints what it would do and exits unless you pass `--apply`:
  *
- *     pnpm --filter @cadb/api exec tsx scripts/backfill-bell.ts
- *     pnpm --filter @cadb/api exec tsx scripts/backfill-bell.ts --apply
+ *     node dist/scripts/backfill-bell.js            # dry run
+ *     node dist/scripts/backfill-bell.js --apply
+ *
+ * It lives under src/ rather than the sibling scripts/ folder so that it is
+ * compiled into dist and ships with the deploy — production has no source tree
+ * to run it from.
  */
 
 const APPLY = process.argv.includes("--apply");
