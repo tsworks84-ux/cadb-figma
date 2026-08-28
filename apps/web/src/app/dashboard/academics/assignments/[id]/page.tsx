@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { format, parseISO } from "date-fns";
+import { fullName } from "@/lib/utils";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -129,7 +130,7 @@ function ReviewModal({
         <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-gray-100">
           <div>
             <p className="text-sm font-semibold text-gray-900">
-              {submission.student.firstName} {submission.student.lastName}
+              {fullName(submission.student)}
             </p>
             <p className="text-xs text-gray-400 mt-0.5">
               {submission.student.studentCode}
@@ -235,7 +236,7 @@ function SubmissionRow({ sub, canEdit, onReview }: {
       </td>
       <td className="px-4 py-3">
         <p className="text-sm font-medium text-gray-900">
-          {sub.student?.firstName} {sub.student?.lastName}
+          {fullName(sub.student)}
         </p>
         <p className="text-xs text-gray-400">{sub.student?.studentCode}</p>
       </td>
@@ -328,7 +329,7 @@ export default function AssignmentDetailPage() {
   // Filtered submissions
   const filtered = currentSubs.filter((s) => {
     const nameMatch = !search ||
-      `${s.student?.firstName} ${s.student?.lastName}`.toLowerCase().includes(search.toLowerCase()) ||
+      fullName(s.student).toLowerCase().includes(search.toLowerCase()) ||
       (s.student?.studentCode ?? "").toLowerCase().includes(search.toLowerCase());
     const statusMatch = filterStatus === "ALL" || s.status === filterStatus;
     return nameMatch && statusMatch;

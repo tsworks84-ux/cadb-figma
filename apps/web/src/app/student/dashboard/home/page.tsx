@@ -9,8 +9,7 @@ import {
   GraduationCap, ChevronRight, Info, AlertTriangle, AlertCircle,
   Pin, MapPin, CheckCircle2,
 } from "lucide-react";
-import { formatDate } from "@/lib/utils";
-
+import { formatDate, fullName } from "@/lib/utils";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 type AnnType = "GENERAL" | "IMPORTANT" | "URGENT";
@@ -120,7 +119,7 @@ export default function StudentHomePage() {
           <div>
             <p className="text-sky-200 text-sm font-medium">{greeting} 👋</p>
             <h1 className="text-xl sm:text-2xl font-bold text-white leading-tight">
-              {student ? `${student.firstName} ${student.lastName}` : "Welcome"}
+              {student ? fullName(student) : "Welcome"}
             </h1>
             <p className="text-sky-300 text-xs mt-0.5">
               {now.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}

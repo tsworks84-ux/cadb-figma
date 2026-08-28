@@ -3,6 +3,7 @@ import { prisma } from "@cadb/db";
 import ExcelJS from "exceljs";
 import { authenticate } from "../../middleware/authenticate.js";
 import { ACADEMICS_MODULES, requireModulePermission } from "../../utils/permissions.js";
+import { fullName } from "../../utils/name.js";
 
 // ── Excel helpers ─────────────────────────────────────────────────────────────
 
@@ -90,7 +91,7 @@ export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
           where:   { isExcluded: false },
           include: {
             marks:   true,
-            student: { select: { id: true, firstName: true, lastName: true, rollNumber: true, studentBatches: { select: { batch: { select: { name: true } } }, take: 1, orderBy: { joinedAt: "asc" } } } },
+            student: { select: { id: true, firstName: true, middleName: true, lastName: true, rollNumber: true, studentBatches: { select: { batch: { select: { name: true } } }, take: 1, orderBy: { joinedAt: "asc" } } } },
           },
         },
       },
@@ -153,7 +154,7 @@ export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
     titleRow(ws2, "Student Rankings (by Average Marks)", 6);
     headerRow(ws2.addRow(["Rank", "Roll No", "Name", "Batch", "Exams Appeared", "Average Marks"]));
     students.forEach((s, i) => {
-      dataRow(ws2.addRow([i + 1, s.s.rollNumber ?? "—", `${s.s.firstName} ${s.s.lastName}`, s.s.batch?.name ?? "—", s.attended, s.avg]), i);
+      dataRow(ws2.addRow([i + 1, s.s.rollNumber ?? "—", fullName(s.s), s.s.batch?.name ?? "—", s.attended, s.avg]), i);
     });
     autoWidths(ws2, [8, 14, 28, 20, 16, 16]);
 
@@ -165,7 +166,7 @@ export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
     students.forEach((s, i) => {
       dataRow(ws3.addRow([
         s.s.rollNumber ?? "—",
-        `${s.s.firstName} ${s.s.lastName}`,
+        fullName(s.s),
         ...exams.map((ex) => {
           const sc = s.scores.find((x) => x.examId === ex.id);
           if (!sc) return "—";
@@ -201,7 +202,7 @@ export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
     const [student, exams] = await Promise.all([
       prisma.student.findUnique({
         where: { id: q.studentId },
-        select: { id: true, firstName: true, lastName: true, rollNumber: true, studentBatches: { select: { batch: { select: { name: true, grade: { select: { name: true } }, location: { select: { name: true } } } } }, take: 1, orderBy: { joinedAt: "asc" } } },
+        select: { id: true, firstName: true, middleName: true, lastName: true, rollNumber: true, studentBatches: { select: { batch: { select: { name: true, grade: { select: { name: true } }, location: { select: { name: true } } } } }, take: 1, orderBy: { joinedAt: "asc" } } },
       }),
       prisma.exam.findMany({
         where: { AND: conds },
@@ -255,10 +256,10 @@ export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Sheet 1: Exam History
     const ws1 = wb.addWorksheet("Exam History");
-    titleRow(ws1, `Student Progress — ${student.firstName} ${student.lastName}`, 6);
+    titleRow(ws1, `Student Progress — ${fullName(student)}`, 6);
     // Student info block
     const infoRows = [
-      ["Name", `${student.firstName} ${student.lastName}`],
+      ["Name", fullName(student)],
       ["Roll No", student.rollNumber ?? "—"],
       ["Batch", (student as any).studentBatches?.[0]?.batch?.name ?? "—"],
       ["Grade", (student as any).studentBatches?.[0]?.batch?.grade?.name ?? "—"],
@@ -318,7 +319,7 @@ export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
       include: {
         results: {
           where:   { isExcluded: false },
-          include: { student: { select: { id: true, firstName: true, lastName: true, rollNumber: true, studentBatches: { select: { batch: { select: { name: true } } }, take: 1, orderBy: { joinedAt: "asc" } } } } },
+          include: { student: { select: { id: true, firstName: true, middleName: true, lastName: true, rollNumber: true, studentBatches: { select: { batch: { select: { name: true } } }, take: 1, orderBy: { joinedAt: "asc" } } } } },
         },
       },
     });
@@ -329,7 +330,7 @@ export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
       absent:   exam.results.filter((r) => r.attended === false).length,
       total:    exam.results.length,
       students: exam.results.map((r) => ({
-        name:   `${r.student.firstName} ${r.student.lastName}`,
+        name:   fullName(r.student),
         roll:   r.student.rollNumber ?? "—",
         batch:  (r.student as any).studentBatches?.[0]?.batch?.name ?? "—",
         attended: r.attended !== false,
@@ -388,7 +389,7 @@ export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
           where:   { isExcluded: false },
           include: {
             marks:   true,
-            student: { select: { id: true, firstName: true, lastName: true, rollNumber: true, studentBatches: { select: { batch: { select: { name: true } } }, take: 1, orderBy: { joinedAt: "asc" } } } },
+            student: { select: { id: true, firstName: true, middleName: true, lastName: true, rollNumber: true, studentBatches: { select: { batch: { select: { name: true } } }, take: 1, orderBy: { joinedAt: "asc" } } } },
           },
         },
       },
@@ -447,7 +448,7 @@ export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
     [...stuMap.values()].forEach((entry, i) => {
       const valid = entry.scores.filter((s): s is number => typeof s === "number");
       const avg   = valid.length ? +(valid.reduce((a, b) => a + b, 0) / valid.length).toFixed(2) : "—";
-      dataRow(ws2.addRow([entry.s.rollNumber ?? "—", `${entry.s.firstName} ${entry.s.lastName}`, ...entry.scores, avg]), i);
+      dataRow(ws2.addRow([entry.s.rollNumber ?? "—", fullName(entry.s), ...entry.scores, avg]), i);
     });
     ws2.columns.forEach((c) => { c.width = 14; });
     ws2.getColumn(2).width = 28;
@@ -481,7 +482,7 @@ export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
         batches:     { include: { batch: { select: { name: true } } } },
         submissions: {
           include: {
-            student: { select: { id: true, firstName: true, lastName: true, rollNumber: true, studentBatches: { select: { batch: { select: { name: true } } }, take: 1, orderBy: { joinedAt: "asc" } } } },
+            student: { select: { id: true, firstName: true, middleName: true, lastName: true, rollNumber: true, studentBatches: { select: { batch: { select: { name: true } } }, take: 1, orderBy: { joinedAt: "asc" } } } },
           },
         },
       },
@@ -495,7 +496,7 @@ export const academicReportsRoutes: FastifyPluginAsync = async (fastify) => {
       submitted: a.submissions.filter((s) => s.status !== "NOT_SUBMITTED").length,
       pending:   a.submissions.filter((s) => s.status === "NOT_SUBMITTED").length,
       students:  a.submissions.map((s) => ({
-        name:  `${s.student.firstName} ${s.student.lastName}`,
+        name:  fullName(s.student),
         roll:  s.student.rollNumber ?? "—",
         batch: (s.student as any).studentBatches?.[0]?.batch?.name ?? "—",
         status: s.status,

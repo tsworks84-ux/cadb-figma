@@ -17,8 +17,7 @@ import {
   ChevronDown, ChevronUp, CheckCircle2, Clock, AlertCircle, Plus,
   Users2, Banknote, Trash2, IndianRupee, Info, AlertTriangle, Pin, Loader2, Pencil, Paperclip,
 } from "lucide-react";
-import { formatDate } from "@/lib/utils";
-
+import { formatDate, fullName } from "@/lib/utils";
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 // Native select chrome ignores border/radius/padding on some browsers, leaving
@@ -1339,7 +1338,7 @@ function PTMScheduleModal({ student, onClose, onSaved }: {
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
           <div>
             <h2 className="font-black text-gray-900">Schedule a PTM</h2>
-            <p className="text-xs text-gray-400 mt-0.5">{student.firstName} {student.lastName}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{fullName(student)}</p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"><X className="h-4 w-4" /></button>
         </div>
@@ -2933,7 +2932,7 @@ export default function StudentDetailPage() {
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <h1 className="text-sm font-bold text-gray-900 sm:text-base">{student.firstName} {student.middleName ? `${student.middleName} ` : ""}{student.lastName}</h1>
+              <h1 className="text-sm font-bold text-gray-900 sm:text-base">{fullName(student)}</h1>
               <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium border ${STATUS_COLORS[student.status] ?? STATUS_COLORS.INACTIVE}`}>
                 {student.status}
               </span>

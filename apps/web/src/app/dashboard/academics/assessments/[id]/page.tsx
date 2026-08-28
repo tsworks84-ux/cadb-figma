@@ -17,6 +17,7 @@ import { hasAcademicsAction } from "@/lib/academicsAccess";
 import { invalidateAssessments } from "@/lib/assessmentCache";
 import { format, parseISO } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { fullName } from "@/lib/utils";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -143,7 +144,7 @@ export default function ExamDetailPage() {
     const s = r.student;
     if (filterBatch && !(s.studentBatches ?? []).some((sb: any) => sb.batchId === filterBatch)) return false;
     if (search) {
-      const name = `${s.firstName} ${s.lastName}`.toLowerCase();
+      const name = fullName(s).toLowerCase();
       const roll = (s.rollNumber ?? "").toLowerCase();
       if (!name.includes(search.toLowerCase()) && !roll.includes(search.toLowerCase())) return false;
     }
@@ -302,7 +303,7 @@ export default function ExamDetailPage() {
   const topPerformers = useMemo(() =>
     [...appearedRows]
       .map((r) => ({
-        name:  `${r.student.firstName} ${r.student.lastName}`,
+        name:  fullName(r.student),
         roll:  r.student.rollNumber ?? "—",
         batch: r.student.studentBatches?.[0]?.batch?.name ?? "",
         total: (r.result?.marks ?? []).reduce((s: number, m: any) => s + (m.marks ?? 0), 0),
@@ -470,7 +471,7 @@ export default function ExamDetailPage() {
         const total    = (r.result?.marks ?? []).reduce((s: number, m: any) => s + (m.marks ?? 0), 0);
         return [
           r.student.rollNumber ?? "—",
-          `${r.student.firstName} ${r.student.lastName}`,
+          fullName(r.student),
           r.student.studentBatches?.[0]?.batch?.name ?? "—",
           ...slots.map((slot: any) => {
             if (isAbsent) return "A";
@@ -859,7 +860,7 @@ export default function ExamDetailPage() {
                           {/* Student name */}
                           <td className="sticky left-28 bg-inherit z-10 px-3 py-2 w-40 min-w-[160px]">
                             <div className={`font-medium ${absent ? "text-gray-400" : "text-gray-800"}`}>
-                              {s.firstName} {s.lastName}
+                              {fullName(s)}
                             </div>
                             {s.batch?.name && (
                               <div className="text-[10px] text-gray-400">{s.batch.name}</div>
@@ -928,7 +929,7 @@ export default function ExamDetailPage() {
                     return (
                       <div key={s.id} className="flex items-center gap-3 px-4 sm:px-6 py-2.5">
                         <span className="text-xs font-mono text-gray-400 w-28">{s.rollNumber ?? "—"}</span>
-                        <span className="text-xs text-gray-500 flex-1">{s.firstName} {s.lastName}</span>
+                        <span className="text-xs text-gray-500 flex-1">{fullName(s)}</span>
                         <span className="text-[10px] text-gray-400">{s.batch?.name}</span>
                         {canEdit && (
                           <button onClick={() => restoreMut.mutate(s.id)}

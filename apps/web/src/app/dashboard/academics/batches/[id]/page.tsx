@@ -17,6 +17,7 @@ import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { BatchStatsPanel } from "./BatchStatsPanel";
 import { BatchPTMTab } from "./BatchPTMTab";
+import { fullName } from "@/lib/utils";
 
 // ── Status config ─────────────────────────────────────────────────────────────
 
@@ -66,7 +67,7 @@ function exportCSV(students: any[], batchName: string) {
   const rows = students.map((s: any, i: number) => [
     i + 1,
     s.studentCode,
-    `${s.firstName} ${s.lastName}`,
+    fullName(s),
     s.email,
     s.phone ?? "",
     STATUS_LABEL[s.status] ?? s.status,
@@ -495,7 +496,7 @@ export default function BatchDetailPage() {
                             {s.firstName[0]}{s.lastName[0]}
                           </div>
                           <div>
-                            <p className="font-medium text-gray-900">{s.firstName} {s.lastName}</p>
+                            <p className="font-medium text-gray-900">{fullName(s)}</p>
                             <p className="text-xs text-gray-400">{s.studentCode} · {s.admissionNumber ?? "—"}</p>
                           </div>
                         </div>
@@ -519,7 +520,7 @@ export default function BatchDetailPage() {
                           <div className="flex items-center gap-1 justify-end">
                             {s.status !== "DROPPED" && (
                               <button
-                                onClick={() => setConfirmStudent({ id: s.id, name: `${s.firstName} ${s.lastName}`, action: "drop" })}
+                                onClick={() => setConfirmStudent({ id: s.id, name: fullName(s), action: "drop" })}
                                 title="Mark as Dropped"
                                 className="p-1.5 rounded-lg border border-gray-200 text-gray-400 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-100 transition-colors"
                               >
@@ -536,7 +537,7 @@ export default function BatchDetailPage() {
                               </button>
                             )}
                             <button
-                              onClick={() => setConfirmStudent({ id: s.id, name: `${s.firstName} ${s.lastName}`, action: "remove" })}
+                              onClick={() => setConfirmStudent({ id: s.id, name: fullName(s), action: "remove" })}
                               title="Remove from batch"
                               className="p-1.5 rounded-lg border border-gray-200 text-gray-400 hover:bg-red-50 hover:text-red-600 hover:border-red-100 transition-colors"
                             >
@@ -563,7 +564,7 @@ export default function BatchDetailPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
                         <div>
-                          <p className="font-medium text-gray-900 text-sm">{s.firstName} {s.lastName}</p>
+                          <p className="font-medium text-gray-900 text-sm">{fullName(s)}</p>
                           <p className="text-xs text-gray-400 mt-0.5">{s.studentCode} · {s.phone ?? "—"}</p>
                         </div>
                         <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium shrink-0 ${STATUS_BADGE[s.status] ?? "bg-gray-100 text-gray-600"}`}>
@@ -578,12 +579,12 @@ export default function BatchDetailPage() {
                     {canEdit && (
                       <div className="flex gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                         {s.status !== "DROPPED" && (
-                          <button onClick={() => setConfirmStudent({ id: s.id, name: `${s.firstName} ${s.lastName}`, action: "drop" })}
+                          <button onClick={() => setConfirmStudent({ id: s.id, name: fullName(s), action: "drop" })}
                             className="p-1.5 rounded-lg border border-gray-200 text-gray-400 hover:bg-amber-50 hover:text-amber-600">
                             <UserMinus className="h-3.5 w-3.5" />
                           </button>
                         )}
-                        <button onClick={() => setConfirmStudent({ id: s.id, name: `${s.firstName} ${s.lastName}`, action: "remove" })}
+                        <button onClick={() => setConfirmStudent({ id: s.id, name: fullName(s), action: "remove" })}
                           className="p-1.5 rounded-lg border border-gray-200 text-gray-400 hover:bg-red-50 hover:text-red-600">
                           <X className="h-3.5 w-3.5" />
                         </button>
@@ -779,7 +780,7 @@ export default function BatchDetailPage() {
                         return (
                           <tr key={r.student.id} className="hover:bg-indigo-50/30 transition-colors">
                             <td className="px-4 py-2.5">
-                              <p className="font-medium text-gray-900">{r.student.firstName} {r.student.lastName}</p>
+                              <p className="font-medium text-gray-900">{fullName(r.student)}</p>
                               <p className="text-xs text-gray-400">{r.student.studentCode}</p>
                             </td>
                             <td className="px-4 py-2.5 text-center">
@@ -870,7 +871,7 @@ export default function BatchDetailPage() {
                         {s.firstName[0]}{s.lastName[0]}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{s.firstName} {s.lastName}</p>
+                        <p className="text-sm font-medium text-gray-900 truncate">{fullName(s)}</p>
                         <p className="text-xs text-gray-400">{s.studentCode} {s.batch ? `· Currently in: ${s.batch.name}` : ""}</p>
                       </div>
                       {alreadyInBatch ? (

@@ -13,8 +13,7 @@ import {
 import { useAuthStore } from "@/store/auth";
 import { usePermissionsState } from "@/hooks/usePermissions";
 import { hasAcademicsAction } from "@/lib/academicsAccess";
-import { cn } from "@/lib/utils";
-
+import { cn, fullName } from "@/lib/utils";
 // ── Design tokens ─────────────────────────────────────────────────────────────
 // All inputs: rounded-xl, shadow-sm, focus:ring-4/indigo-50 + border-indigo-400
 // Cards: rounded-2xl bg-white shadow-sm border border-gray-100
@@ -1012,7 +1011,7 @@ export default function NewStudentPage() {
       return { student: res.data.data, defaultPassword: res.data.defaultPassword, redirect };
     },
     onSuccess: ({ student, defaultPassword, redirect }) => {
-      toast.success(`${student.firstName} ${student.lastName} — ${student.studentCode} | Password: ${defaultPassword}`, { duration: 8000 });
+      toast.success(`${fullName(student)} — ${student.studentCode} | Password: ${defaultPassword}`, { duration: 8000 });
       if (redirect) router.push("/dashboard/academics/students");
     },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to save student"),
@@ -1139,7 +1138,7 @@ export default function NewStudentPage() {
             </div>
             <div className="min-w-0">
               <p className="text-[16px] font-bold text-gray-800 truncate leading-tight">
-                {[form.firstName, form.lastName].filter(Boolean).join(" ") || "New Student"}
+                {fullName(form) || "New Student"}
               </p>
               <p className="text-xs text-gray-400 truncate mt-0.5">{form.email || "No email yet"}</p>
             </div>

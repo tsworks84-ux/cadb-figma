@@ -20,6 +20,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, ComposedChart, Area, PieChart, Pie, Cell,
 } from "recharts";
+import { fullName } from "@/lib/utils";
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 
@@ -1314,7 +1315,7 @@ function AttendanceTab({
               {/* Name */}
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-gray-800 truncate">
-                  {st.firstName} {st.lastName}
+                  {fullName(st)}
                 </p>
                 <p className="text-[11px] text-gray-400">{st.rollNumber ?? st.studentCode}</p>
               </div>

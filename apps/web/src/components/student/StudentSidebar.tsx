@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { cn } from "@/lib/utils";
+import { cn, fullName } from "@/lib/utils";
 import {
   Home, User, FileText, CalendarDays, ClipboardList,
   BookOpen, GraduationCap, Settings, LogOut, Bell, X, MessageSquare,
@@ -158,7 +158,7 @@ export function StudentSidebar({ mobileOpen, onMobileClose }: Props) {
             {/* Name + code */}
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-white truncate">
-                {student ? `${student.firstName} ${student.lastName}` : "Loading…"}
+                {student ? fullName(student) : "Loading…"}
               </p>
               <p className="text-xs text-sky-400/70 font-mono truncate">{student?.studentCode}</p>
             </div>

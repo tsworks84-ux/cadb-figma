@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { studentApi } from "@/lib/studentApi";
 import { User, MapPin, Users2, GraduationCap, Camera, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { fullName } from "@/lib/utils";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -157,7 +158,7 @@ export default function StudentProfilePage() {
           {/* Name — sits cleanly in the white area below the avatar */}
           <div className="mb-4">
             <h1 className="text-xl font-bold text-gray-900">
-              {s?.firstName} {s?.middleName ? `${s.middleName} ` : ""}{s?.lastName}
+              {fullName(s)}
             </h1>
             <p className="text-sm text-gray-400 font-mono">{s?.studentCode}</p>
           </div>

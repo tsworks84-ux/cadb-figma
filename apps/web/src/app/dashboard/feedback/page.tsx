@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { cn, fullName } from "@/lib/utils";
 import {
   MessageSquare, Lightbulb, AlertCircle, Clock, CheckCircle2,
   X, Send, Paperclip, ChevronDown, User, Search,
@@ -35,7 +35,7 @@ interface FBItem {
   updatedAt: string;
   student:   {
     id: string; studentCode: string;
-    firstName: string; lastName: string;
+    firstName: string; middleName?: string; lastName: string;
     photoUrl?: string; email?: string; phone?: string;
     studentBatches: { batch: { name: string; academicYear: string } }[];
   };
@@ -182,7 +182,7 @@ function FeedbackPanel({ id, onClose }: { id: string; onClose: () => void }) {
           )}
           <div className="flex-1 min-w-0">
             <p className="text-sm font-bold text-gray-900 truncate">
-              {typeMeta?.label} — {fb?.student.firstName} {fb?.student.lastName}
+              {typeMeta?.label} — {fullName(fb?.student)}
             </p>
             {statusMeta && (
               <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold border mt-0.5", statusMeta.badge)}>
@@ -230,7 +230,7 @@ function FeedbackPanel({ id, onClose }: { id: string; onClose: () => void }) {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-800">
-                    {fb.student.firstName} {fb.student.lastName}
+                    {fullName(fb.student)}
                     <span className="ml-2 text-[11px] font-normal text-gray-400 font-mono">{fb.student.studentCode}</span>
                   </p>
                   <p className="text-xs text-gray-400">
@@ -386,7 +386,7 @@ function FeedbackRow({ item, onClick }: { item: FBItem; onClick: () => void }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <span className="text-sm font-semibold text-gray-900">
-              {item.student.firstName} {item.student.lastName}
+              {fullName(item.student)}
             </span>
             <span className="text-[10px] font-mono text-gray-400">{item.student.studentCode}</span>
             <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold border", typeMeta.badge)}>

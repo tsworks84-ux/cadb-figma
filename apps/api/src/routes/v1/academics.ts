@@ -477,7 +477,7 @@ export async function academicsRoutes(fastify: FastifyInstance) {
 
     const [batch, student] = await Promise.all([
       prisma.batch.findUnique({ where: { id } }),
-      prisma.student.findUnique({ where: { id: studentId }, select: { id: true, firstName: true, lastName: true, studentCode: true, status: true } }),
+      prisma.student.findUnique({ where: { id: studentId }, select: { id: true, firstName: true, middleName: true, lastName: true, studentCode: true, status: true } }),
     ]);
     if (!batch)   return reply.status(404).send({ success: false, error: "Batch not found" });
     if (!student) return reply.status(404).send({ success: false, error: "Student not found" });

@@ -9,6 +9,7 @@ import { randomUUID } from "crypto";
 import path from "path";
 import { getTeacherBatchIds } from "./teacherUtils.js";
 import { requireModulePermission } from "../../utils/permissions.js";
+import { fullName } from "../../utils/name.js";
 import {
   buildTemplateWorkbook, loadWorkbook, parseAndValidate,
   type ReferenceData,
@@ -136,6 +137,7 @@ export async function studentRoutes(fastify: FastifyInstance) {
     if (search) {
       where.OR = [
         { firstName:   { contains: search, mode: "insensitive" } },
+        { middleName:  { contains: search, mode: "insensitive" } },
         { lastName:    { contains: search, mode: "insensitive" } },
         { studentCode: { contains: search, mode: "insensitive" } },
         { email:       { contains: search, mode: "insensitive" } },
@@ -271,7 +273,7 @@ export async function studentRoutes(fastify: FastifyInstance) {
       },
       select: {
         id: true, studentCode: true, admissionNumber: true,
-        firstName: true, lastName: true, email: true,
+        firstName: true, middleName: true, lastName: true, email: true,
         phone: true, status: true, createdAt: true,
         studentBatches: { select: { batchId: true, batch: { select: { id: true, name: true, academicYear: true } } } },
         grade:   { select: { id: true, name: true } },
@@ -437,12 +439,12 @@ export async function studentRoutes(fastify: FastifyInstance) {
         for (const p of payloads) {
           const student = await tx.student.create({
             data: p.data,
-            select: { id: true, studentCode: true, firstName: true, lastName: true },
+            select: { id: true, studentCode: true, firstName: true, middleName: true, lastName: true },
           });
           if (p.batchId) {
             await tx.studentBatch.create({ data: { studentId: student.id, batchId: p.batchId, joinedAt: new Date() } });
           }
-          out.push({ id: student.id, studentCode: student.studentCode, name: `${student.firstName} ${student.lastName}` });
+          out.push({ id: student.id, studentCode: student.studentCode, name: fullName(student) });
         }
         return out;
       }, { timeout: 120_000, maxWait: 15_000 });
@@ -494,7 +496,7 @@ export async function studentRoutes(fastify: FastifyInstance) {
         ...(admissionDate ? { admissionDate: new Date(admissionDate) } : {}),
       },
       select: {
-        id: true, studentCode: true, firstName: true, lastName: true, email: true,
+        id: true, studentCode: true, firstName: true, middleName: true, lastName: true, email: true,
         phone: true, status: true, isArchived: true, createdAt: true,
         studentBatches: { select: { batchId: true, batch: { select: { id: true, name: true, academicYear: true } } } },
       },
@@ -1033,7 +1035,7 @@ export async function studentRoutes(fastify: FastifyInstance) {
     const student = await prisma.student.findUnique({
       where: { id },
       select: {
-        id: true, firstName: true, lastName: true,
+        id: true, firstName: true, middleName: true, lastName: true,
         email: true, parentEmail: true, motherEmail: true,
         communicationContact: true,
       },
@@ -1082,7 +1084,7 @@ export async function studentRoutes(fastify: FastifyInstance) {
     const dateStr = new Date(date).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
     const timeStr = endTime ? `${startTime} – ${endTime}` : startTime;
     const attendeeNames = ptm.attendees.map((a) => `${a.employee.firstName} ${a.employee.lastName}`).join(", ");
-    const studentName   = `${student.firstName} ${student.lastName}`;
+    const studentName   = fullName(student);
 
     const html = `
       <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1f2937">

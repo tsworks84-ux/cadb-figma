@@ -8,6 +8,7 @@ import {
   MessageSquare, Plus, X, Loader2, CheckCircle2, MapPin,
   ChevronDown, ChevronUp, Trash2, Pencil, Users,
 } from "lucide-react";
+import { fullName } from "@/lib/utils";
 
 // ── Status maps ───────────────────────────────────────────────────────────────
 
@@ -68,7 +69,7 @@ function PTMScheduleModal({ student, onClose }: { student: any; onClose: () => v
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
           <div>
             <h2 className="font-black text-gray-900">Schedule a PTM</h2>
-            <p className="text-xs text-gray-400 mt-0.5">{student.firstName} {student.lastName}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{fullName(student)}</p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"><X className="h-4 w-4" /></button>
         </div>
@@ -528,9 +529,9 @@ function ScheduleBatchPTM({ students, canEdit }: { students: any[]; canEdit: boo
         try {
           await api.post(`/api/v1/academics/students/${s.id}/ptms`, payload);
           qc.invalidateQueries({ queryKey: ["student-ptms", s.id] });
-          return { studentId: s.id, name: `${s.firstName} ${s.lastName}`, ok: true };
+          return { studentId: s.id, name: fullName(s), ok: true };
         } catch (e: any) {
-          return { studentId: s.id, name: `${s.firstName} ${s.lastName}`, ok: false, error: e.response?.data?.error ?? "Failed" };
+          return { studentId: s.id, name: fullName(s), ok: false, error: e.response?.data?.error ?? "Failed" };
         }
       })
     );
@@ -691,7 +692,7 @@ function ScheduleBatchPTM({ students, canEdit }: { students: any[]; canEdit: boo
                       {s.firstName[0]}{s.lastName[0]}
                     </div>
                     <div className="min-w-0">
-                      <p className={`text-sm font-medium truncate ${on ? "text-gray-800" : "text-gray-400"}`}>{s.firstName} {s.lastName}</p>
+                      <p className={`text-sm font-medium truncate ${on ? "text-gray-800" : "text-gray-400"}`}>{fullName(s)}</p>
                       <p className="text-xs text-gray-400 truncate">{s.studentCode}</p>
                     </div>
                   </label>
@@ -772,7 +773,7 @@ export function BatchPTMTab({ students, studentsLoading, canEdit }: {
                       {s.firstName[0]}{s.lastName[0]}
                     </div>
                     <div className="min-w-0">
-                      <p className={`text-sm font-medium truncate ${isActive ? "text-indigo-700" : "text-gray-800"}`}>{s.firstName} {s.lastName}</p>
+                      <p className={`text-sm font-medium truncate ${isActive ? "text-indigo-700" : "text-gray-800"}`}>{fullName(s)}</p>
                       <p className="text-xs text-gray-400 truncate">{s.studentCode}</p>
                     </div>
                     <MessageSquare className={`h-3.5 w-3.5 shrink-0 ml-auto ${isActive ? "text-indigo-400" : "text-gray-300"}`} />

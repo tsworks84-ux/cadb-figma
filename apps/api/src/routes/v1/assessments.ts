@@ -5,6 +5,7 @@ import ExcelJS from "exceljs";
 import { getTeacherBatchIds } from "./teacherUtils.js";
 import { authenticate } from "../../middleware/authenticate.js";
 import { requireModulePermission } from "../../utils/permissions.js";
+import { fullName } from "../../utils/name.js";
 import {
   buildMarksTemplate, loadWorkbook, parseMarksWorkbook, slotKey,
   type ExamSlot, type TemplateStudent,
@@ -102,7 +103,7 @@ async function fetchStatsData(q: Record<string, string>) {
           marks: true,
           student: {
             select: {
-              id: true, firstName: true, lastName: true, rollNumber: true,
+              id: true, firstName: true, middleName: true, lastName: true, rollNumber: true,
               studentBatches: { select: { batchId: true, batch: { select: { id: true, name: true, grade: { select: { name: true } } } } } },
             },
           },
@@ -138,7 +139,7 @@ async function fetchStatsData(q: Record<string, string>) {
   }
   const performers = [...studentMap.values()].map((e) => ({
     studentId:  e.student.id,
-    name:       `${e.student.firstName} ${e.student.lastName}`,
+    name:       fullName(e.student),
     roll:       e.student.rollNumber ?? "—",
     batch:      e.student.studentBatches[0]?.batch?.name ?? "—",
     grade:      e.student.studentBatches[0]?.batch?.grade?.name ?? "—",
@@ -205,9 +206,6 @@ function styleDataRow(row: ExcelJS.Row, even: boolean) {
   row.height = 16;
 }
 
-const displayName = (s: { firstName: string; lastName: string | null }) =>
-  `${s.firstName} ${s.lastName ?? ""}`.trim();
-
 /**
  * Alphabetical by the name shown on screen. Sorted in JS rather than by Prisma
  * because the roll number came first before (leaving the list in no order a
@@ -215,9 +213,9 @@ const displayName = (s: { firstName: string; lastName: string | null }) =>
  * order ALL-CAPS names apart from Title Case ones under some collations.
  */
 const byStudentName = (
-  a: { firstName: string; lastName: string | null },
-  b: { firstName: string; lastName: string | null },
-) => displayName(a).localeCompare(displayName(b), "en", { sensitivity: "base", numeric: true });
+  a: { firstName: string; middleName?: string | null; lastName: string | null },
+  b: { firstName: string; middleName?: string | null; lastName: string | null },
+) => fullName(a).localeCompare(fullName(b), "en", { sensitivity: "base", numeric: true });
 
 export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
   // These routes previously had no auth hook at all — anyone could read/write
@@ -259,7 +257,7 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
     const students = await prisma.student.findMany({
       where: { studentBatches: { some: { batchId: { in: batchIds } } }, isArchived: false },
       select: {
-        id: true, firstName: true, lastName: true, rollNumber: true,
+        id: true, firstName: true, middleName: true, lastName: true, rollNumber: true,
         studentBatches: { where: { batchId: { in: batchIds } }, select: { batch: { select: { name: true } } }, take: 1 },
       },
     });
@@ -500,7 +498,7 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
     const students = await prisma.student.findMany({
       where: { studentBatches: { some: { batchId: { in: batchIds } } }, isArchived: false },
       select: {
-        id: true, firstName: true, lastName: true, rollNumber: true,
+        id: true, firstName: true, middleName: true, lastName: true, rollNumber: true,
         studentBatches: { where: { batchId: { in: batchIds } }, select: { batchId: true, batch: { select: { id: true, name: true } } }, take: 1 },
       },
       orderBy: [{ rollNumber: "asc" }, { firstName: "asc" }],
@@ -588,7 +586,7 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
       ctx.students.map<TemplateStudent>((s) => ({
         id:         s.id,
         rollNumber: s.rollNumber,
-        name:       displayName(s),
+        name:       fullName(s),
         batchName:  s.studentBatches[0]?.batch?.name ?? "",
         attended:   ctx.resultMap.get(s.id)?.attended ?? true,
         marks:      Object.fromEntries(
@@ -640,7 +638,7 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
 
     const { rows, errors, totalRows } = parseMarksWorkbook(
       workbook, ctx.slots, ctx.exam.numPapers, ctx.exam.totalMarks,
-      ctx.students.map((s) => ({ id: s.id, rollNumber: s.rollNumber, name: displayName(s) })),
+      ctx.students.map((s) => ({ id: s.id, rollNumber: s.rollNumber, name: fullName(s) })),
     );
 
     // A row naming a student who was taken off this exam gets a message that says

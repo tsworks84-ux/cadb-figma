@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "@cadb/db";
 import { authenticate } from "../../middleware/authenticate.js";
+import { fullName } from "../../utils/name.js";
 
 function requireAdmin(request: any, reply: any): boolean {
   const role = request.user?.role;
@@ -69,6 +70,7 @@ export async function revenueRoutes(fastify: FastifyInstance) {
           id: true,
           studentCode: true,
           firstName: true,
+          middleName: true,
           lastName: true,
           academicYear: true,
           admissionDate: true,
@@ -106,7 +108,7 @@ export async function revenueRoutes(fastify: FastifyInstance) {
       return {
         id: st.id,
         studentCode: st.studentCode,
-        name: `${st.firstName} ${st.lastName}`,
+        name: fullName(st),
         school: st.schoolId ? (schoolMap[st.schoolId] ?? "Unknown") : "Not Assigned",
         academicYear: st.academicYear ?? "Not Assigned",
         admissionDate: st.admissionDate,

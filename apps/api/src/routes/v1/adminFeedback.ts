@@ -16,7 +16,7 @@ const FEEDBACK_LIST_SELECT = {
   student: {
     select: {
       id: true, studentCode: true,
-      firstName: true, lastName: true, photoUrl: true, email: true,
+      firstName: true, middleName: true, lastName: true, photoUrl: true, email: true,
       studentBatches: {
         select: { batch: { select: { name: true, academicYear: true } } },
         take: 1,
@@ -115,7 +115,7 @@ export async function adminFeedbackRoutes(fastify: FastifyInstance) {
         student: {
           select: {
             id: true, studentCode: true,
-            firstName: true, lastName: true, photoUrl: true, email: true, phone: true,
+            firstName: true, middleName: true, lastName: true, photoUrl: true, email: true, phone: true,
             studentBatches: {
               select: { batch: { select: { name: true, academicYear: true } } },
             },

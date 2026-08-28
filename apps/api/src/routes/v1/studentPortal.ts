@@ -4,6 +4,7 @@ import type { StudentJwtPayload } from "@cadb/types";
 import { uploadFile } from "../../utils/s3.js";
 import { randomUUID } from "crypto";
 import path from "path";
+import { fullName } from "../../utils/name.js";
 
 async function authenticateStudent(fastify: FastifyInstance, request: any, reply: any) {
   const auth = request.headers.authorization;
@@ -475,9 +476,9 @@ export async function studentPortalRoutes(fastify: FastifyInstance) {
 
     const student = await prisma.student.findUnique({
       where: { id: studentId },
-      select: { firstName: true, lastName: true },
+      select: { firstName: true, middleName: true, lastName: true },
     });
-    const senderName = student ? `${student.firstName} ${student.lastName}` : "Student";
+    const senderName = student ? fullName(student) : "Student";
 
     // Reopen if student-closed; OPEN/RESPONDED stay as OPEN after student reply
     const newStatus = fb.status === "CLOSED_BY_STUDENT" ? "OPEN" : fb.status;

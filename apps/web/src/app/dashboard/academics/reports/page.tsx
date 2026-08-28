@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
+import { fullName } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   Users2, TrendingUp, CalendarCheck, BookOpen, ClipboardList,
@@ -78,7 +79,7 @@ function StudentSearch({ value, onChange }: { value: { id: string; label: string
   }, [open]);
 
   const select = (s: any) => {
-    const label = `${s.firstName} ${s.lastName} (${s.rollNumber ?? s.id.slice(0, 6)})`;
+    const label = `${fullName(s)} (${s.rollNumber ?? s.id.slice(0, 6)})`;
     setQ(label); onChange({ id: s.id, label }); setOpen(false);
   };
 
@@ -102,7 +103,7 @@ function StudentSearch({ value, onChange }: { value: { id: string; label: string
             <button key={s.id} onClick={() => select(s)}
               className="w-full flex items-center gap-3 px-3 py-2 text-sm text-left hover:bg-indigo-50 transition-colors">
               <div className="flex-1 min-w-0">
-                <p className="font-medium text-gray-700 truncate">{s.firstName} {s.lastName}</p>
+                <p className="font-medium text-gray-700 truncate">{fullName(s)}</p>
                 <p className="text-xs text-gray-400">{s.rollNumber ?? "—"} · {s.batch?.name ?? "—"}</p>
               </div>
             </button>
@@ -395,14 +396,14 @@ async function generatePDF(report: ReportDef, data: any, filters: Record<string,
     autoTable(doc, {
       ...tblOpts, startY: y,
       head: [["Rank","Roll","Name","Batch","Appeared","Average"]],
-      body: (data.students ?? []).map((s: any, i: number) => [i+1, s.rollNumber ?? "—", `${s.firstName} ${s.lastName}`, s.batch?.name ?? "—", s.attended, s.avg]),
+      body: (data.students ?? []).map((s: any, i: number) => [i+1, s.rollNumber ?? "—", fullName(s), s.batch?.name ?? "—", s.attended, s.avg]),
     });
   }
 
   if (report.id === "student-progress" && data.student) {
     const s = data.student;
     doc.setFont("helvetica","bold"); doc.setFontSize(10); doc.setTextColor(40);
-    doc.text(`${s.firstName} ${s.lastName}`, M, y);
+    doc.text(fullName(s), M, y);
     doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(100);
     doc.text(`Roll: ${s.rollNumber ?? "—"}  ·  Batch: ${s.batch?.name ?? "—"}  ·  Grade: ${s.batch?.grade?.name ?? "—"}`, M, y + 6);
     y += 14;

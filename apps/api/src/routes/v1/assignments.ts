@@ -10,6 +10,7 @@ import { pipeline } from "stream/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
+import { fullName } from "../../utils/name.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = join(__dirname, "../../../uploads");
@@ -153,7 +154,7 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
         studentId:   true,
         student: {
           select: {
-            id: true, firstName: true, lastName: true,
+            id: true, firstName: true, middleName: true, lastName: true,
             studentCode: true, rollNumber: true,
             studentBatches: {
               select: {
@@ -176,7 +177,7 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
       if (!studentMap.has(s.id)) {
         studentMap.set(s.id, {
           id: s.id,
-          name: `${s.firstName} ${s.lastName}`,
+          name: fullName(s),
           code: s.studentCode,
           rollNumber: s.rollNumber ?? "",
           batchId:   firstBatch?.batchId ?? "",
@@ -404,7 +405,7 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
           include: {
             student: {
               select: {
-                id: true, firstName: true, lastName: true,
+                id: true, firstName: true, middleName: true, lastName: true,
                 studentCode: true, rollNumber: true,
                 studentBatches: { select: { batchId: true }, take: 1 },
               },
@@ -420,7 +421,7 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
     // All active students currently in these batches
     const currentStudents = await prisma.student.findMany({
       where: { studentBatches: { some: { batchId: { in: batchIds } } }, isArchived: false },
-      select: { id: true, firstName: true, lastName: true, studentCode: true, rollNumber: true, studentBatches: { select: { batchId: true }, take: 1 } },
+      select: { id: true, firstName: true, middleName: true, lastName: true, studentCode: true, rollNumber: true, studentBatches: { select: { batchId: true }, take: 1 } },
       orderBy: [{ rollNumber: "asc" }, { firstName: "asc" }],
     });
 
@@ -482,7 +483,7 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
       create: { assignmentId, studentId, ...data },
       update: data,
       include: {
-        student: { select: { id: true, firstName: true, lastName: true, studentCode: true, rollNumber: true } },
+        student: { select: { id: true, firstName: true, middleName: true, lastName: true, studentCode: true, rollNumber: true } },
       },
     });
     return reply.send({ success: true, data: submission });

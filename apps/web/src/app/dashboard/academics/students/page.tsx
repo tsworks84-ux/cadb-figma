@@ -16,6 +16,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { hasAcademicsAction } from "@/lib/academicsAccess";
 import { useDebounce } from "@/hooks/useDebounce";
 import ImportStudentsModal from "./ImportStudentsModal";
+import { fullName } from "@/lib/utils";
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -90,7 +91,7 @@ function StudentRow({ student, canEdit, canDelete, onArchive, onDelete, onResetP
             className="font-bold text-sm hover:underline cursor-pointer"
             style={{ color: NAV2 }}
           >
-            {student.firstName} {student.lastName}
+            {fullName(student)}
           </span>
           <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold border ${STATUS_COLORS[student.status] ?? STATUS_COLORS.INACTIVE}`}>
             {student.status}
@@ -130,7 +131,7 @@ function StudentRow({ student, canEdit, canDelete, onArchive, onDelete, onResetP
               <div className="absolute right-0 top-8 z-20 w-44 rounded-xl bg-white shadow-lg border border-gray-100 py-1 text-sm">
                 {canEdit && (
                   <>
-                    <button onClick={() => { setMenuOpen(false); onResetPassword(student.id, `${student.firstName} ${student.lastName}`); }}
+                    <button onClick={() => { setMenuOpen(false); onResetPassword(student.id, fullName(student)); }}
                       className="flex w-full items-center gap-2 px-3 py-2 text-gray-600 hover:bg-gray-50">
                       <KeyRound className="h-3.5 w-3.5" /> Reset Password
                     </button>
@@ -144,7 +145,7 @@ function StudentRow({ student, canEdit, canDelete, onArchive, onDelete, onResetP
                 {canDelete && (
                   <>
                     {canEdit && <div className="border-t border-gray-100 my-1" />}
-                    <button onClick={() => { setMenuOpen(false); onDelete(student.id, `${student.firstName} ${student.lastName}`); }}
+                    <button onClick={() => { setMenuOpen(false); onDelete(student.id, fullName(student)); }}
                       className="flex w-full items-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50">
                       <Trash2 className="h-3.5 w-3.5" /> Delete
                     </button>

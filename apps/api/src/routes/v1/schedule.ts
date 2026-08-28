@@ -169,7 +169,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
                   include: {
                     student: {
                       select: {
-                        id: true, firstName: true, lastName: true,
+                        id: true, firstName: true, middleName: true, lastName: true,
                         studentCode: true, rollNumber: true, photoUrl: true,
                       },
                     },
@@ -181,7 +181,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
         },
         attendances: {
           include: {
-            student: { select: { id: true, firstName: true, lastName: true, studentCode: true } },
+            student: { select: { id: true, firstName: true, middleName: true, lastName: true, studentCode: true } },
           },
         },
         assignments: {
