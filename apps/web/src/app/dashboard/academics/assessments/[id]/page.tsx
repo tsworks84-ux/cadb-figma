@@ -14,6 +14,7 @@ import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import ImportMarksModal from "../ImportMarksModal";
 import { hasAcademicsAction } from "@/lib/academicsAccess";
+import { invalidateAssessments } from "@/lib/assessmentCache";
 import { format, parseISO } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
@@ -201,7 +202,7 @@ export default function ExamDetailPage() {
     onSuccess: (res) => {
       if (!res.success) { toast.error(res.error ?? "Failed to save"); return; }
       toast.success("Marks saved successfully");
-      qc.invalidateQueries({ queryKey: ["assessment-results", id] });
+      invalidateAssessments(qc);
     },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to save marks"),
   });
@@ -210,7 +211,7 @@ export default function ExamDetailPage() {
     mutationFn: (studentId: string) =>
       api.patch(`/api/v1/academics/assessments/${id}/results/${studentId}`, { isExcluded: true }).then((r) => r.data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["assessment-results", id] });
+      invalidateAssessments(qc);
       toast.success("Student removed from this exam");
     },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to remove student"),
@@ -220,7 +221,7 @@ export default function ExamDetailPage() {
     mutationFn: (studentId: string) =>
       api.patch(`/api/v1/academics/assessments/${id}/results/${studentId}`, { isExcluded: false }).then((r) => r.data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["assessment-results", id] });
+      invalidateAssessments(qc);
       toast.success("Student restored");
     },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to restore student"),
@@ -229,7 +230,7 @@ export default function ExamDetailPage() {
   const statusMut = useMutation({
     mutationFn: (status: string) =>
       api.patch(`/api/v1/academics/assessments/${id}/status`, { status }).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["assessment", id] }); toast.success("Status updated"); },
+    onSuccess: () => { invalidateAssessments(qc); toast.success("Status updated"); },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to update status"),
   });
 
@@ -969,8 +970,7 @@ export default function ExamDetailPage() {
             // The grid keeps its own copy of every mark, so re-seed it from the
             // server rather than leaving the imported rows showing stale values.
             setInitialized(new Set());
-            qc.invalidateQueries({ queryKey: ["assessment-results", id] });
-            qc.invalidateQueries({ queryKey: ["assessment", id] });
+            invalidateAssessments(qc);
           }}
         />
       )}

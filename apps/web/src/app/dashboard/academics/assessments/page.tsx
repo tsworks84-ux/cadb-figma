@@ -11,6 +11,7 @@ import {
 import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { hasAcademicsAction } from "@/lib/academicsAccess";
+import { invalidateAssessments } from "@/lib/assessmentCache";
 import { useRouter, useSearchParams } from "next/navigation";
 import { format, parseISO } from "date-fns";
 import { AssessmentStatsPanel } from "./StatsPanel";
@@ -263,12 +264,12 @@ function ExamModal({ open, onClose, initial, examId, batches, subjects, academic
 
   const createMut = useMutation({
     mutationFn: (d: any) => api.post("/api/v1/academics/assessments", d).then((r) => r.data),
-    onSuccess: (res) => { if (!res.success) { toast.error(res.error); return; } qc.invalidateQueries({ queryKey: ["assessments"] }); toast.success("Assessment created"); },
+    onSuccess: (res) => { if (!res.success) { toast.error(res.error); return; } invalidateAssessments(qc); toast.success("Assessment created"); },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to create assessment"),
   });
   const updateMut = useMutation({
     mutationFn: (d: any) => api.patch(`/api/v1/academics/assessments/${examId}`, d).then((r) => r.data),
-    onSuccess: (res) => { if (!res.success) { toast.error(res.error); return; } qc.invalidateQueries({ queryKey: ["assessments"] }); toast.success("Assessment updated"); onClose(); },
+    onSuccess: (res) => { if (!res.success) { toast.error(res.error); return; } invalidateAssessments(qc); toast.success("Assessment updated"); onClose(); },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to update assessment"),
   });
   const busy = createMut.isPending || updateMut.isPending;
@@ -517,6 +518,12 @@ function ExamCard({ exam, canEdit, canDelete, onEdit, onDelete, onStatus }: {
   }, [examSubjects, exam.numPapers]);
   const topicCount = syllabus.reduce((n, g) => n + g.topics.length, 0);
 
+  // Exams have no passingMarks column — the card used to read one and so always
+  // printed "—/<total>". Show the exam total, falling back to the sum of the
+  // per-slot max marks when the optional Total Marks field was left blank.
+  const slotMarksTotal = examSubjects.reduce((n: number, es: any) => n + (es.maxMarks ?? 0), 0);
+  const marksTotal = exam.totalMarks ?? (slotMarksTotal > 0 ? slotMarksTotal : null);
+
   // Status-only menu items (edit/archive/delete are separate visible buttons)
   const statusItems = [
     { label: "Mark as Marked", show: exam.status !== "MARKED",     color: "#4338ca", action: () => { onStatus(exam.id, "MARKED");    setMenuOpen(false); } },
@@ -560,9 +567,9 @@ function ExamCard({ exam, canEdit, canDelete, onEdit, onDelete, onStatus }: {
               <span style={{ color: "#374151", fontWeight: 600 }}>{subjectDisplay}</span>
             </span>
           )}
-          {(exam.totalMarks || exam.passingMarks) && (
+          {marksTotal !== null && (
             <span style={{ fontWeight: 700, color: "#374151" }}>
-              Marks: <strong style={{ color: D.nav2 }}>{exam.passingMarks ?? "—"}/{exam.totalMarks ?? "—"}</strong>
+              Marks: <strong style={{ color: D.nav2 }}>{marksTotal}</strong>
             </span>
           )}
         </div>
@@ -746,12 +753,12 @@ function AssessmentsPage() {
   const statusMut = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
       api.patch(`/api/v1/academics/assessments/${id}/status`, { status }).then((r) => r.data),
-    onSuccess: (res) => { if (!res.success) { toast.error(res.error); return; } qc.invalidateQueries({ queryKey: ["assessments"] }); toast.success("Status updated"); },
+    onSuccess: (res) => { if (!res.success) { toast.error(res.error); return; } invalidateAssessments(qc); toast.success("Status updated"); },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to update status"),
   });
   const deleteMut = useMutation({
     mutationFn: (id: string) => api.delete(`/api/v1/academics/assessments/${id}`).then((r) => r.data),
-    onSuccess: (res) => { if (!res.success) { toast.error(res.error); return; } qc.invalidateQueries({ queryKey: ["assessments"] }); toast.success("Deleted"); },
+    onSuccess: (res) => { if (!res.success) { toast.error(res.error); return; } invalidateAssessments(qc); toast.success("Deleted"); },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to delete assessment"),
   });
 
@@ -787,13 +794,22 @@ function AssessmentsPage() {
   };
 
   const exportCSV = () => {
-    const header = ["Name", "Academic Year", "Batches", "Subject", "Date", "Start", "End", "Passing", "Total", "Status", "Topics"];
-    const rows = exams.map((e) => [
-      e.name, e.academicYear,
-      e.batches?.map((eb: any) => eb.batch?.name).join(" | ") ?? "",
-      e.subject?.name ?? "", fmtDate(e.examDate), e.startTime, e.endTime,
-      e.passingMarks ?? "", e.totalMarks ?? "", e.status, e.topics ?? "",
-    ]);
+    // Subject, topics and marks all live on the exam's slots — the old columns
+    // read e.subject / e.topics / e.passingMarks, none of which exist, so those
+    // three columns exported blank for every row.
+    const header = ["Name", "Academic Year", "Batches", "Subject", "Date", "Start", "End", "Total", "Status", "Topics"];
+    const rows = exams.map((e) => {
+      const slots: any[] = e.subjects ?? [];
+      const slotTotal = slots.reduce((n, es) => n + (es.maxMarks ?? 0), 0);
+      return [
+        e.name, e.academicYear,
+        e.batches?.map((eb: any) => eb.batch?.name).join(" | ") ?? "",
+        [...new Set(slots.map((es) => es.subject?.name).filter(Boolean))].join(" | "),
+        fmtDate(e.examDate), e.startTime, e.endTime,
+        e.totalMarks ?? (slotTotal > 0 ? slotTotal : ""), e.status,
+        [...new Set(slots.flatMap((es) => (es.topics ?? "").split(",").map((t: string) => t.trim()).filter(Boolean)))].join(" | "),
+      ];
+    });
     const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
