@@ -15,6 +15,30 @@ import { format, subMonths } from "date-fns";
 // ── Design tokens ───────────────────────────────────────────────────────────────
 const D = { line: "#e6e8ef", muted: "#7c8598", ink: "#111827", nav2: "#28245f", bg: "#f4f6fa", accent: "#eef2ff" };
 
+// ── Download helpers ───────────────────────────────────────────────────────────
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function filenameFrom(disposition: string | undefined, fallback: string) {
+  const m = disposition?.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+  return m ? decodeURIComponent(m[1]) : fallback;
+}
+
+// Blob responses carry JSON error bodies too — read the message back out.
+async function blobError(e: any): Promise<string | null> {
+  const data = e?.response?.data;
+  try {
+    if (data instanceof Blob) return JSON.parse(await data.text())?.error ?? null;
+  } catch { /* not JSON */ }
+  return typeof data?.error === "string" ? data.error : null;
+}
+
 // ── Primitives ─────────────────────────────────────────────────────────────────
 function Label({ children }: { children: React.ReactNode }) {
   return <label className="block text-xs font-semibold text-gray-500 mb-1">{children}</label>;
@@ -195,8 +219,12 @@ function GenerateModal({ report, onClose, academicYears, batches, grades, subjec
       ? `/api/v1/academics/assessments/stats/excel?${p}`
       : `/api/v1/academics/reports/${report.id}?${p}`;
     try {
-      const a = document.createElement("a"); a.href = endpoint; a.click();
-      toast.success("Excel download started");
+      const res  = await api.get(endpoint, { responseType: "blob" });
+      const blob = res.data as Blob;
+      triggerDownload(blob, filenameFrom(res.headers["content-disposition"], `${report.id}_${dateTo}.xlsx`));
+      toast.success("Excel downloaded");
+    } catch (e: any) {
+      toast.error(await blobError(e) ?? "Failed to generate Excel");
     } finally { setLoading(null); }
   };
 

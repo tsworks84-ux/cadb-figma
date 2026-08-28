@@ -72,6 +72,8 @@ await server.register(cors, {
     "http://65.0.41.55:3002",
   ],
   credentials: true,
+  // Excel/PDF exports name their file here; without this the browser hides it.
+  exposedHeaders: ["Content-Disposition"],
 });
 
 await server.register(rateLimit, {
