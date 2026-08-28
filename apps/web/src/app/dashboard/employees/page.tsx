@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { formatDate, getInitials } from "@/lib/utils";
-import { Plus, Search, Trash2, ChevronDown, X, AlertTriangle, UserCheck, UserX, Users, CalendarOff, UserPlus, LogOut, Upload, Download, MoreVertical, Filter, ChevronRight } from "lucide-react";
+import { Plus, Search, Trash2, ChevronDown, X, AlertTriangle, UserCheck, UserX, Users, CalendarOff, UserPlus, LogOut, Upload, Download, MoreVertical, Filter, ChevronRight, Eye, Copy } from "lucide-react";
 import Link from "next/link";
 import type { EmployeeListItem } from "@cadb/types";
 import { toast } from "sonner";
@@ -167,6 +167,109 @@ function StatDetailModal({ metric, subtitle, onClose }: {
   );
 }
 
+// ── Row overflow menu ─────────────────────────────────────────────────────────
+
+/**
+ * The per-row "⋮" menu. It is positioned against the viewport rather than the
+ * row because the table lives inside an `overflow-hidden` card that would clip
+ * a normally-positioned dropdown, and it closes on anything that would move it
+ * out from under the cursor (scroll, resize, Escape, an outside click).
+ */
+function RowMenu({
+  emp, x, y, yTop, isSuperAdmin, onClose, onAction,
+}: {
+  emp: EmployeeListItem; x: number; y: number; yTop: number; isSuperAdmin: boolean;
+  onClose: () => void;
+  onAction: (action: ModalAction, emp: EmployeeListItem) => void;
+}) {
+  const ref    = useRef<HTMLDivElement>(null);
+  const router = useRouter();
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      if (ref.current?.contains(t) || t.closest("[data-row-menu-trigger]")) return;
+      onClose();
+    };
+    const onKey  = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onClose, true);
+    window.addEventListener("resize", onClose);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onClose, true);
+      window.removeEventListener("resize", onClose);
+    };
+  }, [onClose]);
+
+  const items: {
+    key: string; label: string; icon: React.ElementType;
+    danger?: boolean; divider?: boolean; onClick: () => void;
+  }[] = [
+    {
+      key: "view", label: "View profile", icon: Eye,
+      onClick: () => { onClose(); router.push(`/dashboard/employees/${emp.id}`); },
+    },
+    {
+      key: "copy", label: "Copy email", icon: Copy,
+      onClick: () => {
+        onClose();
+        navigator.clipboard.writeText(emp.email)
+          .then(() => toast.success("Email copied"))
+          .catch(() => toast.error("Could not copy email"));
+      },
+    },
+  ];
+
+  if (isSuperAdmin) {
+    const before = items.length;
+    if (emp.status !== "ACTIVE") {
+      items.push({ key: "activate", label: "Activate", icon: UserCheck, onClick: () => onAction("activate", emp) });
+    }
+    if (emp.status !== "TERMINATED") {
+      items.push({ key: "deactivate", label: "Deactivate", icon: UserX, onClick: () => onAction("deactivate", emp) });
+    }
+    items.push({ key: "delete", label: "Delete", icon: Trash2, danger: true, onClick: () => onAction("delete", emp) });
+    items[before].divider = true;
+  }
+
+  const W = 200;
+  const H = 42 + items.length * 36 + (isSuperAdmin ? 9 : 0);
+  const left = Math.min(Math.max(8, x - W), (typeof window !== "undefined" ? window.innerWidth : 1024) - W - 8);
+  const flip = typeof window !== "undefined" && y + H > window.innerHeight - 8 && yTop - H > 8;
+
+  return (
+    <div
+      ref={ref}
+      role="menu"
+      className="fixed z-50 rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+      style={{ width: W, left, top: flip ? undefined : y + 6, bottom: flip ? window.innerHeight - yTop + 6 : undefined }}
+    >
+      <div className="px-3 pb-1.5 pt-1">
+        <p className="truncate text-xs font-semibold text-gray-900">{emp.firstName} {emp.lastName}</p>
+        <p className="truncate text-[11px] text-gray-400">{emp.employeeCode}</p>
+      </div>
+      {items.map((it) => (
+        <div key={it.key}>
+          {it.divider && <div className="my-1 border-t border-gray-100" />}
+          <button
+            role="menuitem"
+            onClick={it.onClick}
+            className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-gray-50 ${
+              it.danger ? "text-red-600 hover:bg-red-50" : "text-gray-700"
+            }`}
+          >
+            <it.icon className="h-4 w-4 shrink-0" />
+            {it.label}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Confirm modal ─────────────────────────────────────────────────────────────
 type ModalAction = "activate" | "deactivate" | "delete";
 
@@ -308,8 +411,13 @@ export default function EmployeesPage() {
   // Bulk selection
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  // Confirm modal
-  const [modal, setModal] = useState<ModalAction | null>(null);
+  // Confirm modal — targets travel with the action so the row menu and the
+  // bulk bar share one confirmation path.
+  const [modal, setModal] = useState<{ action: ModalAction; ids: string[]; names: string[] } | null>(null);
+
+  // Row overflow menu. The table scrolls inside an overflow-hidden card, so an
+  // absolutely positioned dropdown would be clipped — anchor it to the viewport.
+  const [rowMenu, setRowMenu] = useState<{ emp: EmployeeListItem; x: number; y: number; yTop: number } | null>(null);
 
   const activeFilterCount = [status, departmentId, designationId, employmentType, gender, incompleteOnly ? "1" : ""].filter(Boolean).length;
 
@@ -419,10 +527,25 @@ export default function EmployeesPage() {
   const selectedNames = selectedEmployees.map((e) => `${e.firstName} ${e.lastName}`);
 
   function handleConfirm() {
-    const ids = Array.from(selected);
-    if (modal === "activate")   activateMutation.mutate(ids);
-    if (modal === "deactivate") deactivateMutation.mutate(ids);
-    if (modal === "delete")     deleteMutation.mutate(ids);
+    if (!modal) return;
+    if (modal.action === "activate")   activateMutation.mutate(modal.ids);
+    if (modal.action === "deactivate") deactivateMutation.mutate(modal.ids);
+    if (modal.action === "delete")     deleteMutation.mutate(modal.ids);
+  }
+
+  function askBulk(action: ModalAction) {
+    setModal({ action, ids: Array.from(selected), names: selectedNames });
+  }
+
+  const closeRowMenu = useCallback(() => setRowMenu(null), []);
+
+  // The menu is anchored to a row, so anything that reshuffles the rows
+  // (paging, searching, filtering) has to dismiss it.
+  useEffect(() => { setRowMenu(null); }, [page, search, status, departmentId, designationId, employmentType, gender, incompleteOnly]);
+
+  function askRow(action: ModalAction, emp: EmployeeListItem) {
+    setRowMenu(null);
+    setModal({ action, ids: [emp.id], names: [`${emp.firstName} ${emp.lastName}`] });
   }
 
   return (
@@ -438,11 +561,22 @@ export default function EmployeesPage() {
           onClose={() => setStatDetail(null)}
         />
       )}
+      {rowMenu && (
+        <RowMenu
+          emp={rowMenu.emp}
+          x={rowMenu.x}
+          y={rowMenu.y}
+          yTop={rowMenu.yTop}
+          isSuperAdmin={isSuperAdmin}
+          onClose={closeRowMenu}
+          onAction={askRow}
+        />
+      )}
       {modal && (
         <ConfirmModal
-          action={modal}
-          count={selected.size}
-          names={selectedNames}
+          action={modal.action}
+          count={modal.ids.length}
+          names={modal.names}
           onConfirm={handleConfirm}
           onCancel={() => setModal(null)}
           loading={anyPending}
@@ -560,21 +694,21 @@ export default function EmployeesPage() {
               Clear selection
             </button>
             <button
-              onClick={() => setModal("activate")}
+              onClick={() => askBulk("activate")}
               disabled={anyPending}
               className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-60"
             >
               <UserCheck className="h-3.5 w-3.5" /> Activate
             </button>
             <button
-              onClick={() => setModal("deactivate")}
+              onClick={() => askBulk("deactivate")}
               disabled={anyPending}
               className="inline-flex items-center gap-1.5 rounded-lg bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-600 disabled:opacity-60"
             >
               <UserX className="h-3.5 w-3.5" /> Deactivate
             </button>
             <button
-              onClick={() => setModal("delete")}
+              onClick={() => askBulk("delete")}
               disabled={anyPending}
               className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60"
             >
@@ -835,7 +969,17 @@ export default function EmployeesPage() {
                       </td>
                     )}
                     <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
-                      <button className="p-1 hover:bg-gray-100 rounded">
+                      <button
+                        data-row-menu-trigger
+                        aria-label={`Actions for ${emp.firstName} ${emp.lastName}`}
+                        aria-haspopup="menu"
+                        aria-expanded={rowMenu?.emp.id === emp.id}
+                        onClick={(e) => {
+                          const r = e.currentTarget.getBoundingClientRect();
+                          setRowMenu((cur) => cur?.emp.id === emp.id ? null : { emp, x: r.right, y: r.bottom, yTop: r.top });
+                        }}
+                        className="rounded p-1 hover:bg-gray-100"
+                      >
                         <MoreVertical size={16} className="text-gray-400" />
                       </button>
                     </td>
