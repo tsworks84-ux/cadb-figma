@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -49,6 +49,7 @@ function MarksCell({ value, onChange, max, disabled }: {
   return (
     <input
       type="number" min={0} max={max ?? undefined} step="0.5"
+      data-marks-cell="1"
       value={value}
       disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
@@ -181,6 +182,31 @@ export default function ExamDetailPage() {
 
   const updateAttendance = useCallback((studentId: string, val: boolean) => {
     setAttendanceMap((prev) => ({ ...prev, [studentId]: val }));
+  }, []);
+
+  // ── Grid keyboard navigation ─────────────────────────────────────────────
+  // Tab hops straight to the next mark input that can actually be typed into.
+  // Without this, every row also parks focus on its Present checkbox and its
+  // (invisible until hover) remove button, so an absent student costs two blind
+  // Tab presses on the way to the next student who was there.
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  const handleGridKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Tab") return;
+    const target = e.target as HTMLElement;
+    if (!target.matches?.("input[data-marks-cell]")) return;
+
+    // DOM order is row-by-row, left-to-right — the same order the eye reads.
+    // Absent students' cells are disabled, so :not(:disabled) drops them.
+    const cells = Array.from(
+      gridRef.current?.querySelectorAll<HTMLInputElement>("input[data-marks-cell]:not(:disabled)") ?? []
+    );
+    const next = cells.indexOf(target as HTMLInputElement) + (e.shiftKey ? -1 : 1);
+    if (next < 0 || next >= cells.length) return;  // at either end — let Tab leave the grid
+
+    e.preventDefault();
+    cells[next].focus();
+    cells[next].select();  // native Tab selects the contents; keep that so a value can be typed over
   }, []);
 
   // ── Mutations ────────────────────────────────────────────────────────────
@@ -774,7 +800,7 @@ export default function ExamDetailPage() {
           </div>
 
           {/* Table area */}
-          <div className="flex-1 overflow-auto">
+          <div ref={gridRef} onKeyDown={handleGridKeyDown} className="flex-1 overflow-auto">
             {isLoading ? (
               <div className="flex items-center justify-center h-48">
                 <Loader2 className="h-5 w-5 animate-spin text-indigo-400" />
