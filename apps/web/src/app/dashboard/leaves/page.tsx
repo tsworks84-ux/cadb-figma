@@ -2380,7 +2380,7 @@ function PendingApprovalsPanel() {
       queryClient.invalidateQueries({ queryKey: ["my-leaves"] });
       queryClient.invalidateQueries({ queryKey: ["my-leave-balances"] });
     },
-    onError: () => toast.error("Failed to record decision"),
+    onError: (e: any) => toast.error(e?.response?.data?.error ?? "Failed to record decision"),
   });
 
   if (!isApprover) return null;

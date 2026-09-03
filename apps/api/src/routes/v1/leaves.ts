@@ -756,6 +756,23 @@ export async function leaveRoutes(fastify: FastifyInstance) {
         : defaultLopDays;
 
     const year = getFiscalYear(application.fromDate);
+
+    // The balance row is not guaranteed to exist. A leave can be applied for
+    // before the year is provisioned for that type — `apply` skips the pending
+    // increment when there is no row — and types outside the employee's policy
+    // (SPECIAL, say) may never get one at all. A plain `update` throws P2025
+    // there and takes the whole decision down with it, which is why approvers
+    // saw "Failed to record decision" on exactly those leaves.
+    const balanceKey = {
+      employeeId_leaveType_year: { employeeId: application.employeeId, leaveType: application.leaveType, year },
+    };
+    const balance = await prisma.leaveBalance.findUnique({ where: balanceKey });
+
+    // Release only the days this leave actually parked in `pending`. One applied
+    // for before the row existed parked none, so decrementing regardless would
+    // drive the bucket negative and inflate what the employee appears to have left.
+    const heldPending = Math.min(balance?.pending ?? 0, application.totalDays);
+
     const updates: any[] = [
       prisma.leaveApplication.update({
         where: { id },
@@ -772,16 +789,29 @@ export async function leaveRoutes(fastify: FastifyInstance) {
 
     if (body.action === "APPROVED") {
       updates.push(
-        prisma.leaveBalance.update({
-          where: { employeeId_leaveType_year: { employeeId: application.employeeId, leaveType: application.leaveType, year } },
-          data: { used: { increment: application.totalDays }, pending: { decrement: application.totalDays } },
+        prisma.leaveBalance.upsert({
+          where: balanceKey,
+          // A created row carries a zero allocation: it exists to record days
+          // used, not an entitlement anyone granted. `/balances` treats a zero
+          // allocation as unprovisioned, so the policy can still fill the year
+          // in later — the same way an approved comp-off seeds its row.
+          create: {
+            employeeId: application.employeeId,
+            leaveType: application.leaveType,
+            year,
+            allocated: 0,
+            used: application.totalDays,
+          },
+          update: { used: { increment: application.totalDays }, pending: { decrement: heldPending } },
         })
       );
-    } else {
+    } else if (heldPending > 0) {
+      // A rejection only hands days back. With no row there is nothing held, so
+      // there is nothing to create either.
       updates.push(
         prisma.leaveBalance.update({
-          where: { employeeId_leaveType_year: { employeeId: application.employeeId, leaveType: application.leaveType, year } },
-          data: { pending: { decrement: application.totalDays } },
+          where: balanceKey,
+          data: { pending: { decrement: heldPending } },
         })
       );
     }
