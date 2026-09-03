@@ -1,5 +1,4 @@
 import { prisma } from "@cadb/db";
-import { getDepartmentIdsFor, getDepartmentHeadIds } from "../orgHierarchy.js";
 
 /** The fields every channel needs to address a person. */
 export const RECIPIENT_SELECT = {
@@ -22,29 +21,39 @@ export type Recipient = {
   whatsappOptIn: boolean;
   officialPhone: string | null;
   personalPhone: string | null;
-  /** Why this person is being told — used in the greeting and for debugging. */
-  reason: "SUPERVISOR" | "DEPT_HEAD" | "HR_PARTNER" | "HR_POOL" | "SELF" | "EVERYONE";
+  /** Why this person is being told — used for ordering and for debugging. */
+  reason: "SUPERVISOR" | "HR_ADMIN" | "SUPER_ADMIN" | "SELF" | "EVERYONE";
 };
 
-/** Roles that constitute the HR pool when no department HR partner is set. */
-const HR_POOL_ROLES = ["HR_ADMIN"];
+/** The standing audience for any request, whoever raised it. */
+const STANDING_ROLES = ["HR_ADMIN", "SUPER_ADMIN"] as const;
 
 /**
  * Everyone who should hear about a request `employeeId` has raised — leave or
  * reimbursement claim alike:
  *
  *   1. their immediate supervisor (`reportingToId`)
- *   2. the head of every department they belong to
- *   3. the HR partner of every department they belong to
+ *   2. every HR_ADMIN
+ *   3. every SUPER_ADMIN
  *
- * If no department names an HR partner, the whole HR_ADMIN pool is used
- * instead — a department nobody has configured must not silently go unnotified.
- * That fallback is the reason this returns a list rather than one address.
+ * Deliberately nobody else. A request is one employee's business with the
+ * person who decides it plus the two roles accountable for the record; anyone
+ * who merely sits near them in the org chart does not need it in their inbox.
  *
- * The applicant themselves is always excluded (someone can head their own
- * department, or be their own department's HR partner), as is anyone
- * soft-deleted. Earlier reasons win on duplicates, so a supervisor who also
- * heads the department is greeted as the supervisor and messaged once.
+ * This is narrower than it was. Department heads used to be notified for every
+ * department an employee belonged to, and HR was addressed through each
+ * department's `hrPartnerId` with a fallback to the HR pool. Both are gone:
+ * headship is an org-chart fact that says nothing about who decides a leave
+ * (approval authority is the reporting line — see hasLeaveAuthorityOver in
+ * routes/v1/leaves.ts), and routing HR by department meant a partner who is not
+ * an HR_ADMIN got requests while an HR_ADMIN who was nobody's partner did not.
+ * `Department.hrPartnerId` is untouched and still means what it did; it just no
+ * longer decides who is notified.
+ *
+ * The applicant themselves is always excluded — HR staff and Super Admins apply
+ * for leave too, and nobody needs to be told about their own request — as is
+ * anyone soft-deleted. Earlier reasons win on duplicates, so a supervisor who
+ * is also an HR_ADMIN is messaged once, as the supervisor.
  */
 export async function resolveApprovalRecipients(employeeId: string): Promise<Recipient[]> {
   const employee = await prisma.employee.findUnique({
@@ -53,34 +62,18 @@ export async function resolveApprovalRecipients(employeeId: string): Promise<Rec
   });
   if (!employee) return [];
 
-  const deptIds = await getDepartmentIdsFor(employeeId);
-
-  const [headIds, depts] = await Promise.all([
-    getDepartmentHeadIds(deptIds),
-    prisma.department.findMany({
-      where: { id: { in: deptIds }, hrPartnerId: { not: null } },
-      select: { hrPartnerId: true },
-    }),
-  ]);
-
-  const hrPartnerIds = [...new Set(depts.map((d) => d.hrPartnerId!))];
-
-  // Only fall back to the pool when *no* department named a partner. A partly
-  // configured org uses the partners it has rather than mailing all of HR.
-  let hrPoolIds: string[] = [];
-  if (hrPartnerIds.length === 0) {
-    const pool = await prisma.employee.findMany({
-      where: { role: { in: HR_POOL_ROLES }, deletedAt: null },
-      select: { id: true },
-    });
-    hrPoolIds = pool.map((e) => e.id);
-  }
+  // Terminated staff keep their role but should stop receiving traffic; the
+  // announcement audience already drops them, and an approval notice is no
+  // more use to someone who has left.
+  const standing = await prisma.employee.findMany({
+    where: { role: { in: [...STANDING_ROLES] }, deletedAt: null, status: { not: "TERMINATED" } },
+    select: { id: true, role: true },
+  });
 
   const ordered: Array<{ id: string; reason: Recipient["reason"] }> = [
     ...(employee.reportingToId ? [{ id: employee.reportingToId, reason: "SUPERVISOR" as const }] : []),
-    ...headIds.map((id) => ({ id, reason: "DEPT_HEAD" as const })),
-    ...hrPartnerIds.map((id) => ({ id, reason: "HR_PARTNER" as const })),
-    ...hrPoolIds.map((id) => ({ id, reason: "HR_POOL" as const })),
+    ...standing.filter((e) => e.role === "HR_ADMIN").map((e) => ({ id: e.id, reason: "HR_ADMIN" as const })),
+    ...standing.filter((e) => e.role === "SUPER_ADMIN").map((e) => ({ id: e.id, reason: "SUPER_ADMIN" as const })),
   ];
 
   return hydrate(ordered, employeeId);

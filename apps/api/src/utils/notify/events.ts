@@ -46,15 +46,15 @@ type EventMeta = {
 
 /** Labels for the Administration grid, so the API and UI can't drift apart. */
 export const EVENT_META: Record<NotifyEvent, EventMeta> = {
-  LEAVE_APPLIED:          { group: "Leaves", label: "Leave applied",              audience: "Supervisor, department head, HR", channels: ALL_CHANNELS },
-  LEAVE_CANCEL_REQUESTED: { group: "Leaves", label: "Leave cancellation request", audience: "Supervisor, department head, HR", channels: ALL_CHANNELS },
+  LEAVE_APPLIED:          { group: "Leaves", label: "Leave applied",              audience: "Reporting manager, HR, Super Admin", channels: ALL_CHANNELS },
+  LEAVE_CANCEL_REQUESTED: { group: "Leaves", label: "Leave cancellation request", audience: "Reporting manager, HR, Super Admin", channels: ALL_CHANNELS },
   LEAVE_APPROVED:         { group: "Leaves", label: "Leave approved",             audience: "The employee",                    channels: ALL_CHANNELS },
   LEAVE_REJECTED:         { group: "Leaves", label: "Leave rejected",             audience: "The employee",                    channels: ALL_CHANNELS },
-  COMP_OFF_REQUESTED:     { group: "Comp-off", label: "Comp-off claimed",  audience: "Supervisor, department head, HR", channels: ALL_CHANNELS },
+  COMP_OFF_REQUESTED:     { group: "Comp-off", label: "Comp-off claimed",  audience: "Reporting manager, HR, Super Admin", channels: ALL_CHANNELS },
   COMP_OFF_APPROVED:      { group: "Comp-off", label: "Comp-off approved", audience: "The employee",                    channels: ALL_CHANNELS },
   COMP_OFF_REJECTED:      { group: "Comp-off", label: "Comp-off rejected", audience: "The employee",                    channels: ALL_CHANNELS },
-  CLAIM_SUBMITTED:        { group: "Claims", label: "Claim submitted",            audience: "Supervisor, department head, HR", channels: ALL_CHANNELS },
-  CLAIM_CANCEL_REQUESTED: { group: "Claims", label: "Claim cancellation request", audience: "Supervisor, department head, HR", channels: ALL_CHANNELS },
+  CLAIM_SUBMITTED:        { group: "Claims", label: "Claim submitted",            audience: "Reporting manager, HR, Super Admin", channels: ALL_CHANNELS },
+  CLAIM_CANCEL_REQUESTED: { group: "Claims", label: "Claim cancellation request", audience: "Reporting manager, HR, Super Admin", channels: ALL_CHANNELS },
   CLAIM_APPROVED:         { group: "Claims", label: "Claim approved",             audience: "The employee",                    channels: ALL_CHANNELS },
   CLAIM_REJECTED:         { group: "Claims", label: "Claim rejected",             audience: "The employee",                    channels: ALL_CHANNELS },
   CLAIM_PAID:             { group: "Claims", label: "Claim paid out",             audience: "The employee",                    channels: ALL_CHANNELS },
