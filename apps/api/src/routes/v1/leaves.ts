@@ -607,35 +607,72 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true, data });
   });
 
-  // Who is away on one particular day — "is anyone off on Thursday?" rather than
-  // "what needs approving?". Same visibility rule as /pending: admins and custom
-  // roles with the approve grant see everyone, everyone else sees their reports
-  // and the departments they head.
+  // Who is away across a window — "who is out over the next fortnight?" rather
+  // than "what needs approving?". Same visibility rule as /pending: admins and
+  // custom roles with the approve grant see everyone, everyone else sees their
+  // reports and the departments they head.
+  //
+  // PENDING sits alongside the in-force statuses here on purpose. Planning cover
+  // means knowing who has *asked* for a day as well as who has been granted one:
+  // an unanswered request is exactly the one a manager needs to see before it
+  // becomes a surprise absence. Each row carries its status so the two never
+  // read as the same thing.
   fastify.get("/on-date", async (request, reply) => {
     const user = request.user as JwtPayload;
-    const q = request.query as { date?: string };
+    // `date` is the older single-day form, kept so a browser still running the
+    // previous bundle keeps working across a deploy. from/to supersede it.
+    const q = request.query as { date?: string; from?: string; to?: string };
 
-    if (q.date && !/^\d{4}-\d{2}-\d{2}$/.test(q.date)) {
-      return reply.status(400).send({ success: false, error: "date must be YYYY-MM-DD", statusCode: 400 });
+    const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+    for (const [key, value] of Object.entries(q)) {
+      if (value && !ISO_DAY.test(value)) {
+        return reply.status(400).send({ success: false, error: `${key} must be YYYY-MM-DD`, statusCode: 400 });
+      }
     }
-    // Default to today in the server's own timezone, then pin it to UTC midnight
-    // to match how leave dates are stored.
-    const today = new Date();
-    const date = q.date
-      ? new Date(`${q.date}T00:00:00.000Z`)
-      : new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+
+    // Dates are stored at UTC midnight, so every bound is pinned there too —
+    // the server's own local date would be a day off west of Greenwich.
+    const utcDay = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
+    const now = new Date();
+    const today = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+
+    // Default window: the next two weeks, today inclusive. Answers "what is
+    // coming up" without anyone having to pick a date first.
+    const from = q.from ? utcDay(q.from) : q.date ? utcDay(q.date) : today;
+    const to = q.to
+      ? utcDay(q.to)
+      : q.date
+        ? utcDay(q.date)
+        : new Date(from.getTime() + 13 * 86_400_000);
+
+    if (from > to) {
+      return reply.status(400).send({ success: false, error: "from must be on or before to", statusCode: 400 });
+    }
+    // A window nobody would ask for by hand, and the one that would return the
+    // whole table. Bounded rather than paginated: two years of leave for a team
+    // is still a small list, and a cursor here would complicate every caller.
+    const MAX_WINDOW_DAYS = 366 * 2;
+    if ((to.getTime() - from.getTime()) / 86_400_000 > MAX_WINDOW_DAYS) {
+      return reply.status(400).send({
+        success: false,
+        error: `Date range is too wide — ${MAX_WINDOW_DAYS} days at most`,
+        statusCode: 400,
+      });
+    }
 
     const seesAll = isLeaveAdmin(user.role)
       || (isCustomRole(user.role) && await hasPermission(user, "EMP_LEAVES", "canApprove"));
     const employeeFilter = seesAll ? undefined : await buildReportingScopeFilter(user.sub);
 
     // The applied range, not the charged span: this answers who is absent, so a
-    // Sunday the payroll rule trims off is still a day they are away.
+    // Sunday the payroll rule trims off is still a day they are away. A leave
+    // counts when it overlaps the window at all, not only when it sits inside
+    // it — a fortnight's leave that started last week still covers Monday.
     const data = await prisma.leaveApplication.findMany({
       where: {
-        status: { in: IN_FORCE_LEAVE_STATUSES },
-        fromDate: { lte: date },
-        toDate:   { gte: date },
+        status: { in: [...IN_FORCE_LEAVE_STATUSES, "PENDING"] },
+        fromDate: { lte: to },
+        toDate:   { gte: from },
         ...(employeeFilter && { employee: employeeFilter }),
       },
       include: {
@@ -647,10 +684,19 @@ export async function leaveRoutes(fastify: FastifyInstance) {
           },
         },
       },
-      orderBy: [{ employee: { firstName: "asc" } }, { employee: { lastName: "asc" } }],
+      // Chronological: the window is read as a timeline, so the next absence
+      // belongs at the top rather than whoever's name sorts first.
+      orderBy: [{ fromDate: "asc" }, { employee: { firstName: "asc" } }, { employee: { lastName: "asc" } }],
     });
 
-    return reply.send({ success: true, data, date: date.toISOString().slice(0, 10) });
+    return reply.send({
+      success: true,
+      data,
+      from: from.toISOString().slice(0, 10),
+      to: to.toISOString().slice(0, 10),
+      // Echoed for the older single-day callers that read it back.
+      date: from.toISOString().slice(0, 10),
+    });
   });
 
   // Every leave record, for the roles allowed to override them. This is the

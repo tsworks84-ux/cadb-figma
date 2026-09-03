@@ -2249,57 +2249,93 @@ function todayIso() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-function relativeDayLabel(iso: string) {
-  const today = todayIso();
-  if (iso === today) return "today";
-  const diff = Math.round((new Date(iso).getTime() - new Date(today).getTime()) / MS_PER_DAY);
-  if (diff === 1)  return "tomorrow";
-  if (diff === -1) return "yesterday";
-  return new Date(iso).toLocaleDateString("en-IN", { weekday: "long" });
+/** `iso` shifted by `days`, still as a local-timezone YYYY-MM-DD. */
+function shiftIso(iso: string, days: number) {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** The default window: today plus the next thirteen days — a fortnight inclusive. */
+const DEFAULT_WINDOW_DAYS = 14;
+function defaultWindow() {
+  const from = todayIso();
+  return { from, to: shiftIso(from, DEFAULT_WINDOW_DAYS - 1) };
 }
 
 /**
- * Who is away on a given day, defaulting to today. Answers the question a manager
- * actually walks in with — "who's out today?" — which the approvals queue can't,
- * since a leave approved last month no longer appears there.
+ * Who is away over a window, defaulting to the next fortnight. Answers the
+ * question a manager actually walks in with — "who is out, and when?" — which
+ * the approvals queue can't, since a leave approved last month no longer
+ * appears there.
+ *
+ * Approved and still-pending requests sit in one list on purpose: cover has to
+ * be planned against both, and a request nobody has answered is exactly the one
+ * that turns into a surprise absence. Every row states which it is.
  */
 function WhoIsOnLeavePanel() {
-  const [date, setDate] = useState(todayIso());
+  const [range, setRange] = useState(defaultWindow);
 
   const { data: entries = [], isLoading } = useQuery<OnLeaveEntry[]>({
-    queryKey: ["leaves-on-date", date],
-    queryFn: () => api.get(`/api/v1/leaves/on-date?date=${date}`).then((r) => r.data.data),
+    queryKey: ["leaves-on-date", range.from, range.to],
+    queryFn: () =>
+      api.get(`/api/v1/leaves/on-date?from=${range.from}&to=${range.to}`).then((r) => r.data.data),
   });
 
-  const isToday = date === todayIso();
+  // Picking a start past the end (or an end before the start) drags the other
+  // bound along rather than leaving an empty range the server would reject.
+  const setFrom = (value: string) => {
+    const from = value || todayIso();
+    setRange((r) => ({ from, to: from > r.to ? from : r.to }));
+  };
+  const setTo = (value: string) => {
+    const to = value || todayIso();
+    setRange((r) => ({ from: to < r.from ? to : r.from, to }));
+  };
+
+  const isDefaultWindow = range.from === defaultWindow().from && range.to === defaultWindow().to;
+  const pendingCount = entries.filter((e) => e.status === "PENDING").length;
+  const approvedCount = entries.length - pendingCount;
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-      <div className="flex flex-col gap-3 p-5 border-b border-gray-200 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 p-5 border-b border-gray-200 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-2">
           <CalendarOff className="text-teal-600 shrink-0" size={20} />
-          <div>
+          <div className="min-w-0">
             <h3 className="text-base font-semibold text-gray-900">On Leave</h3>
             <p className="text-xs text-gray-500 mt-0.5">
               {isLoading
                 ? "Checking…"
-                : `${entries.length} ${entries.length === 1 ? "person is" : "people are"} away ${relativeDayLabel(date)}`}
+                : entries.length === 0
+                  ? `Nobody is booked off, ${fmtShort(range.from)} – ${fmtShort(range.to)}`
+                  : `${fmtShort(range.from)} – ${fmtShort(range.to)} · ${approvedCount} approved · ${pendingCount} awaiting approval`}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <input
-            type="date" max="2099-12-31" min="1900-01-01"
-            value={date}
-            onChange={(e) => setDate(e.target.value || todayIso())}
-            className="flex-1 sm:flex-initial border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            type="date" max={range.to} min="1900-01-01"
+            aria-label="From date"
+            value={range.from}
+            onChange={(e) => setFrom(e.target.value)}
+            className="flex-1 min-w-0 sm:flex-initial border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-          {!isToday && (
+          <span className="text-xs text-gray-400 shrink-0">to</span>
+          <input
+            type="date" max="2099-12-31" min={range.from}
+            aria-label="To date"
+            value={range.to}
+            onChange={(e) => setTo(e.target.value)}
+            className="flex-1 min-w-0 sm:flex-initial border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {!isDefaultWindow && (
             <button
-              onClick={() => setDate(todayIso())}
+              onClick={() => setRange(defaultWindow())}
               className="px-3 py-2 text-xs font-medium text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50 whitespace-nowrap"
             >
-              Today
+              Next 2 weeks
             </button>
           )}
         </div>
@@ -2312,19 +2348,38 @@ function WhoIsOnLeavePanel() {
       ) : entries.length === 0 ? (
         <div className="px-6 py-10 text-center">
           <CheckCircle2 className="mx-auto text-gray-300 mb-3" size={36} />
-          <p className="text-sm text-gray-500">Nobody is on leave {relativeDayLabel(date)}.</p>
+          <p className="text-sm text-gray-500">
+            Nobody has leave booked between {fmtShort(range.from)} and {fmtShort(range.to)}.
+          </p>
         </div>
       ) : (
         <div className="divide-y divide-gray-100">
           {entries.map((e) => {
             const sameDay = e.fromDate.slice(0, 10) === e.toDate.slice(0, 10);
             const colors = LEAVE_COLORS[e.leaveType] ?? LEAVE_COLORS.CASUAL;
+            const isPending = e.status === "PENDING";
             return (
-              <div key={e.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-5 py-3.5 hover:bg-gray-50 transition-colors">
+              <div
+                key={e.id}
+                className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-5 py-3.5 hover:bg-gray-50 transition-colors ${
+                  // An unapproved request is a maybe, not an absence — the accent
+                  // says so at a glance, before anyone reads the status pill.
+                  isPending ? "border-l-2 border-amber-300" : ""
+                }`}
+              >
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="font-medium text-gray-900">{e.employee.firstName} {e.employee.lastName}</p>
                     <span className="text-xs text-gray-400">{e.employee.employeeCode}</span>
+                    {isPending ? (
+                      <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
+                        Pending approval
+                      </span>
+                    ) : (
+                      <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
+                        Approved
+                      </span>
+                    )}
                     {e.status === "CANCELLATION_PENDING" && (
                       <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
                         Withdrawal pending
@@ -2377,6 +2432,7 @@ function PendingApprovalsPanel() {
       toast.success(isLop ? `Approved with ${variables.lopDays} LoP day${variables.lopDays !== 1 ? "s" : ""}` : "Decision recorded");
       queryClient.invalidateQueries({ queryKey: ["pending-leaves"] });
       queryClient.invalidateQueries({ queryKey: ["decided-leaves"] });
+      queryClient.invalidateQueries({ queryKey: ["leaves-on-date"] });
       queryClient.invalidateQueries({ queryKey: ["my-leaves"] });
       queryClient.invalidateQueries({ queryKey: ["my-leave-balances"] });
     },
@@ -2560,6 +2616,7 @@ function CancellationRequestsPanel() {
       toast.success(vars.action === "APPROVED" ? "Leave cancelled — days returned" : "Cancellation declined");
       queryClient.invalidateQueries({ queryKey: ["leave-cancellation-requests"] });
       queryClient.invalidateQueries({ queryKey: ["decided-leaves"] });
+      queryClient.invalidateQueries({ queryKey: ["leaves-on-date"] });
       queryClient.invalidateQueries({ queryKey: ["all-leaves"] });
       queryClient.invalidateQueries({ queryKey: ["my-leaves"] });
       queryClient.invalidateQueries({ queryKey: ["my-leave-balances"] });
@@ -2683,6 +2740,7 @@ function AllLeavesPanel() {
     queryClient.invalidateQueries({ queryKey: ["pending-leaves"] });
     queryClient.invalidateQueries({ queryKey: ["leave-cancellation-requests"] });
     queryClient.invalidateQueries({ queryKey: ["decided-leaves"] });
+    queryClient.invalidateQueries({ queryKey: ["leaves-on-date"] });
     queryClient.invalidateQueries({ queryKey: ["audit-logs"] });
     setAction(null);
   }
