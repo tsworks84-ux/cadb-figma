@@ -93,9 +93,40 @@ function triggerDownload(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+// Blob responses carry JSON error bodies too — an export that 403s arrives as a Blob,
+// not as { error }. Read the message back out so the toast says why it failed.
+async function blobError(e: any): Promise<string | null> {
+  const data = e?.response?.data;
+  try {
+    if (data instanceof Blob) return JSON.parse(await data.text())?.error ?? null;
+  } catch { /* not JSON */ }
+  return typeof data?.error === "string" ? data.error : null;
+}
+
+/** Message for a failed preview query — the server's reason where there is one. */
+function queryError(e: any, fallback: string): string {
+  return e?.response?.data?.error ?? e?.message ?? fallback;
+}
+
 function fmt(n: number | null | undefined) {
   if (n == null) return "—";
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
+}
+
+// ── Preview message ───────────────────────────────────────────────────────────
+
+/**
+ * What a preview shows when it has no table to draw. Previously these branches
+ * rendered `null`, so a failed request (a 403 from a report the role can open but
+ * the API refused, a server error) looked exactly like clicking Preview and nothing
+ * happening. Show the server's own reason where it gave one.
+ */
+function PreviewMessage({ error, empty }: { error: unknown; empty: string }) {
+  return (
+    <div className={`px-4 py-10 text-center text-sm ${error ? "text-red-500" : "text-gray-400"}`}>
+      {error ? queryError(error, "Could not load this report. Please try again.") : empty}
+    </div>
+  );
 }
 
 // ── Field Group Panel (for employee directory report) ─────────────────────────
@@ -160,7 +191,7 @@ function EmployeeDirectoryReport() {
   ]));
   const [exporting, setExporting] = useState(false);
 
-  const { data: fieldsData, isLoading } = useQuery({
+  const { data: fieldsData, isLoading, error } = useQuery({
     queryKey: ["report-employee-fields"],
     queryFn: () =>
       api.get<{ success: boolean; data: FieldGroup[] }>("/api/v1/reports/employee-directory/fields")
@@ -186,8 +217,8 @@ function EmployeeDirectoryReport() {
       const response = await api.get(`/api/v1/reports/employee-directory/export?fields=${fields}`, { responseType: "blob" });
       triggerDownload(response.data as Blob, `employee_directory_${new Date().toISOString().slice(0, 10)}.xlsx`);
       toast.success("Excel file downloaded");
-    } catch {
-      toast.error("Failed to export report");
+    } catch (e) {
+      toast.error(await blobError(e) ?? "Failed to export report");
     } finally {
       setExporting(false);
     }
@@ -226,9 +257,11 @@ function EmployeeDirectoryReport() {
           </div>
           {isLoading ? (
             <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-blue-500" /></div>
+          ) : !fieldsData?.length ? (
+            <PreviewMessage error={error} empty="No fields available for this report." />
           ) : (
             <div className="space-y-3">
-              {fieldsData?.map((group) => (
+              {fieldsData.map((group) => (
                 <FieldGroupPanel key={group.group} group={group} selected={selected} onToggleField={toggleField} onToggleGroup={toggleGroup} />
               ))}
             </div>
@@ -260,7 +293,7 @@ function SalaryStructuresReport() {
   const [pdfLoading,   setPdfLoading]   = useState(false);
   const [preview, setPreview] = useState(false);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["report-salary-data"],
     queryFn: () =>
       api.get<{ success: boolean; data: SalaryData }>("/api/v1/reports/salary-structures/data")
@@ -275,8 +308,8 @@ function SalaryStructuresReport() {
       const res = await api.get("/api/v1/reports/salary-structures/export", { responseType: "blob" });
       triggerDownload(res.data as Blob, `salary_structures_${new Date().toISOString().slice(0, 10)}.xlsx`);
       toast.success("Excel downloaded");
-    } catch {
-      toast.error("Failed to export Excel");
+    } catch (e) {
+      toast.error(await blobError(e) ?? "Failed to export Excel");
     } finally {
       setExcelLoading(false);
     }
@@ -531,7 +564,9 @@ function SalaryStructuresReport() {
                     </p>
                   )}
                 </>
-              ) : null}
+              ) : (
+                <PreviewMessage error={error} empty="No salary structures to preview." />
+              )}
             </div>
           )}
         </div>
@@ -575,7 +610,7 @@ function MonthlySalaryDisbursementReport() {
   const [preview, setPreview] = useState(false);
   const [xlsLoading, setXlsLoading] = useState(false);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["report-disbursement", month],
     queryFn: () =>
       api.get<{ success: boolean; data: DisbursementRow[] }>(`/api/v1/reports/salary-disbursement/data?month=${month}`)
@@ -592,8 +627,8 @@ function MonthlySalaryDisbursementReport() {
       const label = new Date(+yr, +mo - 1, 1).toLocaleString("en-IN", { month: "long", year: "numeric" }).replace(/ /g, "_");
       triggerDownload(res.data as Blob, `salary_disbursement_${label}.xlsx`);
       toast.success("Excel downloaded");
-    } catch {
-      toast.error("Failed to export");
+    } catch (e) {
+      toast.error(await blobError(e) ?? "Failed to export");
     } finally {
       setXlsLoading(false);
     }
@@ -755,7 +790,9 @@ function MonthlySalaryDisbursementReport() {
                       </p>
                     )}
                   </>
-                ) : null}
+                ) : (
+                  <PreviewMessage error={error} empty="No payroll rows for this month." />
+                )}
               </div>
             )}
           </div>
@@ -846,7 +883,7 @@ function LeaveRecordsReport() {
   const [preview, setPreview] = useState(false);
   const [xlsLoading, setXlsLoading] = useState(false);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["report-leave-records", year],
     queryFn: () =>
       api.get<{ success: boolean; data: LeaveData }>(`/api/v1/reports/leave-records/data?year=${year}`)
@@ -861,8 +898,8 @@ function LeaveRecordsReport() {
       const res = await api.get(`/api/v1/reports/leave-records/export?year=${year}`, { responseType: "blob" });
       triggerDownload(res.data as Blob, `leave_records_${year}.xlsx`);
       toast.success("Excel downloaded");
-    } catch {
-      toast.error("Failed to export");
+    } catch (e) {
+      toast.error(await blobError(e) ?? "Failed to export");
     } finally {
       setXlsLoading(false);
     }
@@ -1077,7 +1114,9 @@ function LeaveRecordsReport() {
                       </>
                     )}
                   </>
-                ) : null}
+                ) : (
+                  <PreviewMessage error={error} empty="No leave records for this year." />
+                )}
               </div>
             )}
           </div>
@@ -1154,7 +1193,7 @@ function ClaimsReport() {
 
   const canPreview = !!from && !!to && from <= to;
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["report-claims", from, to],
     queryFn: () =>
       api.get<{ success: boolean; data: { rows: ClaimRow[]; stats: ClaimStats } }>(
@@ -1177,8 +1216,8 @@ function ClaimsReport() {
       const res = await api.get(`/api/v1/reports/claims/export?from=${from}&to=${to}`, { responseType: "blob" });
       triggerDownload(res.data as Blob, `claims_report_${from}_to_${to}.xlsx`);
       toast.success("Excel downloaded");
-    } catch {
-      toast.error("Failed to export Excel");
+    } catch (e) {
+      toast.error(await blobError(e) ?? "Failed to export Excel");
     } finally {
       setXlsLoading(false);
     }
@@ -1263,7 +1302,7 @@ function ClaimsReport() {
               {isLoading ? (
                 <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-violet-500" /></div>
               ) : rows.length === 0 ? (
-                <div className="text-center py-12 text-sm text-gray-400">No claims found for this date range.</div>
+                <PreviewMessage error={error} empty="No claims found for this date range." />
               ) : (
                 <>
                   <table className="min-w-full text-xs">

@@ -1,10 +1,21 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "@cadb/db";
-import { authenticate, requireRole } from "../../middleware/authenticate.js";
+import { authenticate } from "../../middleware/authenticate.js";
+import { requirePermission } from "../../utils/permissions.js";
 import ExcelJS from "exceljs";
 import { IN_FORCE_LEAVE_STATUSES, daysInMonth, lopDaysInMonth } from "../../utils/leave.js";
 
-const ADMIN_ROLES = ["SUPER_ADMIN", "HR_ADMIN"] as const;
+/**
+ * Each report is gated on its own MIS_* module from the permission matrix — the same
+ * flags the MIS page uses to decide which cards to render. Gating these on role names
+ * instead made every card the UI showed to a DEPT_HEAD or custom role 403 on preview
+ * and export. SUPER_ADMIN bypasses the matrix inside requirePermission.
+ */
+const canViewEmpDirectory = requirePermission("MIS_EMP_DIRECTORY", "canView");
+const canViewSalaryStruct = requirePermission("MIS_SALARY_STRUCT", "canView");
+const canViewSalaryDisb   = requirePermission("MIS_SALARY_DISB",   "canView");
+const canViewLeaveRecords = requirePermission("MIS_LEAVE_RECORDS", "canView");
+const canViewClaims       = requirePermission("MIS_CLAIMS",        "canView");
 
 // All selectable fields for the employee directory report
 export const EMPLOYEE_FIELD_KEYS = [
@@ -147,7 +158,7 @@ export async function reportRoutes(fastify: FastifyInstance) {
 
   // ── GET /reports/employee-directory/fields ──────────────────────────────────
   // Returns the full list of available field keys + labels for the UI picker
-  fastify.get("/employee-directory/fields", { preHandler: requireRole(...ADMIN_ROLES) }, async (_req, reply) => {
+  fastify.get("/employee-directory/fields", { preHandler: canViewEmpDirectory }, async (_req, reply) => {
     const groups = [
       {
         group: "Identity",
@@ -191,7 +202,7 @@ export async function reportRoutes(fastify: FastifyInstance) {
 
   // ── GET /reports/employee-directory/export ──────────────────────────────────
   // Query params: fields=employeeCode,firstName,... (comma-separated)
-  fastify.get("/employee-directory/export", { preHandler: requireRole(...ADMIN_ROLES) }, async (request, reply) => {
+  fastify.get("/employee-directory/export", { preHandler: canViewEmpDirectory }, async (request, reply) => {
     const query = request.query as { fields?: string };
     const requestedFields = query.fields
       ? (query.fields.split(",").filter((f) => EMPLOYEE_FIELD_KEYS.includes(f as EmployeeFieldKey)) as EmployeeFieldKey[])
@@ -338,7 +349,7 @@ export async function reportRoutes(fastify: FastifyInstance) {
   // ── GET /reports/salary-structures/data  (JSON for client-side PDF) ─────────
   fastify.get(
     "/salary-structures/data",
-    { preHandler: requireRole(...ADMIN_ROLES) },
+    { preHandler: canViewSalaryStruct },
     async (_req, reply) => {
       const employees = await fetchSalaryData();
       const rows = employees.map((emp) => {
@@ -384,7 +395,7 @@ export async function reportRoutes(fastify: FastifyInstance) {
   // ── GET /reports/salary-structures/export  (Excel download) ─────────────────
   fastify.get(
     "/salary-structures/export",
-    { preHandler: requireRole(...ADMIN_ROLES) },
+    { preHandler: canViewSalaryStruct },
     async (_req, reply) => {
       const employees = await fetchSalaryData();
 
@@ -749,7 +760,7 @@ export async function reportRoutes(fastify: FastifyInstance) {
   // ── GET /reports/salary-disbursement/data ────────────────────────────────────
   fastify.get(
     "/salary-disbursement/data",
-    { preHandler: requireRole(...ADMIN_ROLES) },
+    { preHandler: canViewSalaryDisb },
     async (request, reply) => {
       const q = request.query as { month?: string };
       if (!q.month || !/^\d{4}-\d{2}$/.test(q.month)) {
@@ -903,7 +914,7 @@ export async function reportRoutes(fastify: FastifyInstance) {
   // ── GET /reports/leave-records/data ─────────────────────────────────────────
   fastify.get(
     "/leave-records/data",
-    { preHandler: requireRole(...ADMIN_ROLES) },
+    { preHandler: canViewLeaveRecords },
     async (request, reply) => {
       const q = request.query as { year?: string };
       const year = q.year ? parseInt(q.year, 10) : new Date().getFullYear();
@@ -918,7 +929,7 @@ export async function reportRoutes(fastify: FastifyInstance) {
   // ── GET /reports/leave-records/export ───────────────────────────────────────
   fastify.get(
     "/leave-records/export",
-    { preHandler: requireRole(...ADMIN_ROLES) },
+    { preHandler: canViewLeaveRecords },
     async (request, reply) => {
       const q = request.query as { year?: string };
       const year = q.year ? parseInt(q.year, 10) : new Date().getFullYear();
@@ -1168,7 +1179,7 @@ export async function reportRoutes(fastify: FastifyInstance) {
   // ── GET /reports/salary-disbursement/export ──────────────────────────────────
   fastify.get(
     "/salary-disbursement/export",
-    { preHandler: requireRole(...ADMIN_ROLES) },
+    { preHandler: canViewSalaryDisb },
     async (request, reply) => {
       const q = request.query as { month?: string };
       if (!q.month || !/^\d{4}-\d{2}$/.test(q.month)) {
@@ -1408,7 +1419,7 @@ export async function reportRoutes(fastify: FastifyInstance) {
   // ── GET /reports/claims/data ────────────────────────────────────────────────
   fastify.get(
     "/claims/data",
-    { preHandler: requireRole(...ADMIN_ROLES) },
+    { preHandler: canViewClaims },
     async (request, reply) => {
       const q = request.query as { from?: string; to?: string };
       if (!q.from || !q.to) {
@@ -1439,7 +1450,7 @@ export async function reportRoutes(fastify: FastifyInstance) {
   // ── GET /reports/claims/export ──────────────────────────────────────────────
   fastify.get(
     "/claims/export",
-    { preHandler: requireRole(...ADMIN_ROLES) },
+    { preHandler: canViewClaims },
     async (request, reply) => {
       const q = request.query as { from?: string; to?: string };
       if (!q.from || !q.to) {
