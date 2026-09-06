@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { formatDate, formatCurrency } from "@/lib/utils";
@@ -12,7 +12,7 @@ import {
   Plus, X, Upload, FileText, Eye, Trash2, CheckCircle, CheckCircle2,
   XCircle, Clock, Banknote, AlertTriangle, ChevronDown, Settings, Paperclip,
   Receipt, Calendar, IndianRupee, Tag, AlertCircle, Download,
-  Users, ChevronRight,
+  Users, ChevronRight, SlidersHorizontal,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 
@@ -306,6 +306,7 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
   const { data: claim, isLoading } = useQuery({
     queryKey: ["claim", claimId],
     queryFn: () => api.get(`/api/v1/claims/${claimId}`).then((r) => r.data.data),
+    staleTime: 0,
   });
 
   const { data: thresholdData } = useQuery({
@@ -334,9 +335,7 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
     }),
     onSuccess: () => {
       toast.success(approvalAction === "APPROVED" ? "Claim approved" : "Claim rejected");
-      qc.invalidateQueries({ queryKey: ["pending-claims"] });
-      qc.invalidateQueries({ queryKey: ["claim", claimId] });
-      qc.invalidateQueries({ queryKey: ["admin-all-claims"] });
+      invalidateClaimLists();
       setShowApprovalForm(false);
       onClose();
     },
@@ -347,8 +346,7 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
     mutationFn: () => api.patch(`/api/v1/claims/${claimId}/pay`),
     onSuccess: () => {
       toast.success("Claim marked as paid");
-      qc.invalidateQueries({ queryKey: ["admin-all-claims"] });
-      qc.invalidateQueries({ queryKey: ["claim", claimId] });
+      invalidateClaimLists();
       onClose();
     },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
@@ -739,6 +737,7 @@ function ClaimApprovalModal({ claimId, onClose }: { claimId: string; onClose: ()
     queryKey: ["claim", claimId],
     queryFn: () => api.get(`/api/v1/claims/${claimId}`).then((r) => r.data.data),
     enabled: !!claimId,
+    staleTime: 0,
   });
 
   const decisionMutation = useMutation({
@@ -749,9 +748,10 @@ function ClaimApprovalModal({ claimId, onClose }: { claimId: string; onClose: ()
     }),
     onSuccess: () => {
       toast.success(decision === "APPROVED" ? "Claim approved" : "Claim rejected");
-      qc.invalidateQueries({ queryKey: ["pending-claims"] });
+      for (const key of ["my-claims", "pending-claims", "admin-all-claims", "claim-cancellation-requests"]) {
+        qc.invalidateQueries({ queryKey: [key] });
+      }
       qc.invalidateQueries({ queryKey: ["claim", claimId] });
-      qc.invalidateQueries({ queryKey: ["admin-all-claims"] });
       onClose();
     },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Decision failed"),
@@ -769,7 +769,13 @@ function ClaimApprovalModal({ claimId, onClose }: { claimId: string; onClose: ()
     ? `${claim.employee.firstName} ${claim.employee.lastName}`
     : "Employee";
   const initials = empName.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase();
-  const canSubmit = decision !== null && notes.trim().length > 0;
+  const needsNote = decision === "REJECTED" && !notes.trim();
+  const canSubmit = decision !== null && !needsNote;
+  const blockedReason = decision === null
+    ? "Choose Approve or Reject to continue."
+    : needsNote
+    ? "A note is required to reject a claim."
+    : null;
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -934,8 +940,10 @@ function ClaimApprovalModal({ claimId, onClose }: { claimId: string; onClose: ()
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
               <FileText size={16} />
-              Manager Notes <span className="text-red-600">*</span>
-              <span className="text-xs text-gray-500 font-normal">(Required for record purposes)</span>
+              Manager Notes
+              {decision === "REJECTED"
+                ? <><span className="text-red-600">*</span><span className="text-xs text-gray-500 font-normal">(Required to reject)</span></>
+                : <span className="text-xs text-gray-500 font-normal">(Optional — kept on the approval record)</span>}
             </label>
             <textarea
               placeholder={
@@ -979,7 +987,10 @@ function ClaimApprovalModal({ claimId, onClose }: { claimId: string; onClose: ()
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-3 p-6 border-t border-gray-200">
+          {blockedReason && (
+            <p className="text-xs text-gray-500 sm:mr-auto">{blockedReason}</p>
+          )}
           <button
             onClick={onClose}
             className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
@@ -1178,16 +1189,177 @@ function NewClaimModal({ onClose, onCreated }: { onClose: () => void; onCreated:
   );
 }
 
+// ─── Column filters ──────────────────────────────────────────────────────────
+
+/**
+ * Per-column filters for the All Claims table. Every field is a plain string so
+ * the inputs stay controlled and "not filtering" is always the empty string.
+ */
+type ClaimColumnFilters = {
+  employee: string;
+  claimNumber: string;
+  claimType: string;
+  title: string;
+  amountMin: string;
+  amountMax: string;
+  status: string;
+  dateFrom: string;
+  dateTo: string;
+};
+
+const EMPTY_CLAIM_FILTERS: ClaimColumnFilters = {
+  employee: "", claimNumber: "", claimType: "", title: "",
+  amountMin: "", amountMax: "", status: "", dateFrom: "", dateTo: "",
+};
+
+function countActiveFilters(f: ClaimColumnFilters) {
+  return Object.values(f).filter((v) => v.trim() !== "").length;
+}
+
+/**
+ * Filters the whole claim list before it is grouped by month, so a match in a
+ * collapsed past month still counts towards the result.
+ */
+function applyClaimFilters(claims: any[], f: ClaimColumnFilters) {
+  if (countActiveFilters(f) === 0) return claims;
+
+  const employee    = f.employee.trim().toLowerCase();
+  const claimNumber = f.claimNumber.trim().toLowerCase();
+  const title       = f.title.trim().toLowerCase();
+  const min = f.amountMin.trim() !== "" ? Number(f.amountMin) : null;
+  const max = f.amountMax.trim() !== "" ? Number(f.amountMax) : null;
+  const from = f.dateFrom ? new Date(`${f.dateFrom}T00:00:00`) : null;
+  const to   = f.dateTo   ? new Date(`${f.dateTo}T23:59:59.999`) : null;
+
+  return claims.filter((c: any) => {
+    if (employee) {
+      const who = `${c.employee?.firstName ?? ""} ${c.employee?.lastName ?? ""} ${c.employee?.employeeCode ?? ""}`.toLowerCase();
+      if (!who.includes(employee)) return false;
+    }
+    if (claimNumber && !String(c.claimNumber ?? "").toLowerCase().includes(claimNumber)) return false;
+    if (f.claimType && c.claimType !== f.claimType) return false;
+    if (title) {
+      const text = `${c.title ?? ""} ${c.description ?? ""}`.toLowerCase();
+      if (!text.includes(title)) return false;
+    }
+    if (min !== null && !Number.isNaN(min) && Number(c.claimedAmount) < min) return false;
+    if (max !== null && !Number.isNaN(max) && Number(c.claimedAmount) > max) return false;
+    if (f.status && c.status !== f.status) return false;
+    if (from || to) {
+      const created = new Date(c.createdAt);
+      if (from && created < from) return false;
+      if (to && created > to) return false;
+    }
+    return true;
+  });
+}
+
+const FILTER_FIELD =
+  "w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-normal normal-case tracking-normal text-gray-700 placeholder:text-gray-300 focus:border-[#2C3E7C] focus:outline-none focus:ring-1 focus:ring-[#2C3E7C]/30";
+
+function FilterText({ value, onChange, placeholder, type = "text" }: {
+  value: string; onChange: (v: string) => void; placeholder: string; type?: string;
+}) {
+  return (
+    <input
+      type={type}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      className={FILTER_FIELD}
+    />
+  );
+}
+
+/** A native select ignores most box styling, so it is appearance-none plus our own chevron. */
+function FilterSelect({ value, onChange, options, placeholder }: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  placeholder: string;
+}) {
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={`${FILTER_FIELD} appearance-none pr-6 ${value ? "text-gray-700" : "text-gray-400"}`}
+      >
+        <option value="">{placeholder}</option>
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-gray-400" />
+    </div>
+  );
+}
+
+/** The filter row that sits under the All Claims column headers, one control per column. */
+function ClaimFilterRow({ filters, onChange, typeOptions, statusOptions }: {
+  filters: ClaimColumnFilters;
+  onChange: (patch: Partial<ClaimColumnFilters>) => void;
+  typeOptions: string[];
+  statusOptions: string[];
+}) {
+  return (
+    <tr className="border-b border-gray-100 bg-white align-top">
+      <th className="px-3 py-2 min-w-[150px]">
+        <FilterText value={filters.employee} onChange={(v) => onChange({ employee: v })} placeholder="Name or code" />
+      </th>
+      <th className="px-3 py-2 min-w-[130px]">
+        <FilterText value={filters.claimNumber} onChange={(v) => onChange({ claimNumber: v })} placeholder="CLM-…" />
+      </th>
+      <th className="px-3 py-2 min-w-[120px]">
+        <FilterSelect
+          value={filters.claimType}
+          onChange={(v) => onChange({ claimType: v })}
+          options={typeOptions.map((t) => ({ value: t, label: t }))}
+          placeholder="All types"
+        />
+      </th>
+      <th className="px-3 py-2 min-w-[170px]">
+        <FilterText value={filters.title} onChange={(v) => onChange({ title: v })} placeholder="Search title" />
+      </th>
+      <th className="px-3 py-2 min-w-[150px]">
+        <div className="flex items-center gap-1">
+          <FilterText type="number" value={filters.amountMin} onChange={(v) => onChange({ amountMin: v })} placeholder="Min" />
+          <span className="text-xs text-gray-300">–</span>
+          <FilterText type="number" value={filters.amountMax} onChange={(v) => onChange({ amountMax: v })} placeholder="Max" />
+        </div>
+      </th>
+      <th className="px-3 py-2 min-w-[160px]">
+        <FilterSelect
+          value={filters.status}
+          onChange={(v) => onChange({ status: v })}
+          options={statusOptions.map((st) => ({ value: st, label: statusLabel(st) }))}
+          placeholder="All statuses"
+        />
+      </th>
+      <th className="px-3 py-2 min-w-[150px]">
+        <div className="flex flex-col gap-1">
+          <FilterText type="date" value={filters.dateFrom} onChange={(v) => onChange({ dateFrom: v })} placeholder="From" />
+          <FilterText type="date" value={filters.dateTo} onChange={(v) => onChange({ dateTo: v })} placeholder="To" />
+        </div>
+      </th>
+      <th className="px-3 py-2" />
+    </tr>
+  );
+}
+
 // ─── Month group (collapsible past months) ───────────────────────────────────
 
-function MonthGroup({ monthKey, claims, onOpen, prefetch, showEmployee = false }: {
+function MonthGroup({ monthKey, claims, onOpen, prefetch, showEmployee = false, defaultOpen = false }: {
   monthKey: string;
   claims: any[];
   onOpen: (id: string) => void;
   prefetch: (id: string) => void;
   showEmployee?: boolean;
+  /** Expand on its own — used while a filter is on, so matches aren't hidden behind a collapsed month. */
+  defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
+  useEffect(() => { if (defaultOpen) setOpen(true); }, [defaultOpen]);
   const total    = claims.reduce((s, c) => s + c.claimedAmount, 0);
   const approved = claims
     .filter((c) => c.status === "APPROVED" || c.status === "PAID")
@@ -1428,6 +1600,8 @@ export default function ClaimsPage() {
   const [selectedClaimId, setSelectedClaimId] = useState<string | null>(null);
   const [reviewClaimId, setReviewClaimId] = useState<string | null>(null);
   const [teamSubTab, setTeamSubTab] = useState<"pending" | "cancellations" | "all">("pending");
+  const [allFilters, setAllFilters] = useState<ClaimColumnFilters>(EMPTY_CLAIM_FILTERS);
+  const [showAllFilters, setShowAllFilters] = useState(true);
 
   function prefetchClaim(id: string) {
     qc.prefetchQuery({
@@ -1436,21 +1610,30 @@ export default function ClaimsPage() {
     });
   }
 
+  // A claim's status moves under our feet — another admin approves it, or this
+  // admin approves it in a second tab. The app-wide 5-minute staleTime would
+  // then keep showing SUBMITTED for a claim that is already APPROVED, so every
+  // claim list opts out of it and refetches on mount and on window focus.
+  const liveList = { staleTime: 0, refetchOnMount: "always", refetchOnWindowFocus: true } as const;
+
   const { data: myClaims } = useQuery({
     queryKey: ["my-claims"],
     queryFn: () => api.get("/api/v1/claims/my").then((r) => r.data.data),
+    ...liveList,
   });
 
   const { data: pendingClaims } = useQuery({
     queryKey: ["pending-claims"],
     queryFn: () => api.get("/api/v1/claims/pending").then((r) => r.data.data),
     enabled: isAdmin,
+    ...liveList,
   });
 
   const { data: allClaims } = useQuery({
     queryKey: ["admin-all-claims"],
     queryFn: () => api.get("/api/v1/claims/admin/all").then((r) => r.data.data),
     enabled: isAdmin && activeTab === "team" && teamSubTab === "all",
+    ...liveList,
   });
 
   // Fetched alongside the pending count so the sub-tab can carry its own badge.
@@ -1458,6 +1641,7 @@ export default function ClaimsPage() {
     queryKey: ["claim-cancellation-requests"],
     queryFn: () => api.get("/api/v1/claims/cancellation-requests").then((r) => r.data.data),
     enabled: isAdmin,
+    ...liveList,
   });
 
   function openClaim(id: string) {
@@ -1780,67 +1964,124 @@ export default function ClaimsPage() {
             {teamSubTab === "cancellations" && <CancellationRequestsPanel onOpen={openClaim} />}
 
             {/* All Claims sub-tab */}
-            {teamSubTab === "all" && (
-              <div>
-                {!allClaims?.length ? (
-                  <p className="px-6 py-10 text-sm text-center text-gray-400">No claims found.</p>
-                ) : (() => {
-                  const groups = new Map<string, any[]>();
-                  for (const claim of allClaims) {
-                    const key = claimMonthKey(claim);
-                    if (!groups.has(key)) groups.set(key, []);
-                    groups.get(key)!.push(claim);
-                  }
-                  const sortedKeys     = [...groups.keys()].sort((a, b) => b.localeCompare(a));
-                  const curMonthClaims = groups.get(curKey) ?? [];
-                  const pastKeys       = sortedKeys.filter((k) => k !== curKey);
+            {teamSubTab === "all" && (() => {
+              const source       = allClaims ?? [];
+              const filtered     = applyClaimFilters(source, allFilters);
+              const activeCount  = countActiveFilters(allFilters);
+              const isFiltering  = activeCount > 0;
+              const patchFilters = (patch: Partial<ClaimColumnFilters>) =>
+                setAllFilters((f) => ({ ...f, ...patch }));
 
-                  return (
-                    <>
-                      {curMonthClaims.length > 0 && (
-                        <div>
-                          <div className="px-6 py-2.5 border-b flex items-center justify-between" style={{ backgroundColor: "#EEF1F8" }}>
-                            <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#2C3E7C" }}>
-                              {monthLabel(curKey)} · Current
-                            </span>
-                            <span className="text-sm font-semibold" style={{ color: "#2C3E7C" }}>
-                              {formatCurrency(curMonthClaims.reduce((s: number, c: any) => s + c.claimedAmount, 0))} claimed
-                            </span>
-                          </div>
-                          <div className="overflow-x-auto">
-                            <table className="w-full">
-                              <thead>
-                                <tr className="border-b border-gray-100 bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
-                                  <th className="px-5 py-3">Employee</th>
-                                  <th className="px-5 py-3">Claim #</th>
-                                  <th className="px-5 py-3">Type</th>
-                                  <th className="px-5 py-3">Title</th>
-                                  <th className="px-5 py-3">Amount</th>
-                                  <th className="px-5 py-3">Status</th>
-                                  <th className="px-5 py-3">Date</th>
-                                  <th className="px-5 py-3"></th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-50">
-                                {curMonthClaims.map((claim: any) => (
-                                  <tr key={claim.id} onMouseEnter={() => prefetchClaim(claim.id)} className="hover:bg-gray-50">
-                                    <td className="px-5 py-3 text-sm font-medium text-gray-800">{claim.employee?.firstName} {claim.employee?.lastName}</td>
-                                    <td className="px-5 py-3 text-xs font-mono text-gray-400">{claim.claimNumber}</td>
-                                    <td className="px-5 py-3 text-xs text-gray-500">{claim.claimType}</td>
-                                    <td className="px-5 py-3 text-sm text-gray-800 max-w-xs truncate">{claim.title}</td>
-                                    <td className="px-5 py-3 text-sm font-semibold">{formatCurrency(claim.claimedAmount)}</td>
-                                    <td className="px-5 py-3"><Badge status={claim.status} /></td>
-                                    <td className="px-5 py-3 text-xs text-gray-400">{formatDate(claim.createdAt)}</td>
-                                    <td className="px-5 py-3">
-                                      <button onClick={() => openClaim(claim.id)} className="text-xs font-medium hover:underline" style={{ color: "#2C3E7C" }}>View</button>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
+              // Options come from the data itself, so a filter can never select an empty set.
+              const typeOptions   = [...new Set(source.map((c: any) => c.claimType).filter(Boolean))].sort() as string[];
+              const statusOptions = (["DRAFT", "SUBMITTED", "APPROVED", "REJECTED", "PAID", "CANCELLATION_PENDING", "CANCELLED"] as const)
+                .filter((st) => source.some((c: any) => c.status === st));
+
+              const groups = new Map<string, any[]>();
+              for (const claim of filtered) {
+                const key = claimMonthKey(claim);
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key)!.push(claim);
+              }
+              const sortedKeys     = [...groups.keys()].sort((a, b) => b.localeCompare(a));
+              const curMonthClaims = groups.get(curKey) ?? [];
+              const pastKeys       = sortedKeys.filter((k) => k !== curKey);
+
+              return (
+                <div>
+                  {/* Filter bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 border-b border-gray-100">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setShowAllFilters((o) => !o)}
+                        className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                          showAllFilters
+                            ? "border-[#2C3E7C] text-[#2C3E7C] bg-[#EEF1F8]"
+                            : "border-gray-200 text-gray-600 hover:bg-gray-50"
+                        }`}
+                      >
+                        <SlidersHorizontal size={14} />
+                        Filters
+                        {activeCount > 0 && (
+                          <span className="inline-flex h-4 min-w-[16px] px-1 items-center justify-center rounded-full text-[10px] font-bold text-white" style={{ backgroundColor: "#F2994A" }}>
+                            {activeCount}
+                          </span>
+                        )}
+                      </button>
+                      {isFiltering && (
+                        <button
+                          onClick={() => setAllFilters(EMPTY_CLAIM_FILTERS)}
+                          className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-800"
+                        >
+                          <X size={12} /> Clear all
+                        </button>
                       )}
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      Showing <span className="font-semibold text-gray-800">{filtered.length}</span> of {source.length} claim{source.length !== 1 ? "s" : ""}
+                    </p>
+                  </div>
+
+                  {!source.length ? (
+                    <p className="px-6 py-10 text-sm text-center text-gray-400">No claims found.</p>
+                  ) : (
+                    <>
+                      <div>
+                        <div className="px-6 py-2.5 border-b flex items-center justify-between gap-3" style={{ backgroundColor: "#EEF1F8" }}>
+                          <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#2C3E7C" }}>
+                            {monthLabel(curKey)} · Current
+                          </span>
+                          <span className="text-sm font-semibold text-right" style={{ color: "#2C3E7C" }}>
+                            {formatCurrency(curMonthClaims.reduce((s: number, c: any) => s + c.claimedAmount, 0))} claimed
+                          </span>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full min-w-[900px]">
+                            <thead>
+                              <tr className="border-b border-gray-100 bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
+                                <th className="px-5 py-3">Employee</th>
+                                <th className="px-5 py-3">Claim #</th>
+                                <th className="px-5 py-3">Type</th>
+                                <th className="px-5 py-3">Title</th>
+                                <th className="px-5 py-3">Amount</th>
+                                <th className="px-5 py-3">Status</th>
+                                <th className="px-5 py-3">Date</th>
+                                <th className="px-5 py-3"></th>
+                              </tr>
+                              {showAllFilters && (
+                                <ClaimFilterRow
+                                  filters={allFilters}
+                                  onChange={patchFilters}
+                                  typeOptions={typeOptions}
+                                  statusOptions={statusOptions}
+                                />
+                              )}
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                              {curMonthClaims.length === 0 ? (
+                                <tr>
+                                  <td colSpan={8} className="px-5 py-8 text-center text-sm text-gray-400">
+                                    {isFiltering ? "No claims this month match these filters." : "No claims this month."}
+                                  </td>
+                                </tr>
+                              ) : curMonthClaims.map((claim: any) => (
+                                <tr key={claim.id} onMouseEnter={() => prefetchClaim(claim.id)} className="hover:bg-gray-50">
+                                  <td className="px-5 py-3 text-sm font-medium text-gray-800">{claim.employee?.firstName} {claim.employee?.lastName}</td>
+                                  <td className="px-5 py-3 text-xs font-mono text-gray-400">{claim.claimNumber}</td>
+                                  <td className="px-5 py-3 text-xs text-gray-500">{claim.claimType}</td>
+                                  <td className="px-5 py-3 text-sm text-gray-800 max-w-xs truncate">{claim.title}</td>
+                                  <td className="px-5 py-3 text-sm font-semibold">{formatCurrency(claim.claimedAmount)}</td>
+                                  <td className="px-5 py-3"><Badge status={claim.status} /></td>
+                                  <td className="px-5 py-3 text-xs text-gray-400">{formatDate(claim.createdAt)}</td>
+                                  <td className="px-5 py-3">
+                                    <button onClick={() => openClaim(claim.id)} className="text-xs font-medium hover:underline" style={{ color: "#2C3E7C" }}>View</button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
 
                       {pastKeys.map((key) => (
                         <MonthGroup
@@ -1850,13 +2091,20 @@ export default function ClaimsPage() {
                           onOpen={openClaim}
                           prefetch={prefetchClaim}
                           showEmployee
+                          defaultOpen={isFiltering}
                         />
                       ))}
+
+                      {isFiltering && filtered.length === 0 && (
+                        <p className="px-6 py-10 text-sm text-center text-gray-400">
+                          No claims match these filters.
+                        </p>
+                      )}
                     </>
-                  );
-                })()}
-              </div>
-            )}
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
