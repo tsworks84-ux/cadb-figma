@@ -105,7 +105,7 @@ export async function academicsRoutes(fastify: FastifyInstance) {
         select: {
           id: true, status: true,
           schoolId: true, gradeId: true, courseId: true, academicYear: true,
-          totalFee: true, paidFee: true,
+          totalFee: true, paidFee: true, refundAmount: true,
           studentBatches: { select: { batchId: true } },
         },
       }),
@@ -143,6 +143,11 @@ export async function academicsRoutes(fastify: FastifyInstance) {
     const batchMap  = Object.fromEntries(batches.map((b) => [b.id, b]));
     const courseMap = Object.fromEntries(courses.map((c) => [c.id, c]));
 
+    // Fee actually retained: a refund hands collected money back, so it never
+    // counts towards collected revenue.
+    const netPaid = (st: { paidFee: number | null; refundAmount: number | null }) =>
+      Math.max(0, (st.paidFee ?? 0) - (st.refundAmount ?? 0));
+
     // Student + revenue grouping helper
     // Students with null keys (no grade/school/etc. assigned) are placed under "Not Assigned" — always last in list
     function groupStudents(keyFn: (s: typeof students[0]) => string | null, labelFn: (k: string) => string) {
@@ -155,7 +160,7 @@ export async function academicsRoutes(fastify: FastifyInstance) {
         if (!m[key]) m[key] = { label, count: 0, revenue: 0, collected: 0 };
         m[key].count++;
         m[key].revenue   += st.totalFee ?? 0;
-        m[key].collected += st.paidFee  ?? 0;
+        m[key].collected += netPaid(st);
       }
       return Object.values(m)
         .filter((g) => g.label)
@@ -179,7 +184,7 @@ export async function academicsRoutes(fastify: FastifyInstance) {
           if (!m[key]) m[key] = { label, count: 0, revenue: 0, collected: 0 };
           m[key].count++;
           m[key].revenue   += st.totalFee ?? 0;
-          m[key].collected += st.paidFee  ?? 0;
+          m[key].collected += netPaid(st);
         }
       }
       return Object.values(m).filter((g) => g.label).sort((a, b) => b.count - a.count);
@@ -193,7 +198,8 @@ export async function academicsRoutes(fastify: FastifyInstance) {
 
     // Revenue totals
     const totalRevenue     = students.reduce((s, st) => s + (st.totalFee ?? 0), 0);
-    const collectedRevenue = students.reduce((s, st) => s + (st.paidFee  ?? 0), 0);
+    const collectedRevenue = students.reduce((s, st) => s + netPaid(st), 0);
+    const refundedRevenue  = students.reduce((s, st) => s + (st.refundAmount ?? 0), 0);
 
     // Avg batch strength (only batches with at least one student)
     const activeBatches = batches.filter((b) => b._count.studentBatches > 0);
@@ -225,6 +231,7 @@ export async function academicsRoutes(fastify: FastifyInstance) {
         revenue: {
           total:     totalRevenue,
           collected: collectedRevenue,
+          refunded:  refundedRevenue,
           due:       totalRevenue - collectedRevenue,
           byGrade:   byGrade.map((g) => ({ label: g.label, total: g.revenue, collected: g.collected })),
           bySchool:  bySchool.map((g) => ({ label: g.label, total: g.revenue, collected: g.collected })),

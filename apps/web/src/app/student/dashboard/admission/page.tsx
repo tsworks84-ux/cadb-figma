@@ -3,7 +3,7 @@
 import { useStudentAuthStore } from "@/store/studentAuth";
 import { useQuery } from "@tanstack/react-query";
 import { studentApi } from "@/lib/studentApi";
-import { ClipboardList, IndianRupee, CheckCircle2, Clock, AlertCircle, Banknote, GraduationCap } from "lucide-react";
+import { ClipboardList, IndianRupee, CheckCircle2, Clock, AlertCircle, Banknote, GraduationCap, Undo2 } from "lucide-react";
 
 function SectionCard({ title, icon: Icon, children }: { title: string; icon: any; children: React.ReactNode }) {
   return (
@@ -70,6 +70,8 @@ export default function StudentAdmissionPage() {
   const instalments: any[] = s?.instalments ?? [];
   const paymentLogs: any[] = s?.paymentLogs ?? [];
 
+  const refunds: any[] = s?.refunds ?? [];
+
   const totalFee = s?.totalFee ?? 0;
   const paidFee  = s?.paidFee  ?? 0;
   const discount = s?.discountType === "AMOUNT"
@@ -77,8 +79,11 @@ export default function StudentAdmissionPage() {
     : s?.discountType === "PERCENTAGE"
       ? Math.round(totalFee * (s?.discountAmount ?? 0) / 100)
       : 0;
+  // Refunded fee has been handed back, so it comes off what has net been paid.
+  const refunded   = s?.refundAmount ?? 0;
+  const netPaid    = Math.max(0, paidFee - refunded);
   const netFee     = Math.max(0, totalFee - discount);
-  const balanceDue = Math.max(0, netFee - paidFee);
+  const balanceDue = Math.max(0, netFee - netPaid);
 
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-4">
@@ -125,10 +130,13 @@ export default function StudentAdmissionPage() {
       {/* Fee Summary */}
       {totalFee > 0 && (
         <>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className={`grid grid-cols-2 gap-3 ${refunded > 0 ? "md:grid-cols-5" : "md:grid-cols-4"}`}>
             {[
               { label: "Total Fee",   value: fmtCurrency(totalFee),   cls: "border-sky-100  bg-sky-50   text-sky-700"   },
-              { label: "Paid",        value: fmtCurrency(paidFee),    cls: "border-green-100 bg-green-50 text-green-700" },
+              { label: refunded > 0 ? "Paid (net)" : "Paid", value: fmtCurrency(netPaid), cls: "border-green-100 bg-green-50 text-green-700" },
+              ...(refunded > 0
+                ? [{ label: "Refunded", value: fmtCurrency(refunded), cls: "border-rose-100 bg-rose-50 text-rose-700" }]
+                : []),
               { label: "Discount",    value: fmtCurrency(discount),   cls: "border-amber-100 bg-amber-50 text-amber-700" },
               { label: "Balance Due", value: fmtCurrency(balanceDue), cls: balanceDue > 0 ? "border-red-100 bg-red-50 text-red-700" : "border-green-100 bg-green-50 text-green-700" },
             ].map(({ label, value, cls }) => (
@@ -171,6 +179,30 @@ export default function StudentAdmissionPage() {
                     </div>
                   );
                 })}
+              </div>
+            </SectionCard>
+          )}
+
+          {/* Refunds */}
+          {refunds.length > 0 && (
+            <SectionCard title="Refunds" icon={Undo2}>
+              <div className="divide-y divide-gray-50">
+                {refunds.map((r: any) => (
+                  <div key={r.id} className="py-3.5 flex items-center gap-3">
+                    <div className="h-8 w-8 rounded-full bg-rose-50 border border-rose-100 flex items-center justify-center shrink-0">
+                      <Undo2 className="h-4 w-4 text-rose-500" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-800">− {fmtCurrency(r.amount)}</p>
+                      <p className="text-xs text-gray-400">
+                        {r.refundMode && `${r.refundMode} · `}
+                        {r.referenceNumber && `Ref: ${r.referenceNumber} · `}
+                        {fmt(r.refundDate ?? r.createdAt)}
+                        {r.reason ? ` · ${r.reason}` : ""}
+                      </p>
+                    </div>
+                  </div>
+                ))}
               </div>
             </SectionCard>
           )}

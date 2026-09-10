@@ -46,7 +46,7 @@ export async function studentPortalRoutes(fastify: FastifyInstance) {
         motherName: true, motherPhone: true, motherEmail: true, motherOccupation: true,
         communicationContact: true, communicationContactName: true, communicationContactPhone: true,
         admissionNumber: true, admissionDate: true, academicYear: true,
-        totalFee: true, paidFee: true, discountType: true, discountAmount: true,
+        totalFee: true, paidFee: true, refundAmount: true, discountType: true, discountAmount: true,
         status: true, mustChangePassword: true,
         studentBatches: {
           select: {
@@ -70,6 +70,10 @@ export async function studentPortalRoutes(fastify: FastifyInstance) {
         },
         paymentLogs: {
           select: { id: true, amount: true, paymentMode: true, paymentDate: true, receiptNumber: true, note: true, createdAt: true },
+          orderBy: { createdAt: "desc" },
+        },
+        refunds: {
+          select: { id: true, amount: true, refundMode: true, refundDate: true, referenceNumber: true, reason: true, createdAt: true },
           orderBy: { createdAt: "desc" },
         },
       },

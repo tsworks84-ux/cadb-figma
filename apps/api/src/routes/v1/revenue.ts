@@ -77,6 +77,7 @@ export async function revenueRoutes(fastify: FastifyInstance) {
           schoolId: true,
           totalFee: true,
           paidFee: true,
+          refundAmount: true,
           discountAmount: true,
           discountType: true,
           studentBatches: {
@@ -103,8 +104,12 @@ export async function revenueRoutes(fastify: FastifyInstance) {
       const totalFee      = st.totalFee      ?? 0;
       const discount      = st.discountAmount ?? 0;
       const paidFee       = st.paidFee       ?? 0;
+      // A refund gives collected money back, so it comes off what the student
+      // has net paid and pushes the same amount back into the balance due.
+      const refundAmount  = st.refundAmount  ?? 0;
+      const netPaid       = Math.max(0, paidFee - refundAmount);
       const netReceivable = Math.max(0, totalFee - discount);
-      const balanceDue    = Math.max(0, netReceivable - paidFee);
+      const balanceDue    = Math.max(0, netReceivable - netPaid);
       return {
         id: st.id,
         studentCode: st.studentCode,
@@ -120,6 +125,8 @@ export async function revenueRoutes(fastify: FastifyInstance) {
         discountAmount: discount,
         netReceivable,
         paidFee,
+        refundAmount,
+        netPaid,
         balanceDue,
       };
     });
@@ -131,23 +138,25 @@ export async function revenueRoutes(fastify: FastifyInstance) {
         totalFee:       acc.totalFee       + st.totalFee,
         totalDiscount:  acc.totalDiscount  + st.discountAmount,
         netReceivable:  acc.netReceivable  + st.netReceivable,
-        totalReceived:  acc.totalReceived  + st.paidFee,
+        totalReceived:  acc.totalReceived  + st.netPaid,
+        totalRefunded:  acc.totalRefunded  + st.refundAmount,
         totalDue:       acc.totalDue       + st.balanceDue,
       }),
-      { studentCount: 0, totalFee: 0, totalDiscount: 0, netReceivable: 0, totalReceived: 0, totalDue: 0 },
+      { studentCount: 0, totalFee: 0, totalDiscount: 0, netReceivable: 0, totalReceived: 0, totalRefunded: 0, totalDue: 0 },
     );
 
     // Group by batch (student counted in each batch they belong to)
-    const batchAgg: Record<string, { id: string; label: string; studentCount: number; totalFee: number; totalDiscount: number; netReceivable: number; totalReceived: number; totalDue: number }> = {};
+    const batchAgg: Record<string, { id: string; label: string; studentCount: number; totalFee: number; totalDiscount: number; netReceivable: number; totalReceived: number; totalRefunded: number; totalDue: number }> = {};
     for (const st of studentRows) {
       const entries = st.batches.length > 0 ? st.batches : [{ id: "__none__", name: "No Batch" }];
       for (const b of entries) {
-        if (!batchAgg[b.id]) batchAgg[b.id] = { id: b.id, label: b.name, studentCount: 0, totalFee: 0, totalDiscount: 0, netReceivable: 0, totalReceived: 0, totalDue: 0 };
+        if (!batchAgg[b.id]) batchAgg[b.id] = { id: b.id, label: b.name, studentCount: 0, totalFee: 0, totalDiscount: 0, netReceivable: 0, totalReceived: 0, totalRefunded: 0, totalDue: 0 };
         batchAgg[b.id].studentCount++;
         batchAgg[b.id].totalFee       += st.totalFee;
         batchAgg[b.id].totalDiscount  += st.discountAmount;
         batchAgg[b.id].netReceivable  += st.netReceivable;
-        batchAgg[b.id].totalReceived  += st.paidFee;
+        batchAgg[b.id].totalReceived  += st.netPaid;
+        batchAgg[b.id].totalRefunded  += st.refundAmount;
         batchAgg[b.id].totalDue       += st.balanceDue;
       }
     }
@@ -156,12 +165,13 @@ export async function revenueRoutes(fastify: FastifyInstance) {
     const schoolAgg: Record<string, any> = {};
     for (const st of studentRows) {
       const key = st.school;
-      if (!schoolAgg[key]) schoolAgg[key] = { label: key, studentCount: 0, totalFee: 0, totalDiscount: 0, netReceivable: 0, totalReceived: 0, totalDue: 0 };
+      if (!schoolAgg[key]) schoolAgg[key] = { label: key, studentCount: 0, totalFee: 0, totalDiscount: 0, netReceivable: 0, totalReceived: 0, totalRefunded: 0, totalDue: 0 };
       schoolAgg[key].studentCount++;
       schoolAgg[key].totalFee       += st.totalFee;
       schoolAgg[key].totalDiscount  += st.discountAmount;
       schoolAgg[key].netReceivable  += st.netReceivable;
-      schoolAgg[key].totalReceived  += st.paidFee;
+      schoolAgg[key].totalReceived  += st.netPaid;
+      schoolAgg[key].totalRefunded  += st.refundAmount;
       schoolAgg[key].totalDue       += st.balanceDue;
     }
 
@@ -169,12 +179,13 @@ export async function revenueRoutes(fastify: FastifyInstance) {
     const yearAgg: Record<string, any> = {};
     for (const st of studentRows) {
       const key = st.academicYear;
-      if (!yearAgg[key]) yearAgg[key] = { label: key, studentCount: 0, totalFee: 0, totalDiscount: 0, netReceivable: 0, totalReceived: 0, totalDue: 0 };
+      if (!yearAgg[key]) yearAgg[key] = { label: key, studentCount: 0, totalFee: 0, totalDiscount: 0, netReceivable: 0, totalReceived: 0, totalRefunded: 0, totalDue: 0 };
       yearAgg[key].studentCount++;
       yearAgg[key].totalFee       += st.totalFee;
       yearAgg[key].totalDiscount  += st.discountAmount;
       yearAgg[key].netReceivable  += st.netReceivable;
-      yearAgg[key].totalReceived  += st.paidFee;
+      yearAgg[key].totalReceived  += st.netPaid;
+      yearAgg[key].totalRefunded  += st.refundAmount;
       yearAgg[key].totalDue       += st.balanceDue;
     }
 

@@ -16,6 +16,7 @@ import {
   BookOpen, Calendar, CreditCard, Building2, MapPin, Hash,
   ChevronDown, ChevronUp, CheckCircle2, Clock, AlertCircle, Plus,
   Users2, Banknote, Trash2, IndianRupee, Info, AlertTriangle, Pin, Loader2, Pencil, Paperclip,
+  Undo2,
 } from "lucide-react";
 import { formatDate, fullName } from "@/lib/utils";
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -456,12 +457,21 @@ const emptyPayForm = () => ({
   receiptNumber: "", note: "", instalmentId: "",
 });
 
+const REFUND_MODES = ["Cash", "UPI", "Bank Transfer", "Cheque", "DD", "Card", "Online"];
+
+const emptyRefundForm = () => ({
+  amount: "", refundMode: "", refundDate: new Date().toISOString().split("T")[0],
+  referenceNumber: "", reason: "",
+});
+
 function AdmissionTab({ student, canEdit, onRefetch }: { student: any; canEdit: boolean; onRefetch: () => void }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [showPayForm, setShowPayForm] = useState(false);
   const [payForm, setPayForm] = useState(emptyPayForm());
   const [quickPayInstalmentId, setQuickPayInstalmentId] = useState<string | null>(null);
+  const [showRefundForm, setShowRefundForm] = useState(false);
+  const [refundForm, setRefundForm] = useState(emptyRefundForm());
 
   // Instalment editing
   const [editingInstalments, setEditingInstalments] = useState(false);
@@ -510,8 +520,21 @@ function AdmissionTab({ student, canEdit, onRefetch }: { student: any; canEdit: 
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
   });
 
+  const addRefundMut = useMutation({
+    mutationFn: (data: any) => api.post(`/api/v1/academics/students/${student.id}/refunds`, data),
+    onSuccess: () => { toast.success("Refund recorded"); setShowRefundForm(false); setRefundForm(emptyRefundForm()); refetchStudent(); },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to record refund"),
+  });
+
+  const deleteRefundMut = useMutation({
+    mutationFn: (refundId: string) => api.delete(`/api/v1/academics/students/${student.id}/refunds/${refundId}`),
+    onSuccess: () => { toast.success("Refund removed"); refetchStudent(); },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed"),
+  });
+
   const set = (field: string, val: string) => setForm((p) => ({ ...p, [field]: val }));
   const setPay = (field: string, val: string) => setPayForm((p) => ({ ...p, [field]: val }));
+  const setRefund = (field: string, val: string) => setRefundForm((p) => ({ ...p, [field]: val }));
 
   const startEditInstalments = () => {
     const initial: Record<string, { amount: string; dueDate: string; label: string }> = {};
@@ -600,9 +623,32 @@ function AdmissionTab({ student, canEdit, onRefetch }: { student: any; canEdit: 
   const paidFee    = student.paidFee ?? 0;
   const totalFee   = student.totalFee ?? 0;
   const discount   = student.discountAmount ?? 0;
-  const balanceDue = Math.max(0, totalFee - discount - paidFee);
+  // A refund hands collected money back, so it lowers what the student has net
+  // paid and puts the same amount back on the balance due.
+  const refunded   = student.refundAmount ?? 0;
+  const netPaid    = Math.max(0, paidFee - refunded);
+  const refundable = Math.max(0, paidFee - refunded);
+  const balanceDue = Math.max(0, totalFee - discount - netPaid);
   const paymentLogs: any[] = student.paymentLogs ?? [];
+  const refunds: any[]     = student.refunds ?? [];
   const instalments: any[] = student.instalments ?? [];
+
+  const handleAddRefund = () => {
+    const amt = parseFloat(refundForm.amount || "0");
+    if (!refundForm.amount || amt <= 0) { toast.error("Enter a valid refund amount"); return; }
+    if (amt > refundable) { toast.error(`At most ${fmtCurrency(refundable)} can be refunded`); return; }
+    if (!refundForm.refundMode || !refundForm.refundDate) {
+      toast.error("Refund Mode and Date are required");
+      return;
+    }
+    addRefundMut.mutate({
+      amount:          amt,
+      refundMode:      refundForm.refundMode      || undefined,
+      refundDate:      refundForm.refundDate      || undefined,
+      referenceNumber: refundForm.referenceNumber || undefined,
+      reason:          refundForm.reason          || undefined,
+    });
+  };
 
   const inputCls = "w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none bg-white text-gray-700";
 
@@ -655,10 +701,13 @@ function AdmissionTab({ student, canEdit, onRefetch }: { student: any; canEdit: 
       </SectionCard>
 
       {/* Fee Summary */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className={`grid grid-cols-2 gap-3 ${refunded > 0 ? "md:grid-cols-5" : "md:grid-cols-4"}`}>
         {[
           { label: "Total Fee",   value: fmtCurrency(totalFee),   color: "border-blue-100  bg-blue-50  text-blue-700"  },
-          { label: "Paid",        value: fmtCurrency(paidFee),    color: "border-green-100 bg-green-50 text-green-700" },
+          { label: refunded > 0 ? "Paid (net)" : "Paid", value: fmtCurrency(netPaid), color: "border-green-100 bg-green-50 text-green-700" },
+          ...(refunded > 0
+            ? [{ label: "Refunded", value: fmtCurrency(refunded), color: "border-rose-100 bg-rose-50 text-rose-700" }]
+            : []),
           { label: "Discount",    value: fmtCurrency(discount),   color: "border-amber-100 bg-amber-50 text-amber-700" },
           { label: "Balance Due", value: fmtCurrency(balanceDue), color: balanceDue > 0 ? "border-red-100 bg-red-50 text-red-700" : "border-green-100 bg-green-50 text-green-700" },
         ].map(({ label, value, color }) => (
@@ -963,6 +1012,118 @@ function AdmissionTab({ student, canEdit, onRefetch }: { student: any; canEdit: 
                 </div>
                 {canEdit && (
                   <button onClick={() => { if (confirm("Remove this payment entry?")) deletePaymentMut.mutate(log.id); }}
+                    className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors shrink-0">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
+
+      {/* Refunds — money handed back, usually after a cancelled admission */}
+      <SectionCard title="Refunds" icon={Undo2} action={
+        canEdit ? (
+          <button onClick={() => { setRefundForm(emptyRefundForm()); setShowRefundForm(true); }}
+            disabled={refundable <= 0}
+            title={refundable <= 0 ? "Nothing has been paid that could be refunded" : undefined}
+            className="flex items-center gap-1.5 text-xs font-medium text-rose-600 hover:text-rose-700 px-3 py-1.5 rounded-lg hover:bg-rose-50 transition-colors disabled:opacity-40 disabled:hover:bg-transparent">
+            <Plus className="h-3.5 w-3.5" /> Add Refund
+          </button>
+        ) : null
+      }>
+
+        {/* Add Refund inline form */}
+        {showRefundForm && (
+          <div className="mb-5 rounded-xl border border-rose-100 bg-rose-50 p-4">
+            <p className="text-xs font-bold text-rose-600 uppercase tracking-wider mb-1">New Refund Entry</p>
+            <p className="text-xs text-rose-500/80 mb-3">
+              Up to {fmtCurrency(refundable)} can be refunded — the balance of what this student has paid.
+            </p>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 mb-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Refund Amount (₹) *</label>
+                <input type="number" min="0" max={refundable} placeholder="0.00" value={refundForm.amount}
+                  onChange={(e) => setRefund("amount", e.target.value)}
+                  className={`${inputCls}${parseFloat(refundForm.amount || "0") > refundable ? " border-amber-300" : ""}`} />
+                {parseFloat(refundForm.amount || "0") > refundable && (
+                  <p className="text-xs text-amber-600 mt-1">Exceeds {fmtCurrency(refundable)}</p>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  Refund Mode <span className="text-amber-500">*</span>
+                </label>
+                <select value={refundForm.refundMode} onChange={(e) => setRefund("refundMode", e.target.value)}
+                  className={`${inputCls}${!refundForm.refundMode ? " border-amber-300" : ""}`}>
+                  <option value="">Select mode</option>
+                  {REFUND_MODES.map(m => <option key={m}>{m}</option>)}
+                </select>
+                {!refundForm.refundMode && <p className="text-xs text-amber-600 mt-1">Required</p>}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  Refund Date <span className="text-amber-500">*</span>
+                </label>
+                <input type="date" max="2099-12-31" min="1900-01-01" value={refundForm.refundDate}
+                  onChange={(e) => setRefund("refundDate", e.target.value)}
+                  className={`${inputCls}${!refundForm.refundDate ? " border-amber-300" : ""}`} />
+                {!refundForm.refundDate && <p className="text-xs text-amber-600 mt-1">Required</p>}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Reference No.</label>
+                <input type="text" placeholder="Optional" value={refundForm.referenceNumber}
+                  onChange={(e) => setRefund("referenceNumber", e.target.value)} className={inputCls} />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Reason</label>
+                <input type="text" placeholder="e.g. Admission cancelled" value={refundForm.reason}
+                  onChange={(e) => setRefund("reason", e.target.value)} className={inputCls} />
+              </div>
+            </div>
+            <div className="flex items-center gap-2 justify-end">
+              <button onClick={() => { setShowRefundForm(false); setRefundForm(emptyRefundForm()); }}
+                className="text-xs font-medium text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg hover:bg-white transition-colors border border-transparent hover:border-gray-200">
+                Cancel
+              </button>
+              <button onClick={handleAddRefund} disabled={addRefundMut.isPending}
+                className="flex items-center gap-1.5 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 px-4 py-1.5 rounded-lg transition-colors disabled:opacity-50">
+                <Save className="h-3.5 w-3.5" /> {addRefundMut.isPending ? "Saving…" : "Save Refund"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Refund list */}
+        {refunds.length === 0 && !showRefundForm ? (
+          <div className="text-center py-8">
+            <Undo2 className="h-8 w-8 text-gray-200 mx-auto mb-2" />
+            <p className="text-sm text-gray-400">No refunds recorded.</p>
+            {canEdit && refundable > 0 && <p className="text-xs text-gray-400 mt-1">Use &ldquo;Add Refund&rdquo; when fee is paid back to the student.</p>}
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-50">
+            {refunds.map((r: any) => (
+              <div key={r.id} className="flex items-start justify-between gap-3 py-3">
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="h-8 w-8 rounded-full bg-rose-50 border border-rose-100 flex items-center justify-center shrink-0 mt-0.5">
+                    <Undo2 className="h-3.5 w-3.5 text-rose-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-bold text-rose-700">− {fmtCurrency(r.amount)}</span>
+                      {r.refundMode && <span className="text-xs bg-gray-100 text-gray-600 rounded-full px-2 py-0.5">{r.refundMode}</span>}
+                    </div>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {r.refundDate ? fmt(r.refundDate) : fmt(r.createdAt)}
+                      {r.referenceNumber && <> · Ref: {r.referenceNumber}</>}
+                      {r.reason && <> · {r.reason}</>}
+                    </p>
+                  </div>
+                </div>
+                {canEdit && (
+                  <button onClick={() => { if (confirm("Remove this refund entry?")) deleteRefundMut.mutate(r.id); }}
                     className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors shrink-0">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>

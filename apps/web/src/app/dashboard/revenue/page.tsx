@@ -8,7 +8,7 @@ import { useAuthStore } from "@/store/auth";
 import Link from "next/link";
 import {
   IndianRupee, TrendingUp, TrendingDown, Tag, Users,
-  ChevronRight, Search, X, Loader2, Wallet,
+  ChevronRight, Search, X, Loader2, Wallet, Undo2,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -18,7 +18,9 @@ interface RevenueSummary {
   totalFee: number;
   totalDiscount: number;
   netReceivable: number;
+  // Net of refunds — money handed back is not money collected.
   totalReceived: number;
+  totalRefunded: number;
   totalDue: number;
 }
 
@@ -30,6 +32,7 @@ interface RevenueGroup {
   totalDiscount: number;
   netReceivable: number;
   totalReceived: number;
+  totalRefunded: number;
   totalDue: number;
 }
 
@@ -45,6 +48,8 @@ interface StudentRow {
   discountAmount: number;
   netReceivable: number;
   paidFee: number;
+  refundAmount: number;
+  netPaid: number;
   balanceDue: number;
 }
 
@@ -114,7 +119,7 @@ function GroupTable({ rows }: { rows: RevenueGroup[] }) {
   const maxReceivable = Math.max(...rows.map((r) => r.netReceivable), 1);
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm min-w-[700px]">
+      <table className="w-full text-sm min-w-[800px]">
         <thead>
           <tr className="border-b border-gray-100">
             <th className="text-left py-3 px-4 text-xs font-semibold text-gray-400 uppercase tracking-wide">Name</th>
@@ -123,6 +128,7 @@ function GroupTable({ rows }: { rows: RevenueGroup[] }) {
             <th className="text-right py-3 px-4 text-xs font-semibold text-gray-400 uppercase tracking-wide">Discount</th>
             <th className="text-right py-3 px-4 text-xs font-semibold text-gray-400 uppercase tracking-wide">Net Receivable</th>
             <th className="text-right py-3 px-4 text-xs font-semibold text-gray-400 uppercase tracking-wide">Received</th>
+            <th className="text-right py-3 px-4 text-xs font-semibold text-gray-400 uppercase tracking-wide">Refunded</th>
             <th className="text-right py-3 px-4 text-xs font-semibold text-gray-400 uppercase tracking-wide">Balance Due</th>
             <th className="text-right py-3 px-4 text-xs font-semibold text-gray-400 uppercase tracking-wide w-32">Collection</th>
           </tr>
@@ -142,6 +148,9 @@ function GroupTable({ rows }: { rows: RevenueGroup[] }) {
                 <td className="py-3.5 px-4 text-right text-amber-600">{formatCurrency(row.totalDiscount)}</td>
                 <td className="py-3.5 px-4 text-right font-semibold text-gray-800">{formatCurrency(row.netReceivable)}</td>
                 <td className="py-3.5 px-4 text-right text-green-700 font-semibold">{formatCurrency(row.totalReceived)}</td>
+                <td className="py-3.5 px-4 text-right text-rose-600">
+                  {row.totalRefunded > 0 ? formatCurrency(row.totalRefunded) : <span className="text-gray-300">—</span>}
+                </td>
                 <td className="py-3.5 px-4 text-right font-semibold" style={{ color: row.totalDue > 0 ? "#dc2626" : "#16a34a" }}>
                   {formatCurrency(row.totalDue)}
                 </td>
@@ -190,7 +199,7 @@ function StudentTable({ students, search }: { students: StudentRow[]; search: st
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm min-w-[900px]">
+      <table className="w-full text-sm min-w-[1000px]">
         <thead>
           <tr className="border-b border-gray-100">
             <th className="text-left py-3 px-4 text-xs font-semibold text-gray-400 uppercase tracking-wide">Student</th>
@@ -201,6 +210,7 @@ function StudentTable({ students, search }: { students: StudentRow[]; search: st
             <th className="text-right py-3 px-4 text-xs font-semibold text-gray-400 uppercase tracking-wide hidden md:table-cell">Discount</th>
             <th className="text-right py-3 px-4 text-xs font-semibold text-gray-400 uppercase tracking-wide">Net Receivable</th>
             <th className="text-right py-3 px-4 text-xs font-semibold text-gray-400 uppercase tracking-wide">Received</th>
+            <th className="text-right py-3 px-4 text-xs font-semibold text-gray-400 uppercase tracking-wide hidden md:table-cell">Refunded</th>
             <th className="text-right py-3 px-4 text-xs font-semibold text-gray-400 uppercase tracking-wide">Balance Due</th>
           </tr>
         </thead>
@@ -237,7 +247,10 @@ function StudentTable({ students, search }: { students: StudentRow[]; search: st
               <td className="py-3 px-4 text-right text-gray-600">{formatCurrency(st.totalFee)}</td>
               <td className="py-3 px-4 text-right text-amber-600 hidden md:table-cell">{formatCurrency(st.discountAmount)}</td>
               <td className="py-3 px-4 text-right font-semibold text-gray-800">{formatCurrency(st.netReceivable)}</td>
-              <td className="py-3 px-4 text-right text-green-700 font-semibold">{formatCurrency(st.paidFee)}</td>
+              <td className="py-3 px-4 text-right text-green-700 font-semibold">{formatCurrency(st.netPaid)}</td>
+              <td className="py-3 px-4 text-right text-rose-600 hidden md:table-cell">
+                {st.refundAmount > 0 ? formatCurrency(st.refundAmount) : <span className="text-gray-300">—</span>}
+              </td>
               <td className="py-3 px-4 text-right font-semibold" style={{ color: st.balanceDue > 0 ? "#dc2626" : "#16a34a" }}>
                 {formatCurrency(st.balanceDue)}
               </td>
@@ -417,7 +430,7 @@ export default function RevenuePage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <SummaryCard
           icon={Wallet}
           label="Gross Fee"
@@ -438,9 +451,17 @@ export default function RevenuePage() {
           icon={TrendingUp}
           label="Fee Received"
           value={formatCurrency(summary?.totalReceived ?? 0)}
-          sub={`${pct(summary?.totalReceived ?? 0, summary?.netReceivable ?? 0)}% collection rate`}
+          sub={`Net of refunds · ${pct(summary?.totalReceived ?? 0, summary?.netReceivable ?? 0)}% collection rate`}
           accent="#16a34a"
           iconBg="bg-green-50"
+        />
+        <SummaryCard
+          icon={Undo2}
+          label="Fee Refunded"
+          value={formatCurrency(summary?.totalRefunded ?? 0)}
+          sub="Paid back to students"
+          accent="#e11d48"
+          iconBg="bg-rose-50"
         />
         <SummaryCard
           icon={TrendingDown}

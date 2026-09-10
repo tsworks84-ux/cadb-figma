@@ -1263,6 +1263,7 @@ model Student {
 
   totalFee           Float?
   paidFee            Float?
+  refundAmount       Float?    // total refunded back to the student, sum of StudentRefund rows
   discountType       String?   // "PERCENTAGE" | "AMOUNT"
   discountAmount     Float?
   paymentDate        DateTime?
@@ -1283,6 +1284,7 @@ model Student {
 
   instalments        StudentInstalment[]
   paymentLogs        StudentPaymentLog[]
+  refunds            StudentRefund[]
 
   status             StudentStatus @default(ACTIVE)
   isArchived         Boolean       @default(false)
@@ -1565,6 +1567,24 @@ model StudentPaymentLog {
 
   student       Student            @relation(fields: [studentId], references: [id], onDelete: Cascade)
   instalment    StudentInstalment? @relation(fields: [instalmentId], references: [id], onDelete: SetNull)
+
+  @@index([studentId])
+}
+
+// Money paid back to a student — typically after a cancelled admission. Each row
+// is one refund; their sum is mirrored on Student.refundAmount the way payment
+// logs are mirrored on Student.paidFee.
+model StudentRefund {
+  id            String    @id @default(cuid())
+  studentId     String
+  amount        Float
+  refundMode    String?
+  refundDate    DateTime?
+  referenceNumber String?
+  reason        String?
+  createdAt     DateTime  @default(now())
+
+  student       Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@index([studentId])
 }

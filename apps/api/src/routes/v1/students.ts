@@ -71,6 +71,7 @@ const createSchema = z.object({
   academicYear:     z.string().optional(),
   totalFee:         z.number().optional(),
   paidFee:          z.number().optional(),
+  refundAmount:     z.number().optional(),
   discountType:     z.enum(["PERCENTAGE", "AMOUNT"]).optional(),
   discountAmount:   z.number().optional(),
   paymentDate:      z.string().optional(),
@@ -204,7 +205,7 @@ export async function studentRoutes(fastify: FastifyInstance) {
         motherName: true, motherPhone: true, motherEmail: true, motherOccupation: true,
         communicationContact: true, communicationContactName: true, communicationContactPhone: true,
         admissionNumber: true, admissionDate: true, academicYear: true,
-        totalFee: true, paidFee: true, discountType: true, discountAmount: true,
+        totalFee: true, paidFee: true, refundAmount: true, discountType: true, discountAmount: true,
         paymentDate: true, paymentMode: true, receiptNumber: true, paymentNote: true,
         status: true, isArchived: true, mustChangePassword: true,
         createdAt: true, updatedAt: true,
@@ -226,6 +227,10 @@ export async function studentRoutes(fastify: FastifyInstance) {
         },
         paymentLogs: {
           select: { id: true, amount: true, paymentMode: true, paymentDate: true, receiptNumber: true, note: true, instalmentId: true, createdAt: true, instalment: { select: { instalmentNo: true, label: true } } },
+          orderBy: { createdAt: "desc" },
+        },
+        refunds: {
+          select: { id: true, amount: true, refundMode: true, refundDate: true, referenceNumber: true, reason: true, createdAt: true },
           orderBy: { createdAt: "desc" },
         },
       },
@@ -627,6 +632,16 @@ export async function studentRoutes(fastify: FastifyInstance) {
     const log = await prisma.studentPaymentLog.findUnique({ where: { id: logId, studentId: id } });
     if (!log) return reply.status(404).send({ success: false, error: "Log not found" });
 
+    // Removing a payment must not leave more refunded than was ever collected.
+    const cur0 = await prisma.student.findUnique({ where: { id }, select: { paidFee: true, refundAmount: true } });
+    const refunded = cur0?.refundAmount ?? 0;
+    if (refunded > 0 && (cur0?.paidFee ?? 0) - log.amount < refunded - 0.005) {
+      return reply.status(400).send({
+        success: false,
+        error: `This payment is covered by ₹${refunded.toFixed(2)} of recorded refunds. Remove the refund first.`,
+      });
+    }
+
     await prisma.$transaction(async (tx) => {
       const cur = await tx.student.findUnique({ where: { id }, select: { paidFee: true } });
       await tx.studentPaymentLog.delete({ where: { id: logId } });
@@ -637,6 +652,90 @@ export async function studentRoutes(fastify: FastifyInstance) {
           data: { isPaid: false, paidAt: null, paidAmount: null, paymentMode: null, note: null },
         });
       }
+    });
+
+    return reply.send({ success: true });
+  });
+
+  // ── REFUNDS ────────────────────────────────────────────────────────────────
+  // Money handed back to a student, usually after a cancelled admission. Each
+  // row is one refund; Student.refundAmount mirrors their sum the same way
+  // paidFee mirrors the payment logs, so the fee summary can be read off the
+  // student row alone.
+
+  const refundSchema = z.object({
+    amount:          z.number().positive(),
+    refundMode:      z.string().optional(),
+    refundDate:      z.string().optional(),
+    referenceNumber: z.string().optional(),
+    reason:          z.string().optional(),
+  });
+
+  fastify.get("/:id/refunds", async (request, reply) => {
+    const { id } = request.params as any;
+    const refunds = await prisma.studentRefund.findMany({
+      where: { studentId: id },
+      orderBy: { createdAt: "desc" },
+    });
+    return reply.send({ success: true, data: refunds });
+  });
+
+  fastify.post("/:id/refunds", async (request, reply) => {
+    const { id } = request.params as any;
+    const parsed = refundSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
+
+    const student = await prisma.student.findUnique({
+      where: { id },
+      select: { id: true, paidFee: true, refundAmount: true },
+    });
+    if (!student) return reply.status(404).send({ success: false, error: "Student not found" });
+
+    const { amount, refundDate, ...rest } = parsed.data;
+
+    // You can only refund money that was actually collected, so the running
+    // total of refunds can never exceed what the student has paid.
+    const alreadyRefunded = student.refundAmount ?? 0;
+    const refundable      = (student.paidFee ?? 0) - alreadyRefunded;
+    if (amount > refundable + 0.005) {
+      return reply.status(400).send({
+        success: false,
+        error: `Refund exceeds the refundable amount. At most ₹${refundable.toFixed(2)} can be refunded.`,
+      });
+    }
+
+    const refund = await prisma.$transaction(async (tx) => {
+      const created = await tx.studentRefund.create({
+        data: {
+          studentId:  id,
+          amount,
+          refundDate: refundDate ? new Date(refundDate) : new Date(),
+          ...rest,
+        },
+      });
+      // Explicit value, not an increment, so a NULL column does not swallow it.
+      await tx.student.update({
+        where: { id },
+        data: { refundAmount: alreadyRefunded + amount },
+      });
+      return created;
+    });
+
+    return reply.status(201).send({ success: true, data: refund });
+  });
+
+  fastify.delete("/:id/refunds/:refundId", async (request, reply) => {
+    const { id, refundId } = request.params as any;
+    const refund = await prisma.studentRefund.findUnique({ where: { id: refundId, studentId: id } });
+    if (!refund) return reply.status(404).send({ success: false, error: "Refund not found" });
+
+    await prisma.$transaction(async (tx) => {
+      const cur = await tx.student.findUnique({ where: { id }, select: { refundAmount: true } });
+      await tx.studentRefund.delete({ where: { id: refundId } });
+      await tx.student.update({
+        where: { id },
+        data: { refundAmount: Math.max(0, (cur?.refundAmount ?? 0) - refund.amount) },
+      });
     });
 
     return reply.send({ success: true });
