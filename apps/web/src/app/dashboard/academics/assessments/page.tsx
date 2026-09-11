@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
   Plus, Minus, X, Calendar, ChevronDown, Loader2,
-  Trash2, Clock, BookOpen, FileCheck2, Pencil, Archive, ArchiveRestore,
+  Trash2, Clock, BookOpen, FileCheck2, Pencil, Archive, ArchiveRestore, Check,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -15,6 +15,7 @@ import { invalidateAssessments } from "@/lib/assessmentCache";
 import { useRouter, useSearchParams } from "next/navigation";
 import { format, parseISO } from "date-fns";
 import { AssessmentStatsPanel } from "./StatsPanel";
+import { EXAM_PRESETS, PRESET_LABELS, resolveSubjectId, type ExamPreset } from "./examPresets";
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const D = { line: "#e6e8ef", muted: "#7c8598", ink: "#111827", nav2: "#28245f", bg: "#f4f6fa" };
@@ -202,8 +203,10 @@ function BatchMultiSelect({ batches, selected, onChange }: {
 }
 
 // ── Stepper ───────────────────────────────────────────────────────────────────
-function Stepper({ value, min, max, onChange, label }: {
+function Stepper({ value, min, max, onChange, label, unit }: {
   value: number; min: number; max: number; label: string; onChange: (n: number) => void;
+  /** [singular, plural] — read from the label before, and "Subjects per Paper" contains "paper". */
+  unit: [string, string];
 }) {
   return (
     <div>
@@ -220,7 +223,7 @@ function Stepper({ value, min, max, onChange, label }: {
         </button>
       </div>
       <div style={{ marginTop: 8, color: D.muted, fontSize: 13, fontWeight: 850 }}>
-        {value} {label.toLowerCase().includes("paper") ? (value === 1 ? "paper" : "papers") : (value === 1 ? "subject" : "subjects")}
+        {value} {value === 1 ? unit[0] : unit[1]}
       </div>
     </div>
   );
@@ -250,21 +253,145 @@ function emptyForm(defaultYear = ""): ExamForm {
   };
 }
 
+// ── Exam patterns (built-in presets + saved templates) ────────────────────────
+type PatternSlot = { subjectId: string | null; maxMarks: number | null; missing?: string };
+type Pattern = { numPapers: number; numSubjects: number; totalMarks: number | null; slots: PatternSlot[][] };
+
+function presetPattern(p: ExamPreset, subjects: any[]): Pattern {
+  return {
+    numPapers: p.numPapers, numSubjects: p.numSubjects, totalMarks: p.totalMarks,
+    slots: p.slots.map((paper) => paper.map((s) => {
+      const subjectId = resolveSubjectId(s.subject, subjects);
+      return { subjectId, maxMarks: s.maxMarks, missing: subjectId ? undefined : s.subject };
+    })),
+  };
+}
+
+function templatePattern(t: any, subjects: any[]): Pattern {
+  const active = new Set(subjects.map((s) => s.id));
+  const slots: PatternSlot[][] = Array.from({ length: t.numPapers }, () =>
+    Array.from({ length: t.numSubjects }, () => ({ subjectId: null, maxMarks: null })));
+  for (const ts of t.subjects ?? []) {
+    const row = slots[ts.paperNum - 1];
+    if (!row || ts.subjectSlot < 1 || ts.subjectSlot > row.length) continue;
+    // A subject deactivated since the template was saved isn't in the dropdown,
+    // so it can't be preselected — say so rather than leave a blank slot unexplained.
+    const usable = !!ts.subjectId && active.has(ts.subjectId);
+    row[ts.subjectSlot - 1] = {
+      subjectId: usable ? ts.subjectId : null, maxMarks: ts.maxMarks,
+      missing: ts.subjectId && !usable ? (ts.subject?.name ?? "A subject") : undefined,
+    };
+  }
+  return { numPapers: t.numPapers, numSubjects: t.numSubjects, totalMarks: t.totalMarks, slots };
+}
+
+function templateSummary(t: any) {
+  const slots: any[] = t.subjects ?? [];
+  const names = [...new Set(slots.map((s) => s.subject?.name).filter(Boolean))].join(", ") || "No subjects";
+  const total = t.totalMarks ?? slots.reduce((n, s) => n + (s.maxMarks ?? 0), 0);
+  return `${t.numPapers > 1 ? `${t.numPapers} papers · ` : ""}${names}${total ? ` · ${total}` : ""}`;
+}
+
+function PatternChip({ title, detail, active, onClick, onDelete }: {
+  title: string; detail: string; active: boolean; onClick: () => void; onDelete?: () => void;
+}) {
+  return (
+    <div style={{ position: "relative" }}>
+      <button type="button" onClick={onClick} aria-pressed={active} className="active:scale-[.99] transition-transform"
+        style={{
+          width: "100%", height: "100%", textAlign: "left", cursor: "pointer", font: "inherit",
+          borderRadius: 12, padding: onDelete ? "10px 36px 10px 12px" : "10px 12px",
+          border: `1px solid ${active ? "#818cf8" : D.line}`, background: active ? "#eef2ff" : "white",
+          boxShadow: active ? "0 0 0 3px rgba(79,70,229,.12)" : "none",
+        }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 850, color: active ? "#3730a3" : D.ink, overflowWrap: "anywhere" }}>
+          {active && <Check style={{ width: 14, height: 14, flexShrink: 0 }} />}{title}
+        </span>
+        <span style={{ display: "block", marginTop: 3, fontSize: 12, fontWeight: 650, color: D.muted, lineHeight: 1.35 }}>{detail}</span>
+      </button>
+      {onDelete && (
+        <button type="button" onClick={onDelete} title="Delete template" aria-label={`Delete template ${title}`}
+          style={{ position: "absolute", top: 6, right: 6, padding: 6, borderRadius: 8, border: "none", background: "none", cursor: "pointer", color: "#ef4444", display: "flex" }}>
+          <Trash2 style={{ width: 13, height: 13 }} />
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ── ExamModal ─────────────────────────────────────────────────────────────────
-function ExamModal({ open, onClose, initial, examId, batches, subjects, academicYears, defaultYear }: {
+function ExamModal({ open, onClose, initial, examId, batches, subjects, academicYears, defaultYear, canDeleteTemplates }: {
   open: boolean; onClose: () => void; initial?: ExamForm; examId?: string;
-  batches: any[]; subjects: any[]; academicYears: any[]; defaultYear: string;
+  batches: any[]; subjects: any[]; academicYears: any[]; defaultYear: string; canDeleteTemplates: boolean;
 }) {
   const qc = useQueryClient();
+  const isCreate = !examId;
   const [form, setForm] = useState<ExamForm>(initial ?? emptyForm(defaultYear));
-  useEffect(() => { if (open) setForm(initial ?? emptyForm(defaultYear)); }, [open]); // eslint-disable-line
+  // Key of the pattern last applied ("preset:jee-main" / "tpl:<id>"), and the slots
+  // it produced — so switching patterns only asks to confirm once the user has
+  // actually typed over what the previous one filled in.
+  const [pattern, setPattern] = useState<string | null>(null);
+  const appliedSlots = useRef<string | null>(null);
+  const [saveTemplate, setSaveTemplate] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  useEffect(() => {
+    if (!open) return;
+    setForm(initial ?? emptyForm(defaultYear));
+    setPattern(null); appliedSlots.current = null;
+    setSaveTemplate(false); setTemplateName("");
+  }, [open]); // eslint-disable-line
 
   const filteredBatches = form.academicYear ? batches.filter((b) => b.academicYear === form.academicYear) : batches;
   const timeError = !!(form.startTime && form.endTime && form.startTime === form.endTime);
 
+  const { data: templates = [] } = useQuery<any[]>({
+    queryKey: ["exam-templates"],
+    queryFn:  () => api.get("/api/v1/academics/assessments/templates").then((r) => r.data.data),
+    enabled:  open && isCreate,
+  });
+  const deleteTemplateMut = useMutation({
+    mutationFn: (id: string) => api.delete(`/api/v1/academics/assessments/templates/${id}`).then((r) => r.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["exam-templates"] }); toast.success("Template deleted"); },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to delete template"),
+  });
+
+  const applyPattern = (key: string, label: string, p: Pattern) => {
+    const current = JSON.stringify(form.paperSubjects);
+    const entered = form.paperSubjects.some((paper) => paper.some((s) => s.subjectId || s.maxMarks || s.topics.length));
+    if (entered && current !== appliedSlots.current &&
+        !confirm(`Replace the subjects, max marks and topics entered below with the ${label} pattern?`)) return;
+
+    const paperSubjects: SubjectSlot[][] = p.slots.map((paper) => paper.map((s) => ({
+      subjectId: s.subjectId ?? "", topics: [], maxMarks: s.maxMarks != null ? String(s.maxMarks) : "",
+    })));
+    setForm((prev) => ({
+      ...prev, numPapers: p.numPapers, numSubjects: p.numSubjects, paperSubjects,
+      totalMarks: p.totalMarks != null ? String(p.totalMarks) : "",
+    }));
+    appliedSlots.current = JSON.stringify(paperSubjects);
+    setPattern(key);
+
+    const missing = [...new Set(p.slots.flat().map((s) => s.missing).filter(Boolean))];
+    if (subjects.length === 0) {
+      toast.warning("The subject list couldn't be loaded, so subjects were left blank — marks are filled in; pick each subject by hand");
+    } else if (missing.length) {
+      const one = missing.length === 1;
+      toast.warning(`${missing.join(", ")} ${one ? "isn't an active subject" : "aren't active subjects"} under Academics → Settings — pick ${one ? "it" : "them"} by hand`);
+    }
+  };
+
   const createMut = useMutation({
     mutationFn: (d: any) => api.post("/api/v1/academics/assessments", d).then((r) => r.data),
-    onSuccess: (res) => { if (!res.success) { toast.error(res.error); return; } invalidateAssessments(qc); toast.success("Assessment created"); },
+    onSuccess: (res, vars) => {
+      if (!res.success) { toast.error(res.error); return; }
+      invalidateAssessments(qc);
+      if (vars.saveAsTemplate) {
+        qc.invalidateQueries({ queryKey: ["exam-templates"] });
+        toast.success(`Assessment created · template "${vars.saveAsTemplate}" saved`);
+      } else {
+        toast.success("Assessment created");
+      }
+    },
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to create assessment"),
   });
   const updateMut = useMutation({
@@ -282,7 +409,19 @@ function ExamModal({ open, onClose, initial, examId, batches, subjects, academic
     if (!form.startTime)              { toast.error("Start time is required");      return null; }
     if (!form.endTime)                { toast.error("End time is required");        return null; }
     if (form.batchIds.length === 0)   { toast.error("Select at least one batch");   return null; }
+    const tplName = templateName.trim();
+    const withTemplate = isCreate && saveTemplate;
+    if (withTemplate) {
+      if (!tplName) { toast.error("Name the template, or untick “Save this pattern as a template”"); return null; }
+      if (PRESET_LABELS.includes(tplName.toLowerCase()) || templates.some((t) => t.name.toLowerCase() === tplName.toLowerCase())) {
+        toast.error(`A template named "${tplName}" already exists — pick another name`); return null;
+      }
+      if (!form.paperSubjects.some((paper) => paper.some((s) => s.subjectId))) {
+        toast.error("Pick at least one subject before saving this as a template"); return null;
+      }
+    }
     return {
+      ...(withTemplate ? { saveAsTemplate: tplName } : {}),
       academicYear: form.academicYear, name: form.name.trim(),
       numPapers: form.numPapers, numSubjects: form.numSubjects, batchIds: form.batchIds,
       paperSubjects: form.paperSubjects.map((paper) =>
@@ -307,7 +446,12 @@ function ExamModal({ open, onClose, initial, examId, batches, subjects, academic
   const handleSaveAnother = () => {
     const p = buildPayload(); if (!p) return;
     createMut.mutate(p, {
-      onSuccess: (res) => { if (res.success) setForm({ ...emptyForm(defaultYear), academicYear: form.academicYear, examDate: form.examDate }); },
+      onSuccess: (res) => {
+        if (!res.success) return;
+        setForm({ ...emptyForm(defaultYear), academicYear: form.academicYear, examDate: form.examDate });
+        setPattern(null); appliedSlots.current = null;
+        setSaveTemplate(false); setTemplateName("");
+      },
     });
   };
 
@@ -365,10 +509,42 @@ function ExamModal({ open, onClose, initial, examId, batches, subjects, academic
 
           {/* Structure */}
           <SCard title="Structure">
+            {isCreate && (
+              <div style={{ marginBottom: 16 }}>
+                <p style={{ margin: "0 0 8px", color: "#4b5563", fontSize: 13, fontWeight: 850 }}>Start from an exam pattern</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {EXAM_PRESETS.map((p) => (
+                    <PatternChip key={p.key} title={p.label} detail={p.summary} active={pattern === `preset:${p.key}`}
+                      onClick={() => applyPattern(`preset:${p.key}`, p.label, presetPattern(p, subjects))} />
+                  ))}
+                </div>
+                {templates.length > 0 && (
+                  <>
+                    <p style={{ margin: "14px 0 8px", color: "#4b5563", fontSize: 13, fontWeight: 850 }}>Saved templates</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      {templates.map((t) => (
+                        <PatternChip key={t.id} title={t.name} detail={templateSummary(t)} active={pattern === `tpl:${t.id}`}
+                          onClick={() => applyPattern(`tpl:${t.id}`, t.name, templatePattern(t, subjects))}
+                          onDelete={canDeleteTemplates ? () => {
+                            if (!confirm(`Delete the template "${t.name}"? Tests already created from it are not affected.`)) return;
+                            if (pattern === `tpl:${t.id}`) setPattern(null);
+                            deleteTemplateMut.mutate(t.id);
+                          } : undefined} />
+                      ))}
+                    </div>
+                  </>
+                )}
+                {pattern && (
+                  <p style={{ margin: "10px 0 0", fontSize: 12, fontWeight: 700, color: "#4f46e5" }}>
+                    Subjects and marks filled in below — adjust anything before saving.
+                  </p>
+                )}
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5" style={{ background: "white", border: `1px solid ${D.line}`, borderRadius: 14, padding: 16 }}>
-              <Stepper label="No. of Papers" value={form.numPapers} min={1} max={5}
+              <Stepper label="No. of Papers" unit={["paper", "papers"]} value={form.numPapers} min={1} max={5}
                 onChange={(n) => setForm({ ...form, numPapers: n, paperSubjects: resizePS(form.paperSubjects, n, form.numSubjects) })} />
-              <Stepper label="Subjects per Paper" value={form.numSubjects} min={1} max={5}
+              <Stepper label="Subjects per Paper" unit={["subject", "subjects"]} value={form.numSubjects} min={1} max={5}
                 onChange={(n) => setForm({ ...form, numSubjects: n, paperSubjects: resizePS(form.paperSubjects, form.numPapers, n) })} />
             </div>
             <p style={{ marginTop: 10, fontSize: 13, color: D.muted, fontWeight: 850 }}>{structureDesc}</p>
@@ -455,6 +631,30 @@ function ExamModal({ open, onClose, initial, examId, batches, subjects, academic
               </DField>
             </div>
           </SCard>
+
+          {/* Save as template */}
+          {isCreate && (
+            <div style={{ border: `1px solid ${saveTemplate ? "#c7d2fe" : D.line}`, borderRadius: 16, padding: 18, background: saveTemplate ? "#f5f7ff" : "#fbfcfe" }}>
+              <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+                <input type="checkbox" checked={saveTemplate} onChange={(e) => setSaveTemplate(e.target.checked)}
+                  style={{ accentColor: "#4f46e5", width: 16, height: 16, marginTop: 2, flexShrink: 0 }} />
+                <span>
+                  <span style={{ display: "block", fontSize: 14, fontWeight: 850, color: D.ink }}>Save this pattern as a template</span>
+                  <span style={{ display: "block", marginTop: 2, fontSize: 12, fontWeight: 650, color: D.muted, lineHeight: 1.4 }}>
+                    Keeps the papers, subjects, max marks and total for next time — not the batches, date or topics.
+                  </span>
+                </span>
+              </label>
+              {saveTemplate && (
+                <div style={{ marginTop: 12, maxWidth: 420 }}>
+                  <DField label="Template Name" req>
+                    <DInput autoFocus placeholder="e.g. XI JEE Main Weekly" maxLength={40} value={templateName}
+                      onChange={(e) => setTemplateName(e.target.value)} />
+                  </DField>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Foot */}
@@ -999,7 +1199,8 @@ function AssessmentsPage() {
 
       <ExamModal open={modalOpen} onClose={() => { setModalOpen(false); setEditTarget(null); }}
         initial={editTarget?.form} examId={editTarget?.id}
-        batches={batches} subjects={subjects} academicYears={years} defaultYear={defaultYear} />
+        batches={batches} subjects={subjects} academicYears={years} defaultYear={defaultYear}
+        canDeleteTemplates={canDelete} />
     </div>
   );
 }

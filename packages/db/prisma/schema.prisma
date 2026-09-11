@@ -1426,6 +1426,7 @@ model Subject {
   schedules     Schedule[]
   assignments   Assignment[]
   examSubjects  ExamSubject[]
+  examTemplateSubjects ExamTemplateSubject[]
 
   @@index([isActive])
 }
@@ -1806,6 +1807,37 @@ model ExamBatch {
   @@unique([examId, batchId])
   @@index([examId])
   @@index([batchId])
+}
+
+// A named, reusable exam pattern — the paper/subject grid and per-slot max marks
+// of an exam, without its batches, date or topics. Saved from the New Assessment
+// form; the built-in JEE Main / NEET / K-CET presets live in the web app, not here.
+model ExamTemplate {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  numPapers   Int      @default(1)
+  numSubjects Int      @default(1)
+  totalMarks  Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  subjects ExamTemplateSubject[]
+}
+
+model ExamTemplateSubject {
+  id          String  @id @default(cuid())
+  templateId  String
+  paperNum    Int
+  subjectSlot Int
+  subjectId   String?
+  maxMarks    Float?
+
+  template ExamTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  subject  Subject?     @relation(fields: [subjectId],  references: [id], onDelete: SetNull)
+
+  @@unique([templateId, paperNum, subjectSlot])
+  @@index([templateId])
+  @@index([subjectId])
 }
 
 model ExamResult {

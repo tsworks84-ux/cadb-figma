@@ -50,7 +50,27 @@ const examSchema = z.object({
   note:          z.string().nullable().optional(),
 });
 
+// Creating an exam can also save its paper/subject grid as a named template.
+const createExamSchema = examSchema.extend({
+  saveAsTemplate: z.string().trim().min(1, "Template name is required").max(40, "Template name cannot exceed 40 characters").optional(),
+});
+
 type Slot = z.infer<typeof slotSchema>;
+
+const templateInclude = {
+  subjects: {
+    include: { subject: { select: { id: true, name: true } } },
+    orderBy: [{ paperNum: "asc" }, { subjectSlot: "asc" }] as { paperNum?: "asc" | "desc"; subjectSlot?: "asc" | "desc" }[],
+  },
+} as const;
+
+/** Case-insensitive, so "JEE Weekly" and "jee weekly" can't both exist. */
+async function templateNameTaken(name: string) {
+  const hit = await prisma.examTemplate.findFirst({ where: { name: { equals: name, mode: "insensitive" } }, select: { id: true } });
+  return !!hit;
+}
+
+const templateNameConflict = (name: string) => ({ success: false, error: `A template named "${name}" already exists — pick another name` });
 
 function buildSubjectRows(paperSubjects: Slot[][], numPapers: number, numSubjects: number) {
   const rows: { paperNum: number; subjectSlot: number; subjectId: string | null; topics: string | null; maxMarks: number | null }[] = [];
@@ -404,27 +424,66 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
 
   // ── POST / ────────────────────────────────────────────────────────────────
   fastify.post("/", async (req, reply) => {
-    const parsed = examSchema.safeParse(req.body);
+    const parsed = createExamSchema.safeParse(req.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.issues[0]?.message });
 
-    const { batchIds, paperSubjects = [], note, examDate, totalMarks, numPapers = 1, numSubjects = 1, ...rest } = parsed.data;
+    const { batchIds, paperSubjects = [], note, examDate, totalMarks, numPapers = 1, numSubjects = 1, saveAsTemplate, ...rest } = parsed.data;
     const subjectRows = buildSubjectRows(paperSubjects, numPapers, numSubjects);
 
-    const exam = await prisma.exam.create({
-      data: {
-        ...rest,
-        numPapers,
-        numSubjects,
-        examDate:   new Date(examDate),
-        note:       note       ?? null,
-        totalMarks: totalMarks ?? null,
-        batches:    { create: batchIds.map((batchId) => ({ batchId })) },
-        subjects:   { create: subjectRows },
-      },
-      include: examInclude,
-    });
+    // Checked before anything is written, so a clashing template name can't leave
+    // behind an exam the user believes failed to save.
+    if (saveAsTemplate && await templateNameTaken(saveAsTemplate)) {
+      return reply.status(409).send(templateNameConflict(saveAsTemplate));
+    }
 
-    return reply.status(201).send({ success: true, data: exam });
+    try {
+      const exam = await prisma.$transaction(async (tx) => {
+        const created = await tx.exam.create({
+          data: {
+            ...rest,
+            numPapers,
+            numSubjects,
+            examDate:   new Date(examDate),
+            note:       note       ?? null,
+            totalMarks: totalMarks ?? null,
+            batches:    { create: batchIds.map((batchId) => ({ batchId })) },
+            subjects:   { create: subjectRows },
+          },
+          include: examInclude,
+        });
+        if (saveAsTemplate) {
+          // The pattern only — topics are this sitting's syllabus, not the template's.
+          await tx.examTemplate.create({
+            data: {
+              name: saveAsTemplate, numPapers, numSubjects, totalMarks: totalMarks ?? null,
+              subjects: { create: subjectRows.map(({ topics: _topics, ...row }) => row) },
+            },
+          });
+        }
+        return created;
+      });
+      return reply.status(201).send({ success: true, data: exam });
+    } catch (e: any) {
+      // Exam has no unique columns, so P2002 here is the template name, taken
+      // between the check above and the insert.
+      if (saveAsTemplate && e?.code === "P2002") return reply.status(409).send(templateNameConflict(saveAsTemplate));
+      throw e;
+    }
+  });
+
+  // ── Exam templates ────────────────────────────────────────────────────────
+  // Saved from the create form (saveAsTemplate above). Static paths, so they win
+  // over the /:id routes below regardless of registration order.
+  fastify.get("/templates", async (_req, reply) => {
+    const data = await prisma.examTemplate.findMany({ include: templateInclude, orderBy: { name: "asc" } });
+    return reply.send({ success: true, data });
+  });
+
+  fastify.delete("/templates/:templateId", async (req, reply) => {
+    const { templateId } = req.params as { templateId: string };
+    const { count } = await prisma.examTemplate.deleteMany({ where: { id: templateId } });
+    if (!count) return reply.status(404).send({ success: false, error: "Template not found" });
+    return reply.send({ success: true });
   });
 
   // ── PATCH /:id ────────────────────────────────────────────────────────────
