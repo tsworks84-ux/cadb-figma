@@ -164,6 +164,11 @@ export default function ExamDetailPage() {
   const allPresent = filteredRows.length > 0 && filteredRows.every((r) => attendanceMap[r.student.id] ?? true);
   const somePresent = filteredRows.some((r) => attendanceMap[r.student.id] ?? true);
 
+  // Counted off the grid's own checkboxes, so they move as attendance is ticked
+  // (before saving) and follow the batch filter and search.
+  const presentCount = filteredRows.filter((r) => attendanceMap[r.student.id] ?? true).length;
+  const absentCount  = filteredRows.length - presentCount;
+
   const toggleAllAttendance = (val: boolean) => {
     setAttendanceMap((prev) => {
       const next = { ...prev };
@@ -785,12 +790,20 @@ export default function ExamDetailPage() {
             </select>
             <input placeholder="Search student…" value={search} onChange={(e) => setSearch(e.target.value)}
               className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-indigo-400 w-48" />
-            <span className="text-xs text-gray-400 ml-auto">
-              {filteredRows.length} student{filteredRows.length !== 1 ? "s" : ""}
-              {excludedRows.length > 0 && (
-                <span className="ml-2 text-red-400">· {excludedRows.length} excluded</span>
-              )}
-            </span>
+            <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+              <span className="text-xs text-gray-400">
+                {filteredRows.length} student{filteredRows.length !== 1 ? "s" : ""}
+                {excludedRows.length > 0 && (
+                  <span className="ml-2 text-red-400">· {excludedRows.length} excluded</span>
+                )}
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                Total Present <span className="font-semibold">{presentCount}</span>
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-600">
+                Total Absent <span className="font-semibold">{absentCount}</span>
+              </span>
+            </div>
             {canEdit && (
               <button onClick={() => setImportOpen(true)}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 transition-colors">
