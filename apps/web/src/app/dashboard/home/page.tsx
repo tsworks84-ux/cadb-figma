@@ -16,20 +16,25 @@ import {
 
 // ── Super Admin Dashboard ──────────────────────────────────────────────────────
 
-function MetricCard({ icon: Icon, trend, trendUp, title, value, sub }: {
-  icon: React.ElementType; trend: string; trendUp: boolean;
+function MetricCard({ icon: Icon, trend, trendUp, trendTitle, title, value, sub }: {
+  icon: React.ElementType; trend?: string; trendUp?: boolean | null; trendTitle?: string;
   title: string; value: string; sub: string;
 }) {
+  // trendUp null = no movement: grey, no arrow
+  const trendColor = trendUp == null ? "text-gray-400" : trendUp ? "text-green-500" : "text-red-500";
   return (
     <div className="rounded-xl border border-gray-100 bg-white p-5">
       <div className="flex items-start justify-between mb-4">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gray-100">
           <Icon className="h-5 w-5 text-gray-500" />
         </div>
-        <span className={`flex items-center gap-1 text-xs font-medium ${trendUp ? "text-green-500" : "text-red-500"}`}>
-          {trendUp ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
-          {trend}
-        </span>
+        {trend && (
+          <span title={trendTitle} className={`flex items-center gap-1 text-xs font-medium ${trendColor}`}>
+            {trendUp === true && <TrendingUp className="h-3.5 w-3.5" />}
+            {trendUp === false && <TrendingDown className="h-3.5 w-3.5" />}
+            {trend}
+          </span>
+        )}
       </div>
       <p className="text-sm text-gray-500 mb-1">{title}</p>
       <p className="text-2xl font-bold text-gray-900">{value}</p>
@@ -38,9 +43,10 @@ function MetricCard({ icon: Icon, trend, trendUp, title, value, sub }: {
   );
 }
 
-function SectionHeader({ icon: Icon, title, subtitle, linkLabel = "View Details" }: {
-  icon: React.ElementType; title: string; subtitle: string; linkLabel?: string;
+function SectionHeader({ icon: Icon, title, subtitle, linkLabel = "View Details", href }: {
+  icon: React.ElementType; title: string; subtitle: string; linkLabel?: string; href?: string;
 }) {
+  const linkClass = "flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-800 border border-gray-200 rounded-lg px-3 py-1.5 transition-colors";
   return (
     <div className="flex items-center justify-between mb-4">
       <div className="flex items-center gap-3">
@@ -52,15 +58,60 @@ function SectionHeader({ icon: Icon, title, subtitle, linkLabel = "View Details"
           <p className="text-xs text-gray-400">{subtitle}</p>
         </div>
       </div>
-      <button className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-800 border border-gray-200 rounded-lg px-3 py-1.5 transition-colors">
-        {linkLabel} <ChevronRight className="h-3.5 w-3.5" />
-      </button>
+      {href ? (
+        <Link href={href} className={`shrink-0 ${linkClass}`}>
+          {linkLabel} <ChevronRight className="h-3.5 w-3.5" />
+        </Link>
+      ) : (
+        <button className={`shrink-0 ${linkClass}`}>
+          {linkLabel} <ChevronRight className="h-3.5 w-3.5" />
+        </button>
+      )}
     </div>
   );
 }
 
+interface PerformanceMetric { windowDays: number; value: number | null; previous: number | null; sample: number }
+interface PerformanceSummary {
+  attendance: PerformanceMetric; testPerformance: PerformanceMetric; assignmentSubmission: PerformanceMetric;
+}
+
+// Card props for one rate: the % itself, and its change in percentage points
+// against the window before. No trend when either window had nothing to measure.
+function performanceCardProps(
+  m: PerformanceMetric | undefined,
+  state: { isLoading: boolean; isError: boolean },
+  describe: (m: PerformanceMetric) => string,
+  emptyText: (days: number) => string,
+) {
+  if (state.isLoading) return { value: "…", sub: "Loading…" };
+  if (state.isError || !m) return { value: "—", sub: "Couldn't load this metric" };
+  if (m.value == null) return { value: "—", sub: emptyText(m.windowDays) };
+
+  const props: { value: string; sub: string; trend?: string; trendUp?: boolean | null; trendTitle?: string } = {
+    value: `${m.value.toFixed(1)}%`,
+    sub:   describe(m),
+  };
+  if (m.previous != null) {
+    const delta = Math.round((m.value - m.previous) * 10) / 10;
+    props.trend      = `${delta > 0 ? "+" : ""}${delta.toFixed(1)} pts`;
+    props.trendUp    = delta === 0 ? null : delta > 0;
+    props.trendTitle = `vs the previous ${m.windowDays} days (${m.previous.toFixed(1)}%)`;
+  }
+  return props;
+}
+
 function SuperAdminDashboard() {
   const { user } = useAuthStore();
+
+  const { data: performance, isLoading: perfLoading, isError: perfError } = useQuery({
+    queryKey: ["academics-overview-performance"],
+    queryFn: () =>
+      api.get("/api/v1/academics/overview/performance").then((r) => r.data.data as PerformanceSummary),
+    staleTime: 5 * 60 * 1000,
+  });
+  const perfState = { isLoading: perfLoading, isError: perfError };
+  const n = (x: number) => x.toLocaleString("en-IN");
 
   const now = new Date();
   const greeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 17 ? "Good afternoon" : "Good evening";
@@ -113,11 +164,26 @@ function SuperAdminDashboard() {
 
         {/* Student Performance Metrics */}
         <div>
-          <SectionHeader icon={Users} title="Student Performance Metrics" subtitle="Academic performance and attendance analytics" />
+          <SectionHeader icon={Users} title="Student Performance Metrics" subtitle="Academic performance and attendance analytics" href="/dashboard/academics" />
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <MetricCard icon={UserCheck} trend="+2.3%" trendUp title="Average Daily Attendance" value="92.5%" sub="Last 30 days" />
-            <MetricCard icon={TrendingUp} trend="+5.1%" trendUp title="Average Test Performance" value="78.4%" sub="Across all subjects" />
-            <MetricCard icon={FileText} trend="-1.2%" trendUp={false} title="Average Assignment Submission Rate" value="85.7%" sub="On-time submissions" />
+            <MetricCard
+              icon={UserCheck} title="Average Daily Attendance"
+              {...performanceCardProps(performance?.attendance, perfState,
+                (m) => `Last ${m.windowDays} days · ${n(m.sample)} marked`,
+                (d) => `No attendance marked in the last ${d} days`)}
+            />
+            <MetricCard
+              icon={TrendingUp} title="Average Test Performance"
+              {...performanceCardProps(performance?.testPerformance, perfState,
+                (m) => `Last ${m.windowDays} days · ${n(m.sample)} results, all subjects`,
+                (d) => `No marked exams in the last ${d} days`)}
+            />
+            <MetricCard
+              icon={FileText} title="Average Assignment Submission Rate"
+              {...performanceCardProps(performance?.assignmentSubmission, perfState,
+                (m) => `Due in last ${m.windowDays} days · ${n(m.sample)} expected`,
+                (d) => `No assignments due in the last ${d} days`)}
+            />
           </div>
         </div>
 

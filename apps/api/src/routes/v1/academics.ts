@@ -58,7 +58,7 @@ export async function academicsRoutes(fastify: FastifyInstance) {
     if (own && own[1] === (request.user as any)?.sub) return null;
 
     // The overview dashboard is org-wide, so it has a grant of its own.
-    if (url.endsWith("/overview")) return "ACA_OVERVIEW";
+    if (url.endsWith("/overview") || url.endsWith("/overview/performance")) return "ACA_OVERVIEW";
     // Batch-scoped routes (incl. /batches/:id/subjects) belong to ACA_BATCH.
     if (url.includes("/batches"))  return "ACA_BATCH";
     if (url.includes("/subjects")) return "ACA_SUBJECT";
@@ -242,6 +242,130 @@ export async function academicsRoutes(fastify: FastifyInstance) {
         },
         performance: { avgTestScore, submissionRate },
         todaySchedules: { count: todaySchedules.length, list: todaySchedules },
+      },
+    });
+  });
+
+  // ── PERFORMANCE SUMMARY (home dashboard metric cards) ─────────────────────
+  // Each metric is a rate over a trailing window, plus the same rate over the
+  // window before it so the card can show a trend. `sample` is how many records
+  // the rate stands on — 0 means there was nothing to measure, and value is null.
+
+  fastify.get("/overview/performance", async (_request, reply) => {
+    const ATTENDANCE_DAYS = 30;
+    const TEST_DAYS       = 90;
+    const ASSIGNMENT_DAYS = 30;
+
+    // Schedule.date, Exam.examDate and Assignment.submissionDate are @db.Date, so
+    // windows are plain calendar dates: [from, to).
+    const dateStr = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const windowOf = (days: number, endOffsetDays: number) => {
+      const to = new Date();
+      to.setHours(0, 0, 0, 0);
+      to.setDate(to.getDate() - endOffsetDays);
+      const from = new Date(to);
+      from.setDate(from.getDate() - days);
+      return { from: dateStr(from), to: dateStr(to) };
+    };
+    const round1 = (n: number) => Math.round(n * 10) / 10;
+
+    // Present ÷ marked, over non-cancelled classes — the same rule as a student's
+    // attendance tab. Unmarked classes don't count either way. Includes today.
+    async function attendance(w: { from: string; to: string }) {
+      const rows = await prisma.scheduleAttendance.groupBy({
+        by: ["isPresent"],
+        _count: { _all: true },
+        where: {
+          schedule: { date: { gte: new Date(w.from), lt: new Date(w.to) }, status: { not: "CANCELLED" } },
+          student:  { isArchived: false },
+        },
+      });
+      const present = rows.find((r) => r.isPresent)?._count._all ?? 0;
+      const sample  = rows.reduce((s, r) => s + r._count._all, 0);
+      return { value: sample > 0 ? round1((present / sample) * 100) : null, sample };
+    }
+
+    // Mean of each appeared, non-excluded student's score as a % of the exam's
+    // marks — exam.totalMarks, which is what the exam page's % column uses, or the
+    // sum of per-slot max marks when no total was set. Exams with neither are skipped.
+    async function testPerformance(w: { from: string; to: string }) {
+      const [row] = await prisma.$queryRaw<{ value: number | null; sample: number }[]>`
+        WITH exam_max AS (
+          SELECT e.id,
+                 COALESCE(
+                   e."totalMarks"::float8,
+                   CASE WHEN COUNT(es.id) > 0 AND COUNT(es."maxMarks") = COUNT(es.id)
+                        THEN SUM(es."maxMarks") END
+                 ) AS max_marks
+          FROM "Exam" e
+          LEFT JOIN "ExamSubject" es ON es."examId" = e.id
+          WHERE e."examDate" >= ${w.from}::date AND e."examDate" < ${w.to}::date
+            AND e.status NOT IN ('CANCELLED', 'ARCHIVED')
+          GROUP BY e.id
+        ),
+        result_totals AS (
+          SELECT r."examId", SUM(m.marks) AS total
+          FROM "ExamResult" r
+          JOIN exam_max   em ON em.id = r."examId"
+          JOIN "Student"   s ON s.id  = r."studentId"
+          JOIN "ExamMark"  m ON m."examResultId" = r.id
+          WHERE r.attended AND NOT r."isExcluded" AND NOT s."isArchived" AND m.marks IS NOT NULL
+          GROUP BY r.id, r."examId"
+        )
+        SELECT AVG(rt.total / em.max_marks * 100)::float8 AS value, COUNT(*)::int AS sample
+        FROM result_totals rt
+        JOIN exam_max em ON em.id = rt."examId"
+        WHERE em.max_marks > 0
+      `;
+      return { value: row?.value != null ? round1(row.value) : null, sample: row?.sample ?? 0 };
+    }
+
+    // Of every (assignment, student) pair that was due in the window, how many
+    // were handed in. Expected students come from batch membership, not from
+    // AssignmentSubmission rows — those are only created when someone opens the
+    // assignment's submission list, so most pairs have no row at all. "Handed in"
+    // is any status past NOT_SUBMITTED, as in the assignments report. Only due
+    // dates before today count, since today's are still open.
+    async function assignmentSubmission(w: { from: string; to: string }) {
+      const [row] = await prisma.$queryRaw<{ expected: number; submitted: number }[]>`
+        SELECT COUNT(*)::int AS expected,
+               COUNT(*) FILTER (WHERE sub.status IS NOT NULL AND sub.status <> 'NOT_SUBMITTED')::int AS submitted
+        FROM "Assignment" a
+        JOIN LATERAL (
+          SELECT DISTINCT sb."studentId"
+          FROM "AssignmentBatch" ab
+          JOIN "StudentBatch" sb ON sb."batchId" = ab."batchId"
+          JOIN "Student"       s ON s.id = sb."studentId"
+          WHERE ab."assignmentId" = a.id AND NOT s."isArchived"
+        ) st ON TRUE
+        LEFT JOIN "AssignmentSubmission" sub
+          ON sub."assignmentId" = a.id AND sub."studentId" = st."studentId"
+        WHERE a.status <> 'ARCHIVED'
+          AND a."submissionDate" >= ${w.from}::date AND a."submissionDate" < ${w.to}::date
+      `;
+      const expected = row?.expected ?? 0;
+      return {
+        value:  expected > 0 ? round1(((row?.submitted ?? 0) / expected) * 100) : null,
+        sample: expected,
+      };
+    }
+
+    const [attNow, attPrev, testNow, testPrev, subNow, subPrev] = await Promise.all([
+      attendance(windowOf(ATTENDANCE_DAYS, -1)),              // today inclusive
+      attendance(windowOf(ATTENDANCE_DAYS, ATTENDANCE_DAYS - 1)),
+      testPerformance(windowOf(TEST_DAYS, -1)),
+      testPerformance(windowOf(TEST_DAYS, TEST_DAYS - 1)),
+      assignmentSubmission(windowOf(ASSIGNMENT_DAYS, 0)),     // due before today
+      assignmentSubmission(windowOf(ASSIGNMENT_DAYS, ASSIGNMENT_DAYS)),
+    ]);
+
+    return reply.send({
+      success: true,
+      data: {
+        attendance:           { windowDays: ATTENDANCE_DAYS, ...attNow,  previous: attPrev.value },
+        testPerformance:      { windowDays: TEST_DAYS,       ...testNow, previous: testPrev.value },
+        assignmentSubmission: { windowDays: ASSIGNMENT_DAYS, ...subNow,  previous: subPrev.value },
       },
     });
   });
