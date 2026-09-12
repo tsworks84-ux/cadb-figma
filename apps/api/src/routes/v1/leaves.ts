@@ -45,6 +45,16 @@ async function canOverrideLeaves(user: JwtPayload): Promise<boolean> {
 }
 
 /**
+ * May the caller read every employee's leave record? Drives the org-wide records
+ * browser at Employees → Leaves. Purely a read grant: cancelling and deleting
+ * still go through `canOverrideLeaves`, and approving through
+ * `hasLeaveAuthorityOver`, so a role can be given the list without the buttons.
+ */
+async function canSeeAllLeaves(user: JwtPayload): Promise<boolean> {
+  return isLeaveAdmin(user.role) || await hasPermission(user, "EMP_ALL_LEAVES", "canView");
+}
+
+/**
  * Which balance bucket currently holds this leave's days.
  * PENDING parks them in `pending`; APPROVED (and an approved leave awaiting a
  * cancellation decision) has already moved them into `used`. Anything else has
@@ -88,6 +98,9 @@ function summariseLeave(application: any): string {
  *   - the employee's immediate supervisor (`reportingToId`)
  *   - the head of any department the employee belongs to
  *   - custom roles holding the matching EMP_LEAVES grant
+ *   - any role holding the matching EMP_ALL_LEAVES grant (the org-wide leave
+ *     records browser on the Employees page) — built-ins included, since that
+ *     module is new and starts denied for everyone the matrix hasn't opened
  *
  * The supervisor and head checks are role-independent: an EMPLOYEE-role manager
  * has authority over their reports. They also never match self, so heading your
@@ -100,6 +113,7 @@ async function hasLeaveAuthorityOver(
 ): Promise<boolean> {
   if (isLeaveAdmin(user.role)) return true;
   if (isCustomRole(user.role) && await hasPermission(user, "EMP_LEAVES", action)) return true;
+  if (await hasPermission(user, "EMP_ALL_LEAVES", action)) return true;
   if (await isImmediateSupervisor(user.sub, targetId)) return true;
   if (await isDepartmentHeadOf(user.sub, targetId)) return true;
   return false;
@@ -330,7 +344,8 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     const user = request.user as JwtPayload;
 
     const seesAll = isLeaveAdmin(user.role)
-      || (isCustomRole(user.role) && await hasPermission(user, "EMP_LEAVES", "canApprove"));
+      || (isCustomRole(user.role) && await hasPermission(user, "EMP_LEAVES", "canApprove"))
+      || await hasPermission(user, "EMP_ALL_LEAVES", "canApprove");
     const employeeFilter = seesAll ? undefined : await buildReportingScopeFilter(user.sub);
 
     const data = await prisma.leaveApplication.findMany({
@@ -570,6 +585,7 @@ export async function leaveRoutes(fastify: FastifyInstance) {
 
     const canApproveAny = isLeaveAdmin(user.role)
       || (isCustomRole(user.role) && await hasPermission(user, "EMP_LEAVES", "canApprove"))
+      || await hasPermission(user, "EMP_ALL_LEAVES", "canApprove")
       || directReportCount > 0
       || headedDepartmentIds.length > 0;
 
@@ -591,7 +607,8 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     // everything. Everyone else sees their direct reports plus the members of any
     // department they head — no role name required.
     const seesAll = isLeaveAdmin(user.role)
-      || (isCustomRole(user.role) && await hasPermission(user, "EMP_LEAVES", "canApprove"));
+      || (isCustomRole(user.role) && await hasPermission(user, "EMP_LEAVES", "canApprove"))
+      || await hasPermission(user, "EMP_ALL_LEAVES", "canApprove");
 
     const employeeFilter = seesAll ? undefined : await buildReportingScopeFilter(user.sub);
 
@@ -661,7 +678,8 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     }
 
     const seesAll = isLeaveAdmin(user.role)
-      || (isCustomRole(user.role) && await hasPermission(user, "EMP_LEAVES", "canApprove"));
+      || (isCustomRole(user.role) && await hasPermission(user, "EMP_LEAVES", "canApprove"))
+      || await hasPermission(user, "EMP_ALL_LEAVES", "canApprove");
     const employeeFilter = seesAll ? undefined : await buildReportingScopeFilter(user.sub);
 
     // The applied range, not the charged span: this answers who is absent, so a
@@ -699,22 +717,32 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     });
   });
 
-  // Every leave record, for the roles allowed to override them. This is the
-  // surface the cancel/delete controls hang off — /pending only ever shows the
-  // undecided ones, and an admin has to be able to reach an approved leave too.
+  // Every leave record, for the roles granted EMP_ALL_LEAVES view (plus SA/HR).
+  // This is the surface the cancel/delete controls hang off — /pending only ever
+  // shows the undecided ones, and an admin has to be able to reach an approved
+  // leave too. It backs the Employees → Leaves browser as well; the read is
+  // deliberately wider than the override grant that arms the destructive buttons.
   fastify.get("/all", async (request, reply) => {
     const user = request.user as JwtPayload;
-    if (!await canOverrideLeaves(user)) {
+    if (!await canSeeAllLeaves(user)) {
       return reply.status(403).send({ success: false, error: "Forbidden", statusCode: 403 });
     }
 
     const q = request.query as Record<string, string>;
-    const take = Math.min(Math.max(parseInt(q.limit ?? "200", 10) || 200, 1), 500);
+    const take = Math.min(Math.max(parseInt(q.limit ?? "200", 10) || 200, 1), 1000);
+
+    // `from`/`to` bracket the leave itself, not when it was filed: a records
+    // browser asking for September wants leaves *taken* in September, so the
+    // window matches any leave that overlaps it at either end.
+    const from = q.from ? new Date(q.from) : null;
+    const to   = q.to   ? new Date(q.to)   : null;
 
     const data = await prisma.leaveApplication.findMany({
       where: {
         ...(q.status && { status: q.status as any }),
         ...(q.employeeId && { employeeId: q.employeeId }),
+        ...(to   && { fromDate: { lte: to } }),
+        ...(from && { toDate:   { gte: from } }),
       },
       include: {
         employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, department: { select: { name: true } } } },

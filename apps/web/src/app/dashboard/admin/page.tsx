@@ -37,6 +37,10 @@ const MODULE_ROWS: ModuleRow[] = [
   { key: "EMP_BANK",      label: "Bank Details",   indent: true },
   { key: "EMP_LEAVES",    label: "Leaves",         indent: true },
   { key: "EMP_PAYOUT",    label: "Monthly Payout", indent: true },
+  // Org-wide record browsers on the Employees page. "Leaves" above (EMP_LEAVES) is
+  // one employee's records on their own profile; these two are everybody's.
+  { key: "EMP_ALL_LEAVES", label: "All Leave Records", indent: true },
+  { key: "EMP_ALL_CLAIMS", label: "All Claim Records", indent: true },
   { key: "LEAVES",    label: "Leaves" },
   { key: "CLAIMS",    label: "Claims" },
   { key: "POLICIES",  label: "Policies" },

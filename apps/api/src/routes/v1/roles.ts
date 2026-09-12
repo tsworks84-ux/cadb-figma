@@ -15,6 +15,10 @@ const MODULES = [
   // Custom Roles and Roles & Permissions are deliberately NOT here: granting either
   // would let the holder grant themselves everything, so they stay SUPER_ADMIN-only.
   "ADM_DEPARTMENTS", "ADM_DESIGNATIONS", "ADM_LEAVE_POLICIES", "ADM_WORK_LOCATIONS", "ADM_CLAIM_TYPES",
+  // Org-wide record browsers reached from Employees → Leaves / Claims. Distinct from
+  // EMP_LEAVES (one employee's records, on their profile) and from LEAVES / CLAIMS
+  // (the self-service pages every employee gets).
+  "EMP_ALL_LEAVES", "EMP_ALL_CLAIMS",
 ] as const;
 
 const DEFAULT_PERMISSIONS: Record<string, Record<string, Partial<Record<"canView"|"canCreate"|"canEdit"|"canDelete"|"canApprove"|"canAppraise", boolean>>>> = {
@@ -126,6 +130,23 @@ const ADMIN_DEFAULTS: Record<string, Record<"canView"|"canCreate"|"canEdit"|"can
 for (const role of ROLES) {
   for (const m of ADMIN_MODULES) {
     DEFAULT_PERMISSIONS[role][m] = { ...ADMIN_DEFAULTS[role] };
+  }
+}
+
+// Every employee's leave / claim records, browsed from the Employees page. SUPER_ADMIN
+// and HR_ADMIN start with the reach they already had through the Leaves and Claims
+// pages; everyone else starts denied and is opened up from the permission matrix.
+// These are new modules, so nobody inherits the access from a box ticked for something else.
+const RECORD_MODULES = ["EMP_ALL_LEAVES", "EMP_ALL_CLAIMS"] as const;
+const RECORD_DEFAULTS: Record<string, Record<"canView"|"canCreate"|"canEdit"|"canDelete"|"canApprove"|"canAppraise", boolean>> = {
+  SUPER_ADMIN: { canView: true,  canCreate: false, canEdit: false, canDelete: true,  canApprove: true,  canAppraise: false },
+  HR_ADMIN:    { canView: true,  canCreate: false, canEdit: false, canDelete: false, canApprove: true,  canAppraise: false },
+  DEPT_HEAD:   { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
+  EMPLOYEE:    { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
+};
+for (const role of ROLES) {
+  for (const m of RECORD_MODULES) {
+    DEFAULT_PERMISSIONS[role][m] = { ...RECORD_DEFAULTS[role] };
   }
 }
 

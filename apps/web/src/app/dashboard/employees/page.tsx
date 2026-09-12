@@ -5,11 +5,12 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { formatDate, getInitials } from "@/lib/utils";
-import { Plus, Search, Trash2, ChevronDown, X, AlertTriangle, UserCheck, UserX, Users, CalendarOff, UserPlus, LogOut, Upload, Download, MoreVertical, Filter, ChevronRight, Eye, Copy } from "lucide-react";
+import { Plus, Search, Trash2, ChevronDown, X, AlertTriangle, UserCheck, UserX, Users, CalendarOff, UserPlus, LogOut, Upload, Download, MoreVertical, Filter, ChevronRight, Eye, Copy, CalendarDays, Receipt } from "lucide-react";
 import Link from "next/link";
 import type { EmployeeListItem } from "@cadb/types";
 import { toast } from "sonner";
 import { useAuthStore } from "@/store/auth";
+import { usePermissions } from "@/hooks/usePermissions";
 
 // ── Stat card drill-down ──────────────────────────────────────────────────────
 
@@ -397,6 +398,15 @@ export default function EmployeesPage() {
   const isAdmin = user?.role === "SUPER_ADMIN" || user?.role === "HR_ADMIN";
   const isSuperAdmin = user?.role === "SUPER_ADMIN";
 
+  // The two record browsers are matrix-driven rather than role-driven, so a role can be
+  // handed everyone's leaves or everyone's claims without also being made SA/HR.
+  // Super Admin holds every module implicitly; the rest read their own grant.
+  // Import / Export / Add Employee stay on the built-in admin roles as before.
+  const permissions = usePermissions();
+  const canViewAllLeaves = permissions.EMP_ALL_LEAVES?.canView ?? false;
+  const canViewAllClaims = permissions.EMP_ALL_CLAIMS?.canView ?? false;
+  const hasHeaderActions = isAdmin || canViewAllLeaves || canViewAllClaims;
+
   // Filters
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -596,21 +606,43 @@ export default function EmployeesPage() {
             </div>
           </div>
         </div>
-        {isAdmin && (
+        {hasHeaderActions && (
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
-            <button className="px-3 py-2 border border-gray-200 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-              <Upload className="h-4 w-4" /> <span className="hidden sm:inline">Import</span>
-            </button>
-            <button className="px-3 py-2 border border-gray-200 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-              <Download className="h-4 w-4" /> <span className="hidden sm:inline">Export</span>
-            </button>
-            <Link
-              href="/dashboard/employees/new"
-              className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold text-white transition-colors"
-              style={{ backgroundColor: "#2C3E7C" }}
-            >
-              <Plus className="h-4 w-4" /> Add Employee
-            </Link>
+            {isAdmin && (
+              <>
+                <button className="px-3 py-2 border border-gray-200 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                  <Upload className="h-4 w-4" /> <span className="hidden sm:inline">Import</span>
+                </button>
+                <button className="px-3 py-2 border border-gray-200 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                  <Download className="h-4 w-4" /> <span className="hidden sm:inline">Export</span>
+                </button>
+              </>
+            )}
+            {canViewAllLeaves && (
+              <Link
+                href="/dashboard/employees/leaves"
+                className="px-3 py-2 border border-gray-200 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+              >
+                <CalendarDays className="h-4 w-4" /> Leaves
+              </Link>
+            )}
+            {canViewAllClaims && (
+              <Link
+                href="/dashboard/employees/claims"
+                className="px-3 py-2 border border-gray-200 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+              >
+                <Receipt className="h-4 w-4" /> Claims
+              </Link>
+            )}
+            {isAdmin && (
+              <Link
+                href="/dashboard/employees/new"
+                className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold text-white transition-colors"
+                style={{ backgroundColor: "#2C3E7C" }}
+              >
+                <Plus className="h-4 w-4" /> Add Employee
+              </Link>
+            )}
           </div>
         )}
       </div>

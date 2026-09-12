@@ -1,9 +1,9 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 import { prisma } from "@cadb/db";
 import { authenticate, requireRole } from "../../middleware/authenticate.js";
 import { generateClaimNumber } from "../../utils/claimNumber.js";
-import { hasAnyPermission, isCustomRole } from "../../utils/permissions.js";
+import { hasAnyPermission, hasPermission, isCustomRole } from "../../utils/permissions.js";
 import { recordAudit, describeEmployee } from "../../utils/auditLog.js";
 import { notifyClaimEvent } from "../../utils/notify/index.js";
 import type { JwtPayload } from "@cadb/types";
@@ -43,6 +43,40 @@ const createClaimSchema = z.object({
  */
 async function canOverrideClaims(user: JwtPayload): Promise<boolean> {
   return user.role === "SUPER_ADMIN" || user.role === "HR_ADMIN";
+}
+
+/**
+ * May the caller read every employee's claim? Backs /admin/all and the org-wide
+ * records browser at Employees → Claims.
+ *
+ * The CLAIMS / EMP_LEAVES clause is the pre-existing rule and stays, so roles that
+ * already reached the all-claims view keep it. EMP_ALL_CLAIMS is the grant the
+ * permission matrix now hands out for this on purpose, and it is honoured for
+ * built-in roles too — it is a new module, denied for everyone until granted.
+ */
+async function canSeeAllClaims(user: JwtPayload): Promise<boolean> {
+  return user.role === "SUPER_ADMIN" || user.role === "HR_ADMIN"
+    || (isCustomRole(user.role) && await hasAnyPermission(user, ["CLAIMS", "EMP_LEAVES"], "canView"))
+    || await hasPermission(user, "EMP_ALL_CLAIMS", "canView");
+}
+
+/**
+ * May the caller review claims — approve, reject, and mark paid? Super Admin and HR
+ * as before, plus whoever the matrix grants EMP_ALL_CLAIMS approval to.
+ *
+ * Reading the all-claims list is deliberately a weaker grant: a role can be given
+ * visibility over everyone's claims without being able to decide any of them.
+ */
+async function canReviewClaims(user: JwtPayload): Promise<boolean> {
+  return user.role === "SUPER_ADMIN" || user.role === "HR_ADMIN"
+    || await hasPermission(user, "EMP_ALL_CLAIMS", "canApprove");
+}
+
+/** 403 unless the caller may review claims. Inline so the reason can be specific. */
+async function guardReview(user: JwtPayload, reply: FastifyReply): Promise<boolean> {
+  if (await canReviewClaims(user)) return true;
+  reply.status(403).send({ success: false, error: "Insufficient permissions", statusCode: 403 });
+  return false;
 }
 
 /** Removes a claim's receipt files from disk. Best-effort — a missing file is fine. */
@@ -114,11 +148,7 @@ export async function claimRoutes(fastify: FastifyInstance) {
   // ── Get all claims (admin) with optional status/type filter ──────────────
   fastify.get("/admin/all", async (request, reply) => {
     const user = request.user as JwtPayload;
-    // Built-in admins (SA/HR) as before, or a custom role granted view over Claims / employee
-    // HR data (EMP_LEAVES). Built-in DEPT_HEAD/EMPLOYEE stay excluded from the all-claims view.
-    const allowed = user.role === "SUPER_ADMIN" || user.role === "HR_ADMIN"
-      || (isCustomRole(user.role) && await hasAnyPermission(user, ["CLAIMS", "EMP_LEAVES"], "canView"));
-    if (!allowed) {
+    if (!await canSeeAllClaims(user)) {
       return reply.status(403).send({ success: false, error: "Forbidden", statusCode: 403 });
     }
     const q = request.query as Record<string, string>;
@@ -143,10 +173,12 @@ export async function claimRoutes(fastify: FastifyInstance) {
   fastify.get("/:id", async (request, reply) => {
     const user = request.user as JwtPayload;
     const { id } = request.params as { id: string };
-    const isAdmin = user.role === "SUPER_ADMIN" || user.role === "HR_ADMIN";
+    // Anyone who can browse every claim can open any one of them; everyone else
+    // is scoped to their own, so a bare id is not a way round the list gate.
+    const seesAll = await canSeeAllClaims(user);
 
     const claim = await prisma.reimbursementClaim.findFirst({
-      where: isAdmin ? { id } : { id, employeeId: user.sub },
+      where: seesAll ? { id } : { id, employeeId: user.sub },
       include: {
         receipts: true,
         employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true } },
@@ -476,7 +508,8 @@ export async function claimRoutes(fastify: FastifyInstance) {
   });
 
   // ── Admin: get pending claims ──────────────────────────────────────────────
-  fastify.get("/pending", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN") }, async (request, reply) => {
+  fastify.get("/pending", async (request, reply) => {
+    if (!await guardReview(request.user as JwtPayload, reply)) return;
     const data = await prisma.reimbursementClaim.findMany({
       where: { status: "SUBMITTED" },
       include: {
@@ -489,9 +522,10 @@ export async function claimRoutes(fastify: FastifyInstance) {
   });
 
   // ── Admin: approve / reject ────────────────────────────────────────────────
-  fastify.patch("/:id/decision", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN") }, async (request, reply) => {
+  fastify.patch("/:id/decision", async (request, reply) => {
     const { id } = request.params as { id: string };
     const user = request.user as JwtPayload;
+    if (!await guardReview(user, reply)) return;
     const body = request.body as { action: "APPROVED" | "REJECTED"; approvedAmount?: number; note?: string };
 
     if (!body.action || !["APPROVED", "REJECTED"].includes(body.action)) {
@@ -526,8 +560,9 @@ export async function claimRoutes(fastify: FastifyInstance) {
   });
 
   // ── Admin: mark as paid ───────────────────────────────────────────────────
-  fastify.patch("/:id/pay", { preHandler: requireRole("SUPER_ADMIN", "HR_ADMIN") }, async (request, reply) => {
+  fastify.patch("/:id/pay", async (request, reply) => {
     const { id } = request.params as { id: string };
+    if (!await guardReview(request.user as JwtPayload, reply)) return;
     const claim = await prisma.reimbursementClaim.findFirst({ where: { id, status: "APPROVED" } });
     if (!claim) return reply.status(404).send({ success: false, error: "Approved claim not found", statusCode: 404 });
 
