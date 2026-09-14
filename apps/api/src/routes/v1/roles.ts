@@ -19,6 +19,9 @@ const MODULES = [
   // EMP_LEAVES (one employee's records, on their profile) and from LEAVES / CLAIMS
   // (the self-service pages every employee gets).
   "EMP_ALL_LEAVES", "EMP_ALL_CLAIMS",
+  // Resources library. Create = add your own; Edit / Delete / Approve (shown as
+  // "Hide") act on OTHER people's shared resources — owners always manage their own.
+  "RESOURCES",
 ] as const;
 
 const DEFAULT_PERMISSIONS: Record<string, Record<string, Partial<Record<"canView"|"canCreate"|"canEdit"|"canDelete"|"canApprove"|"canAppraise", boolean>>>> = {
@@ -148,6 +151,19 @@ for (const role of ROLES) {
   for (const m of RECORD_MODULES) {
     DEFAULT_PERMISSIONS[role][m] = { ...RECORD_DEFAULTS[role] };
   }
+}
+
+// Resources library. Every built-in role can browse and add its own material (teachers
+// are EMPLOYEE); moderating anyone else's shared resources starts with Super Admin
+// alone. Custom roles get deny-all from backfill, like every other module.
+const RESOURCE_DEFAULTS: Record<string, Record<"canView"|"canCreate"|"canEdit"|"canDelete"|"canApprove"|"canAppraise", boolean>> = {
+  SUPER_ADMIN: { canView: true, canCreate: true, canEdit: true,  canDelete: true,  canApprove: true,  canAppraise: false },
+  HR_ADMIN:    { canView: true, canCreate: true, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
+  DEPT_HEAD:   { canView: true, canCreate: true, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
+  EMPLOYEE:    { canView: true, canCreate: true, canEdit: false, canDelete: false, canApprove: false, canAppraise: false },
+};
+for (const role of ROLES) {
+  DEFAULT_PERMISSIONS[role].RESOURCES = { ...RESOURCE_DEFAULTS[role] };
 }
 
 /**

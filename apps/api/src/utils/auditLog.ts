@@ -15,7 +15,7 @@ import type { JwtPayload } from "@cadb/types";
  * describes, and the caller has already committed by the time we get here.
  */
 export type AuditAction = "DELETE" | "FORCE_CANCEL";
-export type AuditEntity = "LeaveApplication" | "ReimbursementClaim";
+export type AuditEntity = "LeaveApplication" | "ReimbursementClaim" | "Resource" | "ResourceItem";
 
 export async function recordAudit(opts: {
   request: FastifyRequest;

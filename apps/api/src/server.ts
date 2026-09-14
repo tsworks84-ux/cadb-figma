@@ -47,6 +47,7 @@ import { adminFeedbackRoutes } from "./routes/v1/adminFeedback.js";
 import { revenueRoutes } from "./routes/v1/revenue.js";
 import { notificationSettingRoutes } from "./routes/v1/notificationSettings.js";
 import { notificationRoutes } from "./routes/v1/notifications.js";
+import { resourceRoutes, cleanupAbandonedUploads } from "./routes/v1/resources.js";
 import { confirmExpiredProbations } from "./utils/probation.js";
 import { drainNotifications } from "./utils/notify/dispatcher.js";
 import { createReadStream, existsSync } from "fs";
@@ -149,6 +150,7 @@ await server.register(adminFeedbackRoutes,      { prefix: "/api/v1/feedback" });
 await server.register(revenueRoutes,            { prefix: "/api/v1/revenue" });
 await server.register(notificationSettingRoutes, { prefix: "/api/v1/notification-settings" });
 await server.register(notificationRoutes,        { prefix: "/api/v1/notifications" });
+await server.register(resourceRoutes,            { prefix: "/api/v1/resources" });
 const MIME: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -220,6 +222,17 @@ try {
   };
   await runNotificationDrain();
   setInterval(runNotificationDrain, 30 * 1000).unref();
+
+  // Clear out Resources uploads the browser never finished (tab closed mid-upload).
+  const runUploadCleanup = async () => {
+    try {
+      const n = await cleanupAbandonedUploads();
+      if (n > 0) console.log(`Resources: cleaned up ${n} abandoned upload(s)`);
+    } catch (err) {
+      server.log.error({ err }, "Resources upload cleanup failed");
+    }
+  };
+  setInterval(runUploadCleanup, 60 * 60 * 1000).unref();
 } catch (err) {
   server.log.error(err);
   process.exit(1);

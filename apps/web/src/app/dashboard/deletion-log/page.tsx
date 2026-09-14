@@ -32,6 +32,8 @@ const ACTION_META: Record<string, { label: string; style: string; Icon: React.El
 const ENTITY_LABEL: Record<string, string> = {
   LeaveApplication:   "Leave application",
   ReimbursementClaim: "Reimbursement claim",
+  Resource:           "Resource",
+  ResourceItem:       "Resource item",
   Employee:           "Employee record",
 };
 
@@ -255,6 +257,8 @@ export default function DeletionLogPage() {
           <option value="">All records</option>
           <option value="LeaveApplication">Leave applications</option>
           <option value="ReimbursementClaim">Reimbursement claims</option>
+          <option value="Resource">Resources</option>
+          <option value="ResourceItem">Resource items</option>
           <option value="Employee">Employee records</option>
         </select>
       </div>

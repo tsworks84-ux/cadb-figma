@@ -285,6 +285,7 @@ model Department {
   hrPartner       Employee?              @relation("DeptHrPartner", fields: [hrPartnerId], references: [id])
   memberships     EmployeeDepartment[]
   roleAccess      RoleDepartmentAccess[]
+  resourceShares  ResourceDepartment[]
 
   @@index([code])
   @@index([hrPartnerId])
@@ -446,6 +447,8 @@ model Employee {
   ptmAttendances       PTMAttendee[]
   hrPartnerOf          Department[]        @relation("DeptHrPartner")
   notifications        Notification[]      @relation("NotificationRecipient")
+  resourcesOwned       Resource[]          @relation("ResourceOwner")
+  resourceItemsAdded   ResourceItem[]      @relation("ResourceItemCreator")
 
   @@index([departmentId])
   @@index([designationId])
@@ -2062,4 +2065,109 @@ model Notification {
   @@index([entityType, entityId])
   @@index([createdAt])
   @@index([recipientId, channel, dismissedAt, createdAt])
+}
+
+// ─── RESOURCES ────────────────────────────────────────────────────────────────
+// Teaching material library. CADB holds the structure and the access rules; the
+// bytes live in one academy-owned Google Shared Drive, reached through a service
+// account, so nobody needs a Google login and nothing is lost when staff leave.
+// Every read goes through the API, which is why hidden and private resources are
+// actually private — Drive itself is never shared with viewers.
+
+enum ResourceVisibility {
+  PRIVATE      // owner only — not even Super Admins
+  ALL_STAFF    // everyone holding RESOURCES.canView
+  DEPARTMENTS  // members of the departments in ResourceDepartment
+}
+
+enum ResourceItemKind {
+  FOLDER
+  FILE
+  LINK
+}
+
+enum ResourceItemStatus {
+  UPLOADING  // Drive upload session handed to the browser, not yet confirmed
+  READY
+}
+
+model ResourceCategory {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  /// The six seeded categories. They can be renamed but not deleted.
+  isDefault   Boolean  @default(false)
+  sortOrder   Int      @default(100)
+  /// Drive folder grouping this category's resource folders. Created lazily.
+  driveFolderId String?
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  resources Resource[]
+}
+
+model Resource {
+  id            String             @id @default(cuid())
+  title         String
+  description   String?
+  categoryId    String
+  ownerId       String
+  visibility    ResourceVisibility @default(PRIVATE)
+  isHidden      Boolean            @default(false)
+  hiddenAt      DateTime?
+  hiddenById    String?
+  /// Drive folder holding this resource's files. Created lazily on first upload.
+  driveFolderId String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  deletedAt     DateTime?
+
+  category    ResourceCategory     @relation(fields: [categoryId], references: [id])
+  owner       Employee             @relation("ResourceOwner", fields: [ownerId], references: [id])
+  departments ResourceDepartment[]
+  items       ResourceItem[]
+
+  @@index([categoryId])
+  @@index([ownerId])
+  @@index([visibility, deletedAt])
+}
+
+model ResourceDepartment {
+  resourceId   String
+  departmentId String
+
+  resource   Resource   @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+
+  @@id([resourceId, departmentId])
+  @@index([departmentId])
+}
+
+model ResourceItem {
+  id            String             @id @default(cuid())
+  resourceId    String
+  /// Containing folder; null = top level of the resource.
+  parentId      String?
+  kind          ResourceItemKind
+  status        ResourceItemStatus @default(READY)
+  name          String
+  /// LINK only.
+  url           String?
+  /// FILE: the Drive file. FOLDER: the mirrored Drive folder (lazy).
+  driveFileId   String?
+  mimeType      String?
+  sizeBytes     BigInt?
+  isHidden      Boolean            @default(false)
+  createdById   String
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  deletedAt     DateTime?
+
+  resource  Resource       @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  parent    ResourceItem?  @relation("ResourceItemTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  ResourceItem[] @relation("ResourceItemTree")
+  createdBy Employee       @relation("ResourceItemCreator", fields: [createdById], references: [id])
+
+  @@index([resourceId, parentId])
+  @@index([status, createdAt])
 }

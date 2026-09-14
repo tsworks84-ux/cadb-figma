@@ -8,7 +8,7 @@ import {
   Users, Home, CalendarOff, Receipt, Shield,
   GraduationCap, Settings, LogOut, BarChart3, Building2, User,
   CalendarDays, UsersRound, ListTodo, Megaphone, ClipboardList, School, MessageSquare, IndianRupee, X,
-  Archive,
+  Archive, FolderOpen,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useRouter } from "next/navigation";
@@ -79,6 +79,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
     { name: "Claims", href: "/dashboard/claims", icon: Receipt },
     { name: "Policies", href: "/dashboard/policies", icon: Shield },
     { name: "Training", href: "/dashboard/training", icon: GraduationCap },
+    ...(permissions.RESOURCES?.canView ? [{ name: "Resources", href: "/dashboard/resources", icon: FolderOpen }] : []),
     // Settings is self-service only (own photo, password, preferences), so every
     // role gets it — employees included.
     { name: "Settings", href: "/dashboard/settings", icon: Settings },

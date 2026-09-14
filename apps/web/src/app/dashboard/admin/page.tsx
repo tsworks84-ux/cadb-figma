@@ -28,6 +28,8 @@ type ModuleRow = {
   indent?: boolean;
   /** Super-Admin-only row: shown for completeness, never assignable. */
   locked?: boolean;
+  /** Explains what the columns mean when a module reads them differently. */
+  hint?: string;
 };
 const MODULE_ROWS: ModuleRow[] = [
   { key: "_EMP_HEADER",  label: "Employees",      isHeader: true },
@@ -45,6 +47,7 @@ const MODULE_ROWS: ModuleRow[] = [
   { key: "CLAIMS",    label: "Claims" },
   { key: "POLICIES",  label: "Policies" },
   { key: "TRAINING",  label: "Training" },
+  { key: "RESOURCES", label: "Resources", hint: "Create = add own. Edit, Delete and Approve (= Hide) act on other people's shared resources." },
   { key: "_MIS_HEADER",        label: "MIS Reports",              isHeader: true },
   { key: "MIS_EMP_DIRECTORY",  label: "Employee Directory",       indent: true },
   { key: "MIS_SALARY_STRUCT",  label: "Salary Structures",        indent: true },
@@ -665,6 +668,7 @@ function RolesTab({ isSA }: { isSA: boolean }) {
                               <td className={`py-3 text-sm font-medium text-gray-700 ${row.indent ? "pl-8 pr-3" : "px-5"}`}>
                                 {row.indent && <span className="text-gray-300 mr-1.5">└</span>}
                                 {row.label}
+                                {row.hint && <p className="mt-0.5 max-w-xs text-xs font-normal text-gray-400">{row.hint}</p>}
                               </td>
                               {PERMS.map((perm) => {
                                 const val = mp[perm] ?? false;
