@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { usePermissionsState } from "@/hooks/usePermissions";
+import { ApproverLeaveBalance } from "@/components/leaves/ApproverLeaveBalance";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -131,7 +132,7 @@ function ReviewModal({ leave, canApprove, onClose }: {
     onSuccess: (res) => {
       toast.success(res.data?.message ?? "Decision recorded");
       // Every list that can show this leave, here and on the Leaves page.
-      for (const key of ["all-leave-records", "all-leaves", "pending-leaves", "decided-leaves", "leaves-on-date", "my-leaves", "my-leave-balances"]) {
+      for (const key of ["all-leave-records", "all-leaves", "pending-leaves", "decided-leaves", "leaves-on-date", "my-leaves", "my-leave-balances", "leave-balances"]) {
         queryClient.invalidateQueries({ queryKey: [key] });
       }
       onClose();
@@ -227,6 +228,10 @@ function ReviewModal({ leave, canApprove, onClose }: {
               <p className="text-xs font-medium text-amber-700">Cancellation reason</p>
               <p className="text-sm text-amber-700 mt-0.5">{leave.cancelReason}</p>
             </div>
+          )}
+
+          {canApprove && isPending && (
+            <ApproverLeaveBalance employeeId={leave.employee.id} leaveType={leave.leaveType} totalDays={leave.totalDays} />
           )}
 
           {canApprove && isPending && (

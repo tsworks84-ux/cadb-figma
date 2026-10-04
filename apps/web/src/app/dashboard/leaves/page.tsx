@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuthStore } from "@/store/auth";
+import { ApproverLeaveBalance } from "@/components/leaves/ApproverLeaveBalance";
 import { CalendarDays, Plus, Paperclip, XCircle, ChevronRight, ChevronDown, Clock, AlertTriangle, X, FileText, CheckCircle2, Users, Trash2, Heart, Calendar, CalendarOff, Info, Search } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -631,6 +632,8 @@ function ReviewLeaveModal({
             ))}
           </div>
 
+          <ApproverLeaveBalance employeeId={leave.employee.id} leaveType={leave.leaveType} totalDays={leave.totalDays} />
+
           {/* Reason */}
           <div>
             <p className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
@@ -843,6 +846,8 @@ function LOPApprovalModal({
               </div>
             </div>
           </div>
+
+          <ApproverLeaveBalance employeeId={leave.employee.id} leaveType={leave.leaveType} totalDays={leave.totalDays} />
 
           {/* Decision */}
           <div>
@@ -2435,6 +2440,7 @@ function PendingApprovalsPanel() {
       queryClient.invalidateQueries({ queryKey: ["leaves-on-date"] });
       queryClient.invalidateQueries({ queryKey: ["my-leaves"] });
       queryClient.invalidateQueries({ queryKey: ["my-leave-balances"] });
+      queryClient.invalidateQueries({ queryKey: ["leave-balances"] });
     },
     onError: (e: any) => toast.error(e?.response?.data?.error ?? "Failed to record decision"),
   });

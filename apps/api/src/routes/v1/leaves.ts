@@ -119,6 +119,106 @@ async function hasLeaveAuthorityOver(
   return false;
 }
 
+/**
+ * An employee's leave balances for a fiscal year, with the accrual breakdown and
+ * the year's LoP days. Auto-provisions from the employee's leave policy on first
+ * access. Shared by the self-service `/balances` and the approver's view of a
+ * report's balances, so the two can never show different numbers.
+ */
+async function computeLeaveBalances(employeeId: string, year: number) {
+  const employee = await prisma.employee.findUnique({
+    where: { id: employeeId },
+    select: { joiningDate: true, designation: { select: { grade: true } } },
+  });
+  const joiningDate = employee?.joiningDate ?? null;
+
+  let balances = await prisma.leaveBalance.findMany({
+    where: { employeeId, year },
+    orderBy: { leaveType: "asc" },
+  });
+
+  // Auto-provision from the applicable leave policy if no policy-derived
+  // records exist yet. The test is "no row carries an allocation" rather than
+  // "no rows at all": an approved comp-off creates a COMPENSATORY row with a
+  // zero allocation, and that must not be mistaken for a provisioned year.
+  const isProvisioned = balances.some((b) => b.allocated > 0);
+  if (!isProvisioned && employee?.designation?.grade) {
+    const policy = await prisma.leavePolicy.findFirst({
+      where: {
+        isActive: true,
+        grades: { some: { grade: employee.designation.grade } },
+      },
+      include: { rules: true },
+    });
+
+    if (policy?.rules.length) {
+      // Carry-forward unused balance from the prior FY when the policy allows it.
+      const prevByType = new Map<string, { allocated: number; used: number }>();
+      if (policy.carryForward) {
+        const prev = await prisma.leaveBalance.findMany({
+          where: { employeeId, year: year - 1 },
+        });
+        prev.forEach((p) => prevByType.set(p.leaveType, p));
+      }
+
+      await Promise.all(
+        policy.rules.map((rule) => {
+          const carried = policy.carryForward
+            ? computeCarryForward(prevByType.get(rule.leaveType), year - 1, joiningDate, rule.maxCarryForward)
+            : 0;
+          return prisma.leaveBalance.upsert({
+            where: { employeeId_leaveType_year: { employeeId, leaveType: rule.leaveType, year } },
+            create: { employeeId, leaveType: rule.leaveType, year, allocated: rule.daysPerYear, carried },
+            update: {},
+          });
+        })
+      );
+
+      balances = await prisma.leaveBalance.findMany({
+        where: { employeeId, year },
+        orderBy: { leaveType: "asc" },
+      });
+    }
+  }
+
+  const fyStart = new Date(year, 3, 1);
+  const fyEnd   = new Date(year + 1, 3, 1);
+
+  // LoP days for the year. `lopDays` holds the figure for every leave type —
+  // the whole leave for an unpaid one, the declared days for the rest — so this
+  // is the same number payroll deducts, including 0 for a waived leave.
+  const lopLeaves = await prisma.leaveApplication.findMany({
+    where: {
+      employeeId,
+      status: { in: IN_FORCE_LEAVE_STATUSES },
+      lopDays: { gt: 0 },
+      fromDate: { gte: fyStart, lt: fyEnd },
+    },
+    select: { lopDays: true },
+  });
+  const totalLopDays = lopLeaves.reduce((s, l) => s + l.lopDays, 0);
+
+  const data = balances.map((b) => {
+    const accrued = computeAccrued(b.allocated, year, joiningDate);
+    const availed = b.used + b.pending;
+    return {
+      leaveType: b.leaveType,
+      allocated: b.allocated,
+      accrued,
+      used: b.used,
+      pending: b.pending,
+      availed,
+      // `earned` (approved comp-offs) is added whole — it is credited on
+      // approval, not accrued month by month like an allocation.
+      balance: Math.max(0, accrued + b.carried + b.earned - availed),
+      carried: b.carried,
+      earned: b.earned,
+    };
+  });
+
+  return { data, lopDays: totalLopDays };
+}
+
 export async function leaveRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", authenticate);
 
@@ -462,97 +562,28 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     const q = request.query as Record<string, string>;
     const year = q.year ? parseInt(q.year) : getFiscalYear(new Date());
 
-    const employee = await prisma.employee.findUnique({
-      where: { id: user.sub },
-      select: { joiningDate: true, designation: { select: { grade: true } } },
-    });
-    const joiningDate = employee?.joiningDate ?? null;
+    const { data, lopDays } = await computeLeaveBalances(user.sub, year);
+    return reply.send({ success: true, data, lopDays });
+  });
 
-    let balances = await prisma.leaveBalance.findMany({
-      where: { employeeId: user.sub, year },
-      orderBy: { leaveType: "asc" },
-    });
+  // Another employee's balances, for whoever decides their leave — the reporting
+  // manager, the head of their department, HR / Super Admin, and roles holding
+  // the leave grants. Deliberately not /employees/:id/leave-balances: that runs
+  // through the profile access check, which shuts out EMPLOYEE-role supervisors,
+  // and they are exactly the people approving these requests.
+  fastify.get("/balances/employee/:employeeId", async (request, reply) => {
+    const user = request.user as JwtPayload;
+    const { employeeId } = request.params as { employeeId: string };
+    const q = request.query as Record<string, string>;
+    const year = q.year ? parseInt(q.year) : getFiscalYear(new Date());
 
-    // Auto-provision from the applicable leave policy if no policy-derived
-    // records exist yet. The test is "no row carries an allocation" rather than
-    // "no rows at all": an approved comp-off creates a COMPENSATORY row with a
-    // zero allocation, and that must not be mistaken for a provisioned year.
-    const isProvisioned = balances.some((b) => b.allocated > 0);
-    if (!isProvisioned && employee?.designation?.grade) {
-      const policy = await prisma.leavePolicy.findFirst({
-        where: {
-          isActive: true,
-          grades: { some: { grade: employee.designation.grade } },
-        },
-        include: { rules: true },
-      });
-
-      if (policy?.rules.length) {
-        // Carry-forward unused balance from the prior FY when the policy allows it.
-        const prevByType = new Map<string, { allocated: number; used: number }>();
-        if (policy.carryForward) {
-          const prev = await prisma.leaveBalance.findMany({
-            where: { employeeId: user.sub, year: year - 1 },
-          });
-          prev.forEach((p) => prevByType.set(p.leaveType, p));
-        }
-
-        await Promise.all(
-          policy.rules.map((rule) => {
-            const carried = policy.carryForward
-              ? computeCarryForward(prevByType.get(rule.leaveType), year - 1, joiningDate, rule.maxCarryForward)
-              : 0;
-            return prisma.leaveBalance.upsert({
-              where: { employeeId_leaveType_year: { employeeId: user.sub, leaveType: rule.leaveType, year } },
-              create: { employeeId: user.sub, leaveType: rule.leaveType, year, allocated: rule.daysPerYear, carried },
-              update: {},
-            });
-          })
-        );
-
-        balances = await prisma.leaveBalance.findMany({
-          where: { employeeId: user.sub, year },
-          orderBy: { leaveType: "asc" },
-        });
-      }
+    const allowed = user.sub === employeeId || await hasLeaveAuthorityOver(user, employeeId, "canView");
+    if (!allowed) {
+      return reply.status(403).send({ success: false, error: "Forbidden", statusCode: 403 });
     }
 
-    const fyStart = new Date(year, 3, 1);
-    const fyEnd   = new Date(year + 1, 3, 1);
-
-    // LoP days for the year. `lopDays` holds the figure for every leave type —
-    // the whole leave for an unpaid one, the declared days for the rest — so this
-    // is the same number payroll deducts, including 0 for a waived leave.
-    const lopLeaves = await prisma.leaveApplication.findMany({
-      where: {
-        employeeId: user.sub,
-        status: { in: IN_FORCE_LEAVE_STATUSES },
-        lopDays: { gt: 0 },
-        fromDate: { gte: fyStart, lt: fyEnd },
-      },
-      select: { lopDays: true },
-    });
-    const totalLopDays = lopLeaves.reduce((s, l) => s + l.lopDays, 0);
-
-    const data = balances.map((b) => {
-      const accrued = computeAccrued(b.allocated, year, joiningDate);
-      const availed = b.used + b.pending;
-      return {
-        leaveType: b.leaveType,
-        allocated: b.allocated,
-        accrued,
-        used: b.used,
-        pending: b.pending,
-        availed,
-        // `earned` (approved comp-offs) is added whole — it is credited on
-        // approval, not accrued month by month like an allocation.
-        balance: Math.max(0, accrued + b.carried + b.earned - availed),
-        carried: b.carried,
-        earned: b.earned,
-      };
-    });
-
-    return reply.send({ success: true, data, lopDays: totalLopDays });
+    const { data, lopDays } = await computeLeaveBalances(employeeId, year);
+    return reply.send({ success: true, data, lopDays });
   });
 
   // Get my leaves
