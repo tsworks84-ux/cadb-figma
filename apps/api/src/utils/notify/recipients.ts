@@ -10,6 +10,8 @@ export const RECIPIENT_SELECT = {
   whatsappOptIn: true,
   officialPhone: true,
   personalPhone: true,
+  emailTeamLeaveAlerts: true,
+  emailTeamClaimAlerts: true,
 } as const;
 
 export type Recipient = {
@@ -21,6 +23,8 @@ export type Recipient = {
   whatsappOptIn: boolean;
   officialPhone: string | null;
   personalPhone: string | null;
+  emailTeamLeaveAlerts: boolean;
+  emailTeamClaimAlerts: boolean;
   /** Why this person is being told — used for ordering and for debugging. */
   reason: "SUPERVISOR" | "HR_ADMIN" | "SUPER_ADMIN" | "SELF" | "EVERYONE";
 };

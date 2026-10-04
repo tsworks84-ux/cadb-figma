@@ -1,0 +1,2 @@
+ALTER TABLE "Employee" ADD COLUMN "emailTeamLeaveAlerts" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN "emailTeamClaimAlerts" BOOLEAN NOT NULL DEFAULT true;

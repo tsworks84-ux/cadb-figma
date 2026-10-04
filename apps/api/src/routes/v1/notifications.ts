@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { prisma } from "@cadb/db";
 import { authenticate } from "../../middleware/authenticate.js";
 import type { JwtPayload } from "@cadb/types";
@@ -18,6 +19,11 @@ import { EVENT_META, type NotifyEvent } from "../../utils/notify/events.js";
 
 /** Enough to fill the dropdown and its "older" scroll without paging. */
 const FEED_LIMIT = 50;
+
+const preferencesSchema = z.object({
+  emailTeamLeaveAlerts: z.boolean().optional(),
+  emailTeamClaimAlerts: z.boolean().optional(),
+}).strict();
 
 export async function notificationRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", authenticate);
@@ -56,6 +62,54 @@ export async function notificationRoutes(fastify: FastifyInstance) {
       success: true,
       data: { items, unreadCount: items.filter((i) => !i.read).length },
     });
+  });
+
+  /**
+   * The signed-in employee's own email mutes for team requests. `receivesTeamAlerts`
+   * mirrors resolveApprovalRecipients — someone with direct reports, or an
+   * HR_ADMIN / SUPER_ADMIN — so Settings only offers switches that do something.
+   */
+  fastify.get("/preferences", async (request, reply) => {
+    const user = request.user as JwtPayload;
+
+    const [me, reports] = await Promise.all([
+      prisma.employee.findUnique({
+        where: { id: user.sub },
+        select: { role: true, emailTeamLeaveAlerts: true, emailTeamClaimAlerts: true },
+      }),
+      prisma.employee.count({
+        where: { reportingToId: user.sub, deletedAt: null, status: { not: "TERMINATED" } },
+      }),
+    ]);
+    if (!me) {
+      return reply.status(404).send({ success: false, error: "Employee not found", statusCode: 404 });
+    }
+
+    return reply.send({
+      success: true,
+      data: {
+        emailTeamLeaveAlerts: me.emailTeamLeaveAlerts,
+        emailTeamClaimAlerts: me.emailTeamClaimAlerts,
+        receivesTeamAlerts: reports > 0 || me.role === "HR_ADMIN" || me.role === "SUPER_ADMIN",
+      },
+    });
+  });
+
+  /** Flip either mute. Only the caller's own record is ever touched. */
+  fastify.patch("/preferences", async (request, reply) => {
+    const user = request.user as JwtPayload;
+    const parsed = preferencesSchema.safeParse(request.body);
+    if (!parsed.success || Object.keys(parsed.data).length === 0) {
+      return reply.status(400).send({ success: false, error: "Validation failed", statusCode: 400 });
+    }
+
+    const data = await prisma.employee.update({
+      where: { id: user.sub },
+      data: parsed.data,
+      select: { emailTeamLeaveAlerts: true, emailTeamClaimAlerts: true },
+    });
+
+    return reply.send({ success: true, data });
   });
 
   /** Mark one as read. Opening a notice is not the same as clearing it. */

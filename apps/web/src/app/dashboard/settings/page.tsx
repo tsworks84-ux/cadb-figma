@@ -2,7 +2,7 @@
 
 import { useAuthStore } from "@/store/auth";
 import { useState, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { resolvePhotoUrl } from "@/lib/utils";
 import { toast } from "sonner";
@@ -86,12 +86,32 @@ export default function SettingsPage() {
 
   const [notifications, setNotifications] = useState({
     emailNotices: true,
-    emailLeaves: true,
-    emailClaims: true,
     emailTasks: true,
     pushNotices: true,
     pushLeaves: false,
     pushClaims: false,
+  });
+
+  // Real, server-backed mutes for team leave / claim emails. Everything else in
+  // the Notification Preferences card is still local-only.
+  const qc = useQueryClient();
+  const { data: teamAlerts } = useQuery<{
+    emailTeamLeaveAlerts: boolean;
+    emailTeamClaimAlerts: boolean;
+    receivesTeamAlerts: boolean;
+  }>({
+    queryKey: ["notification-preferences"],
+    queryFn: () => api.get("/api/v1/notifications/preferences").then((r) => r.data.data),
+  });
+  const teamAlertMutation = useMutation({
+    mutationFn: (patch: { emailTeamLeaveAlerts?: boolean; emailTeamClaimAlerts?: boolean }) =>
+      api.patch("/api/v1/notifications/preferences", patch).then((r) => r.data.data),
+    onSuccess: (data, patch) => {
+      qc.setQueryData(["notification-preferences"], (old: any) => ({ ...old, ...data }));
+      const on = Object.values(patch)[0];
+      toast.success(on ? "Emails turned on" : "Emails turned off");
+    },
+    onError: () => toast.error("Couldn't save — try again"),
   });
 
   const [preferences, setPreferences] = useState({
@@ -348,16 +368,53 @@ export default function SettingsPage() {
         </h2>
 
         <div className="space-y-6">
+          {/* Team request emails — saved to the server as soon as they're flipped */}
+          {teamAlerts?.receivesTeamAlerts && (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 mb-1 flex items-center gap-2">
+                <Mail size={15} /> Team Request Emails
+              </h3>
+              <p className="text-xs text-gray-500 mb-3 ml-6">
+                Emails when someone reporting to you raises a request. You&apos;ll still see these in the bell either way.
+              </p>
+              <div className="space-y-4 ml-6">
+                {[
+                  {
+                    key: "emailTeamLeaveAlerts" as const,
+                    label: "Leave requests",
+                    hint: "New leave and comp-off requests, and leave cancellation requests",
+                  },
+                  {
+                    key: "emailTeamClaimAlerts" as const,
+                    label: "Reimbursement claims",
+                    hint: "New claims and claim cancellation requests",
+                  },
+                ].map(({ key, label, hint }) => (
+                  <div key={key} className="flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm text-gray-700">{label}</p>
+                      <p className="text-xs text-gray-400">{hint}</p>
+                    </div>
+                    <ToggleSwitch
+                      checked={teamAlerts[key]}
+                      onChange={(v) => {
+                        if (!teamAlertMutation.isPending) teamAlertMutation.mutate({ [key]: v });
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Email */}
-          <div>
+          <div className={teamAlerts?.receivesTeamAlerts ? "pt-4 border-t border-gray-200" : ""}>
             <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
               <Mail size={15} /> Email Notifications
             </h3>
             <div className="space-y-3 ml-6">
               {[
                 { key: "emailNotices" as const, label: "Notice Board updates" },
-                { key: "emailLeaves" as const, label: "Leave requests and approvals" },
-                { key: "emailClaims" as const, label: "Claim requests and approvals" },
                 { key: "emailTasks" as const, label: "Task assignments and updates" },
               ].map(({ key, label }) => (
                 <label key={key} className="flex items-center justify-between cursor-pointer">

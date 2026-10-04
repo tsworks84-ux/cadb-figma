@@ -353,6 +353,12 @@ model Employee {
   // is the kill switch a person controls — false means never message this number.
   whatsappNumber  String?
   whatsappOptIn   Boolean          @default(true)
+  // Self-service mute for the approval-chain EMAILS this person receives about
+  // other people's requests (a reporting manager hearing a report applied for
+  // leave). Leaves covers comp-off too. The bell is unaffected, and so are
+  // notices about the person's own requests.
+  emailTeamLeaveAlerts Boolean     @default(true)
+  emailTeamClaimAlerts Boolean     @default(true)
 
   // Address
   currentAddress  Json?

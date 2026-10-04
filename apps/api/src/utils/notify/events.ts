@@ -73,3 +73,18 @@ export const GOES_TO_APPLICANT: ReadonlySet<NotifyEvent> = new Set<NotifyEvent>(
   "CLAIM_REJECTED",
   "CLAIM_PAID",
 ]);
+
+/**
+ * Approval-chain events whose EMAIL a recipient can mute for themselves from
+ * Settings, and the Employee flag that does it. Only notices about someone
+ * else's request are listed — nobody can mute word of their own leave being
+ * decided. Comp-off rides on the leave switch: to a manager it is a leave
+ * request like any other.
+ */
+export const TEAM_ALERT_PREF: Partial<Record<NotifyEvent, "emailTeamLeaveAlerts" | "emailTeamClaimAlerts">> = {
+  LEAVE_APPLIED:          "emailTeamLeaveAlerts",
+  LEAVE_CANCEL_REQUESTED: "emailTeamLeaveAlerts",
+  COMP_OFF_REQUESTED:     "emailTeamLeaveAlerts",
+  CLAIM_SUBMITTED:        "emailTeamClaimAlerts",
+  CLAIM_CANCEL_REQUESTED: "emailTeamClaimAlerts",
+};

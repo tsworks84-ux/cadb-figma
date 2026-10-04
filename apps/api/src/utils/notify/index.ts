@@ -3,7 +3,7 @@ import { whatsappNumberFor } from "../phone.js";
 import {
   resolveApprovalRecipients, resolveSelfRecipient, resolveEveryoneElse, type Recipient,
 } from "./recipients.js";
-import { EVENT_META, GOES_TO_APPLICANT, type NotifyChannel, type NotifyEvent } from "./events.js";
+import { EVENT_META, GOES_TO_APPLICANT, TEAM_ALERT_PREF, type NotifyChannel, type NotifyEvent } from "./events.js";
 import { channelsEnabledFor } from "./settings.js";
 import type { NotifyPayload } from "./templates.js";
 import { emailConfigured } from "./channels/email.js";
@@ -310,7 +310,12 @@ function buildRows(
 
   const rows: any[] = [];
 
-  if (channels.includes("EMAIL") && recipient.email) {
+  // The recipient may have muted email for this kind of team request in
+  // Settings. No row rather than a SKIPPED one, same as a WhatsApp opt-out.
+  const mutePref = TEAM_ALERT_PREF[event];
+  const emailMuted = mutePref ? recipient[mutePref] === false : false;
+
+  if (channels.includes("EMAIL") && recipient.email && !emailMuted) {
     rows.push({ ...common, channel: "EMAIL" as const, destination: recipient.email });
   }
 
