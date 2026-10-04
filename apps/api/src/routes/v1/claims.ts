@@ -30,7 +30,15 @@ const createClaimSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
   claimedAmount: z.number().positive(),
+  // YYYY-MM-DD — the day the expense was incurred. Can't be in the future
+  // (checked against the IST calendar date in the handler).
+  expenseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
+
+/** Today's calendar date in IST as YYYY-MM-DD, so a 1 a.m. claim isn't judged against UTC's yesterday. */
+function todayIST(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+}
 
 /**
  * May the caller force-cancel or delete anyone's claim? Super Admin and HR only —
@@ -107,8 +115,16 @@ export async function claimRoutes(fastify: FastifyInstance) {
     if (!claimTypeCfg || !claimTypeCfg.isActive) {
       return reply.status(400).send({ success: false, error: "Invalid or inactive claim type", statusCode: 400 });
     }
+    const { expenseDate, ...rest } = parsed.data;
+    const expense = new Date(`${expenseDate}T00:00:00.000Z`);
+    if (Number.isNaN(expense.getTime()) || expense.toISOString().slice(0, 10) !== expenseDate) {
+      return reply.status(400).send({ success: false, error: "Invalid expense date", statusCode: 400 });
+    }
+    if (expenseDate > todayIST()) {
+      return reply.status(400).send({ success: false, error: "Expense date cannot be in the future", statusCode: 400 });
+    }
     const data = await prisma.reimbursementClaim.create({
-      data: { claimNumber: generateClaimNumber(), employeeId: user.sub, ...parsed.data, status: "DRAFT" },
+      data: { claimNumber: generateClaimNumber(), employeeId: user.sub, ...rest, expenseDate: expense, status: "DRAFT" },
       include: { receipts: true },
     });
     return reply.status(201).send({ success: true, data });

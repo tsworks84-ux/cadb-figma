@@ -62,8 +62,15 @@ const claimSchema = z.object({
   title: z.string().min(1, "Required"),
   description: z.string().optional(),
   claimedAmount: z.coerce.number().positive("Must be positive"),
+  expenseDate: z.string().min(1, "Required").refine((d) => d <= todayLocal(), "Can't be in the future"),
 });
 type ClaimForm = z.infer<typeof claimSchema>;
+
+/** Today as YYYY-MM-DD in the browser's timezone — the max for the expense date picker. */
+function todayLocal() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -487,6 +494,7 @@ function ClaimDetailModal({ claimId, onClose, isAdmin }: {
 
         <div className="grid grid-cols-2 gap-4 rounded-xl bg-gray-50 border border-gray-100 p-4">
           <Field label="Claimed Amount" value={formatCurrency(claim.claimedAmount)} />
+          <Field label="Expense Date" value={claim.expenseDate ? formatDate(claim.expenseDate) : "—"} />
           {claim.approvedAmount != null && (
             <Field label="Approved Amount" value={formatCurrency(claim.approvedAmount)} />
           )}
@@ -825,6 +833,10 @@ function ClaimApprovalModal({ claimId, onClose }: { claimId: string; onClose: ()
               <p className="text-sm font-medium text-gray-900">{claim.title}</p>
             </div>
             <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <p className="text-xs text-gray-500 mb-1">Expense Date</p>
+              <p className="text-sm font-medium text-gray-900">{claim.expenseDate ? formatDate(claim.expenseDate) : "—"}</p>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
               <p className="text-xs text-gray-500 mb-1">Submitted On</p>
               <p className="text-sm font-medium text-gray-900">{formatDate(claim.createdAt)}</p>
             </div>
@@ -1117,6 +1129,22 @@ function NewClaimModal({ onClose, onCreated }: { onClose: () => void; onCreated:
               {errors.claimedAmount && <p className="text-xs text-red-500 mt-1">{errors.claimedAmount.message}</p>}
             </div>
 
+            {/* Expense Date */}
+            <div>
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+                <Calendar size={16} />
+                Expense Date <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="date"
+                max={todayLocal()}
+                {...register("expenseDate")}
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 text-sm bg-white"
+              />
+              <p className="text-xs text-gray-500 mt-1">The day you spent the money, e.g. the date of the cab ride.</p>
+              {errors.expenseDate && <p className="text-xs text-red-500 mt-1">{errors.expenseDate.message}</p>}
+            </div>
+
             {/* Description */}
             <div>
               <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
@@ -1205,11 +1233,14 @@ type ClaimColumnFilters = {
   status: string;
   dateFrom: string;
   dateTo: string;
+  expenseFrom: string;
+  expenseTo: string;
 };
 
 const EMPTY_CLAIM_FILTERS: ClaimColumnFilters = {
   employee: "", claimNumber: "", claimType: "", title: "",
   amountMin: "", amountMax: "", status: "", dateFrom: "", dateTo: "",
+  expenseFrom: "", expenseTo: "",
 };
 
 function countActiveFilters(f: ClaimColumnFilters) {
@@ -1249,6 +1280,13 @@ function applyClaimFilters(claims: any[], f: ClaimColumnFilters) {
       const created = new Date(c.createdAt);
       if (from && created < from) return false;
       if (to && created > to) return false;
+    }
+    if (f.expenseFrom || f.expenseTo) {
+      // @db.Date comes back as midnight UTC, so the ISO day is the calendar day the user picked.
+      const spent = c.expenseDate ? String(c.expenseDate).slice(0, 10) : null;
+      if (!spent) return false;
+      if (f.expenseFrom && spent < f.expenseFrom) return false;
+      if (f.expenseTo && spent > f.expenseTo) return false;
     }
     return true;
   });
@@ -1342,6 +1380,12 @@ function ClaimFilterRow({ filters, onChange, typeOptions, statusOptions }: {
           <FilterText type="date" value={filters.dateTo} onChange={(v) => onChange({ dateTo: v })} placeholder="To" />
         </div>
       </th>
+      <th className="px-3 py-2 min-w-[150px]">
+        <div className="flex flex-col gap-1">
+          <FilterText type="date" value={filters.expenseFrom} onChange={(v) => onChange({ expenseFrom: v })} placeholder="From" />
+          <FilterText type="date" value={filters.expenseTo} onChange={(v) => onChange({ expenseTo: v })} placeholder="To" />
+        </div>
+      </th>
       <th className="px-3 py-2" />
     </tr>
   );
@@ -1399,7 +1443,10 @@ function MonthGroup({ monthKey, claims, onOpen, prefetch, showEmployee = false, 
                   <td className="px-5 py-4 text-sm text-gray-800 max-w-xs truncate">{claim.title}</td>
                   <td className="px-5 py-4 text-sm font-semibold text-gray-900">{formatCurrency(claim.claimedAmount)}</td>
                   <td className="px-5 py-4"><Badge status={claim.status} /></td>
-                  <td className="px-5 py-4 text-xs text-gray-400">{formatDate(claim.createdAt)}</td>
+                  <td className="px-5 py-4 text-xs text-gray-400">
+                    {claim.expenseDate && <span className="block text-gray-600">Spent {formatDate(claim.expenseDate)}</span>}
+                    Filed {formatDate(claim.createdAt)}
+                  </td>
                   {!showEmployee && (
                     <td className="px-5 py-4">
                       {claim.receipts?.length > 0
@@ -1826,7 +1873,7 @@ export default function ClaimsPage() {
                         <table className="w-full">
                           <thead>
                             <tr className="border-b border-gray-100 bg-gray-50">
-                              {["Claim #", "Type", "Title", "Amount", "Status", "Date", "Docs", ""].map((h) => (
+                              {["Claim #", "Type", "Title", "Amount", "Status", "Submitted", "Expense Date", "Docs", ""].map((h) => (
                                 <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>
                               ))}
                             </tr>
@@ -1840,6 +1887,7 @@ export default function ClaimsPage() {
                                 <td className="px-5 py-4 text-sm font-semibold text-gray-900">{formatCurrency(claim.claimedAmount)}</td>
                                 <td className="px-5 py-4"><Badge status={claim.status} /></td>
                                 <td className="px-5 py-4 text-xs text-gray-400">{formatDate(claim.createdAt)}</td>
+                                <td className="px-5 py-4 text-xs text-gray-600">{claim.expenseDate ? formatDate(claim.expenseDate) : "—"}</td>
                                 <td className="px-5 py-4">
                                   {claim.receipts?.length > 0
                                     ? <span className="inline-flex items-center gap-1 text-xs" style={{ color: "#2C3E7C" }}><Paperclip className="h-3 w-3" />{claim.receipts.length}</span>
@@ -1939,7 +1987,7 @@ export default function ClaimsPage() {
                         <div className="flex items-center gap-3 mt-1 flex-wrap">
                           <span className="text-xs text-gray-500">{claim.claimType}</span>
                           <span className="text-sm font-semibold text-gray-900">{formatCurrency(claim.claimedAmount)}</span>
-                          <span className="text-xs text-gray-400">{formatDate(claim.createdAt)}</span>
+                          <span className="text-xs text-gray-400">{claim.expenseDate ? `Spent ${formatDate(claim.expenseDate)} · ` : ""}Filed {formatDate(claim.createdAt)}</span>
                           {claim.receipts?.length > 0 && (
                             <span className="inline-flex items-center gap-1 text-xs" style={{ color: "#2C3E7C" }}>
                               <Paperclip className="h-3 w-3" />{claim.receipts.length} doc{claim.receipts.length > 1 ? "s" : ""}
@@ -2045,7 +2093,8 @@ export default function ClaimsPage() {
                                 <th className="px-5 py-3">Title</th>
                                 <th className="px-5 py-3">Amount</th>
                                 <th className="px-5 py-3">Status</th>
-                                <th className="px-5 py-3">Date</th>
+                                <th className="px-5 py-3">Submitted</th>
+                                <th className="px-5 py-3">Expense Date</th>
                                 <th className="px-5 py-3"></th>
                               </tr>
                               {showAllFilters && (
@@ -2060,7 +2109,7 @@ export default function ClaimsPage() {
                             <tbody className="divide-y divide-gray-50">
                               {curMonthClaims.length === 0 ? (
                                 <tr>
-                                  <td colSpan={8} className="px-5 py-8 text-center text-sm text-gray-400">
+                                  <td colSpan={9} className="px-5 py-8 text-center text-sm text-gray-400">
                                     {isFiltering ? "No claims this month match these filters." : "No claims this month."}
                                   </td>
                                 </tr>
@@ -2073,6 +2122,7 @@ export default function ClaimsPage() {
                                   <td className="px-5 py-3 text-sm font-semibold">{formatCurrency(claim.claimedAmount)}</td>
                                   <td className="px-5 py-3"><Badge status={claim.status} /></td>
                                   <td className="px-5 py-3 text-xs text-gray-400">{formatDate(claim.createdAt)}</td>
+                                  <td className="px-5 py-3 text-xs text-gray-600">{claim.expenseDate ? formatDate(claim.expenseDate) : "—"}</td>
                                   <td className="px-5 py-3">
                                     <button onClick={() => openClaim(claim.id)} className="text-xs font-medium hover:underline" style={{ color: "#2C3E7C" }}>View</button>
                                   </td>

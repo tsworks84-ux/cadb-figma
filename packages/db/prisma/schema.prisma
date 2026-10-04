@@ -739,6 +739,10 @@ model ReimbursementClaim {
   description  String?
   claimedAmount Float
   approvedAmount Float?
+  // The day the money was actually spent (e.g. the cab ride), not the day the
+  // claim was filed. Nullable only because claims raised before this field
+  // existed never captured it — the API requires it on every new claim.
+  expenseDate  DateTime?   @db.Date
   status       ClaimStatus @default(DRAFT)
   approverId   String?
   approvedAt   DateTime?

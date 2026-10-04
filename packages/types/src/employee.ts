@@ -65,6 +65,8 @@ export interface CreateClaimDto {
   title: string;
   description?: string;
   claimedAmount: number;
+  /** YYYY-MM-DD — the day the expense was incurred. */
+  expenseDate: string;
 }
 
 export interface CreateQualificationDto {

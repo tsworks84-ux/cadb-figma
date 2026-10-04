@@ -57,6 +57,7 @@ type ClaimRecord = {
   approvedAmount: number | null;
   status: string;
   createdAt: string;
+  expenseDate: string | null;
   approvedAt: string | null;
   rejectedAt: string | null;
   paidAt: string | null;
@@ -186,9 +187,13 @@ function ReviewModal({ claim, canApprove, onClose }: {
                 {claim.approvedAmount != null ? formatCurrency(claim.approvedAmount) : "—"}
               </p>
             </div>
-            <div className="col-span-2">
+            <div>
               <p className="text-xs uppercase tracking-wide text-gray-400">Submitted on</p>
               <p className="mt-0.5 text-sm text-gray-800">{fmt(claim.createdAt)}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide text-gray-400">Expense date</p>
+              <p className="mt-0.5 text-sm text-gray-800">{claim.expenseDate ? fmt(claim.expenseDate) : "—"}</p>
             </div>
           </div>
 
@@ -503,10 +508,10 @@ export default function AllClaimRecordsPage() {
           <div className="py-16 text-center text-sm text-gray-400">No claim records match these filters.</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[52rem]">
+            <table className="w-full min-w-[58rem]">
               <thead className="border-b border-gray-100 bg-gray-50">
                 <tr>
-                  {["Employee", "Claim", "Type", "Claimed", "Approved", "Status", "Submitted", ""].map((h) => (
+                  {["Employee", "Claim", "Type", "Claimed", "Approved", "Status", "Submitted", "Expense Date", ""].map((h) => (
                     <th key={h} className="whitespace-nowrap px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                       {h}
                     </th>
@@ -543,6 +548,7 @@ export default function AllClaimRecordsPage() {
                       </span>
                     </td>
                     <td className="whitespace-nowrap px-5 py-3 text-sm text-gray-500">{fmtShort(c.createdAt)}</td>
+                    <td className="whitespace-nowrap px-5 py-3 text-sm text-gray-500">{c.expenseDate ? fmtShort(c.expenseDate) : "—"}</td>
                     <td className="whitespace-nowrap px-5 py-3 text-right">
                       <span className="text-xs font-medium text-[#2C3E7C]">
                         {canApprove && c.status === "SUBMITTED" ? "Review" : "View"}
