@@ -12,3 +12,6 @@ ecosystem.staging.config.cjs
 prisma/migrations/
 uploads/
 .claude/
+
+# Phase 2 partner-db generated Prisma client
+packages/partner-db/generated/

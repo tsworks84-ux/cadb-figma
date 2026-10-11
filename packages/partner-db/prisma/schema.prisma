@@ -1,0 +1,324 @@
+// Partner (Phase 2) data — projects, partner users and their grants.
+//
+// Lives in its own Postgres schema, "partner", inside the CADB database. CADB's
+// own Prisma schema and migrations never see it.
+//
+// Rules:
+//  - Columns ending in a CADB model name + "Id" (schoolId, batchId, gradeId,
+//    academicYearId, employeeId, studentId) hold CADB ids as plain strings.
+//    There are deliberately NO foreign keys into CADB's "public" schema: a
+//    cross-schema FK would make Postgres refuse CADB's own deletes of a school
+//    or batch, changing CADB's behaviour. Dangling ids are caught by the
+//    partner-admin data-quality page instead.
+//  - The client is generated to ../generated/client, never the default
+//    @prisma/client location, so it cannot overwrite CADB's client.
+//  - PARTNER_DATABASE_URL must carry ?schema=partner.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("PARTNER_DATABASE_URL")
+}
+
+// ─── ENUMS ──────────────────────────────────────────────────────────────────
+
+enum ProjectType {
+  SIP // School Integrated Program
+  ASP // After School Program
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum SchoolAccessLevel {
+  FULL      // every granted report, down to individual students
+  SUMMARY   // school totals only
+  BENCHMARK // anonymised inside group comparisons only
+}
+
+enum DataGroup {
+  IDENTITY       // name, roll no., grade, batch, board
+  ACADEMIC       // marks, ranks, attendance, submissions
+  PERSONAL       // date of birth, gender, photo
+  PARENT_CONTACT // parent name, phone, email, address
+  FEES           // total, paid, balance
+}
+
+enum AccessAction {
+  LOGIN
+  VIEW
+  DOWNLOAD
+}
+
+enum AdminRole {
+  OWNER   // can also add and remove partner-admin users
+  MANAGER // projects, partner users and grants
+}
+
+// ─── PARTNERS & PROJECTS ────────────────────────────────────────────────────
+
+model Partner {
+  id          String   @id @default(cuid())
+  name        String   @unique // internal name
+  displayName String           // what the partner's own users see
+  isInternal  Boolean  @default(false) // Centum's own programs; never listed to outside partners
+  logoUrl     String?
+  brandColor  String?
+  domain      String?  @unique
+  emailFrom   String?
+  isArchived  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  projects Project[]
+  roles    PartnerRole[]
+  users    PartnerUser[]
+}
+
+model Project {
+  id                  String        @id @default(cuid())
+  partnerId           String
+  type                ProjectType
+  internalName        String
+  displayName         String        // what partner users see
+  startDate           DateTime      @db.Date
+  startAcademicYearId String        // CADB AcademicYear.id
+  status              ProjectStatus @default(ACTIVE)
+  archivedAt          DateTime?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  partner       Partner               @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  grades        ProjectGrade[]
+  schools       ProjectSchool[]
+  batches       ProjectBatch[]
+  projectGrants PartnerProjectGrant[]
+
+  @@unique([partnerId, internalName])
+  @@index([status])
+}
+
+model ProjectGrade {
+  projectId String
+  gradeId   String // CADB Grade.id
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, gradeId])
+}
+
+model Board {
+  id        String   @id @default(cuid())
+  code      String   @unique // CBSE, ICSE, ISC, IGCSE, CIE, IB, PUC …
+  name      String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  schoolGrades ProjectSchoolGrade[]
+}
+
+model ProjectSchool {
+  id        String   @id @default(cuid())
+  projectId String
+  schoolId  String   // CADB School.id
+  createdAt DateTime @default(now())
+
+  project Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  grades  ProjectSchoolGrade[]
+
+  @@unique([projectId, schoolId])
+  @@index([schoolId])
+}
+
+// Board per grade for one school within one project. One row per grade means
+// two boards can never claim the same grade; the admin UI shows these as
+// ranges (e.g. ICSE 8–10, ISC 11–12).
+model ProjectSchoolGrade {
+  projectSchoolId String
+  gradeId         String // CADB Grade.id
+  boardId         String
+
+  projectSchool ProjectSchool @relation(fields: [projectSchoolId], references: [id], onDelete: Cascade)
+  board         Board         @relation(fields: [boardId], references: [id], onDelete: Restrict)
+
+  @@id([projectSchoolId, gradeId])
+  @@index([boardId])
+}
+
+// A CADB batch belongs to at most one project. Unassigned batches are
+// invisible to every partner user. Restrict stops a project with batches from
+// being hard-deleted; such projects are archived instead.
+model ProjectBatch {
+  batchId      String   @id // CADB Batch.id
+  projectId    String
+  assignedAt   DateTime @default(now())
+  assignedById String?  // AdminUser.id
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@index([projectId])
+}
+
+// ─── PARTNER USERS & ACCESS ─────────────────────────────────────────────────
+
+model PartnerRole {
+  id          String   @id @default(cuid())
+  partnerId   String
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  partner     Partner                 @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  permissions PartnerRolePermission[]
+  users       PartnerUser[]
+
+  @@unique([partnerId, name])
+}
+
+model PartnerRolePermission {
+  roleId      String
+  reportKey   String      // key from the partner-api report catalog
+  canView     Boolean     @default(false)
+  canDownload Boolean     @default(false)
+  dataGroups  DataGroup[] @default([])
+
+  role PartnerRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, reportKey])
+}
+
+model PartnerUser {
+  id                 String    @id @default(cuid())
+  partnerId          String
+  roleId             String
+  email              String    @unique
+  name               String
+  passwordHash       String?   // null until the invite is accepted
+  mustChangePassword Boolean   @default(true)
+  isActive           Boolean   @default(true)
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  partner       Partner               @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  role          PartnerRole           @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  overrides     PartnerUserOverride[]
+  projectGrants PartnerProjectGrant[]
+  sessions      PartnerSession[]
+  accessLogs    PartnerAccessLog[]
+
+  @@index([partnerId])
+}
+
+// Per-user exception to the role, for one report.
+model PartnerUserOverride {
+  userId      String
+  reportKey   String
+  canView     Boolean     @default(false)
+  canDownload Boolean     @default(false)
+  dataGroups  DataGroup[] @default([])
+
+  user PartnerUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, reportKey])
+}
+
+model PartnerProjectGrant {
+  userId      String
+  projectId   String
+  grantedAt   DateTime @default(now())
+  grantedById String?  // AdminUser.id
+
+  user         PartnerUser          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project      Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  schoolGrants PartnerSchoolGrant[]
+
+  @@id([userId, projectId])
+  @@index([projectId])
+}
+
+// School access inside a project grant. Removing the project grant removes
+// its school grants with it.
+model PartnerSchoolGrant {
+  userId    String
+  projectId String
+  schoolId  String            // CADB School.id
+  level     SchoolAccessLevel
+
+  projectGrant PartnerProjectGrant @relation(fields: [userId, projectId], references: [userId, projectId], onDelete: Cascade)
+
+  @@id([userId, projectId, schoolId])
+}
+
+model PartnerSession {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  ip        String?
+  userAgent String?
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  user PartnerUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PartnerAccessLog {
+  id        String       @id @default(cuid())
+  userId    String
+  action    AccessAction
+  reportKey String?
+  projectId String?
+  schoolIds String[]     @default([])
+  filters   Json?
+  rowCount  Int?         // student rows in a view or file
+  ip        String?
+  at        DateTime     @default(now())
+
+  user PartnerUser @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, at])
+  @@index([at])
+}
+
+// ─── PARTNER-ADMIN (Centum staff) ───────────────────────────────────────────
+
+// Allow-list of CADB employees who may use partner-admin. They sign in with
+// their CADB credentials; this table decides whether they are let in.
+model AdminUser {
+  id          String    @id @default(cuid())
+  employeeId  String    @unique // CADB Employee.id
+  role        AdminRole @default(MANAGER)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  createdById String?
+
+  auditLogs AdminAuditLog[]
+}
+
+model AdminAuditLog {
+  id          String   @id @default(cuid())
+  adminUserId String
+  action      String   // e.g. project.create, grant.school.set, user.deactivate
+  entityType  String
+  entityId    String
+  before      Json?
+  after       Json?
+  at          DateTime @default(now())
+
+  adminUser AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Restrict)
+
+  @@index([entityType, entityId])
+  @@index([at])
+}
