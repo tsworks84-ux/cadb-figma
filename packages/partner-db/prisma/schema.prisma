@@ -294,17 +294,39 @@ model PartnerAccessLog {
 
 // ─── PARTNER-ADMIN (Centum staff) ───────────────────────────────────────────
 
-// Allow-list of CADB employees who may use partner-admin. They sign in with
-// their CADB credentials; this table decides whether they are let in.
+// Centum staff who may use partner-admin. They have their own password here
+// rather than signing in with CADB credentials: reusing CADB logins would mean
+// granting the partner service read access to employee password hashes.
 model AdminUser {
-  id          String    @id @default(cuid())
-  employeeId  String    @unique // CADB Employee.id
-  role        AdminRole @default(MANAGER)
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  createdById String?
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  name               String
+  employeeId         String?   @unique // CADB Employee.id, for reference
+  passwordHash       String
+  mustChangePassword Boolean   @default(true)
+  role               AdminRole @default(MANAGER)
+  isActive           Boolean   @default(true)
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+  createdById        String?
 
   auditLogs AdminAuditLog[]
+  sessions  AdminSession[]
+}
+
+model AdminSession {
+  id          String    @id @default(cuid())
+  adminUserId String
+  tokenHash   String    @unique // sha256 of the bearer token; the token itself is never stored
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime
+  revokedAt   DateTime?
+
+  adminUser AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+
+  @@index([adminUserId])
 }
 
 model AdminAuditLog {

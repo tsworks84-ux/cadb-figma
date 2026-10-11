@@ -1,0 +1,29 @@
+{
+  "name": "@cadb/partner-api",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "create-admin": "tsx src/scripts/create-admin.ts"
+  },
+  "dependencies": {
+    "@cadb/db": "workspace:*",
+    "@cadb/partner-db": "workspace:*",
+    "@fastify/rate-limit": "^10.3.0",
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.6.1",
+    "fastify": "^5.8.5",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^22.10.7",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.3",
+    "pino-pretty": "^13.0.0"
+  }
+}
