@@ -1,0 +1,439 @@
+<title>Partner Dashboard Design</title>
+<meta name="description" content="Phase 2 design: projects, partner access and a white-label school dashboard reading CADB data.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@85,600;85,700&family=Public+Sans:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column with a sticky contents rail on wide screens; tables scroll in their own boxes. */
+:root {
+  --bg: #f6f8f9;
+  --surface: #ffffff;
+  --ink: #17232b;
+  --muted: #56656f;
+  --line: #d9e1e5;
+  --accent: #0b6e79;
+  --accent-soft: #e2f1f2;
+  --warn: #9a5b00;
+  --warn-soft: #fbf0dc;
+  --ok: #2f7a3e;
+  --ok-soft: #e4f3e6;
+  --code-bg: #eef2f4;
+  --font-display: "Archivo", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Public Sans", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --step--1: 0.8125rem;
+  --step-0: 1rem;
+  --step-1: 1.1875rem;
+  --step-2: 1.5rem;
+  --step-3: 2.25rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f171c; --surface: #152027; --ink: #e3eaee; --muted: #9aaab4; --line: #2a3943;
+    --accent: #5cc3cd; --accent-soft: #143238; --warn: #e8b25c; --warn-soft: #33270f;
+    --ok: #7fcf8d; --ok-soft: #16301b; --code-bg: #1b2a32; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f171c; --surface: #152027; --ink: #e3eaee; --muted: #9aaab4; --line: #2a3943;
+  --accent: #5cc3cd; --accent-soft: #143238; --warn: #e8b25c; --warn-soft: #33270f;
+  --ok: #7fcf8d; --ok-soft: #16301b; --code-bg: #1b2a32; color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: var(--step-0); line-height: 1.6;
+  margin: 0; padding-inline: 16px; padding-block: 0 64px;
+}
+.wrap { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; }
+@media (max-width: 860px) { .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; } nav.toc { display: none; } }
+nav.toc { position: sticky; top: env(safe-area-inset-top, 0px); align-self: start; padding-block: 40px; font-size: var(--step--1); }
+nav.toc p { font-family: var(--font-display); font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 8px; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; counter-reset: s; }
+nav.toc a { color: var(--muted); text-decoration: none; display: block; padding: 2px 0 2px 10px; border-left: 2px solid var(--line); }
+nav.toc a:hover, nav.toc a:focus-visible { color: var(--accent); border-left-color: var(--accent); outline: none; }
+main { min-width: 0; }
+header.doc { padding-block: 40px 24px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.eyebrow { font-family: var(--font-mono); font-size: var(--step--1); color: var(--accent); letter-spacing: .04em; margin: 0 0 10px; }
+h1, h2, h3 { font-family: var(--font-display); font-stretch: 85%; text-wrap: balance; line-height: 1.15; margin: 0; }
+h1 { font-size: var(--step-3); font-weight: 700; }
+h2 { font-size: var(--step-2); font-weight: 700; margin-top: 48px; margin-bottom: 12px; scroll-margin-top: 16px; }
+h3 { font-size: var(--step-1); font-weight: 600; margin-top: 28px; margin-bottom: 6px; }
+p, li { max-width: 68ch; }
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 22px; }
+li { margin-bottom: 4px; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-top: 16px; font-size: var(--step--1); color: var(--muted); }
+.meta b { color: var(--ink); font-weight: 600; }
+.lede { font-size: var(--step-1); color: var(--ink); margin-top: 16px; }
+code, .mono { font-family: var(--font-mono); font-size: .86em; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; overflow-x: auto; font-family: var(--font-mono); font-size: var(--step--1); line-height: 1.55; margin: 0 0 16px; }
+.tbl { overflow-x: auto; margin: 0 0 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: var(--step--1); font-variant-numeric: tabular-nums; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+th { font-family: var(--font-display); font-stretch: 85%; font-weight: 600; font-size: .95em; letter-spacing: .02em; color: var(--muted); background: var(--bg); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td code { white-space: nowrap; }
+.rule { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 6px; padding: 14px 18px; margin: 0 0 12px; }
+.rule h3 { margin-top: 0; }
+.rule p:last-child { margin-bottom: 0; }
+.callout { background: var(--warn-soft); border: 1px solid var(--line); border-radius: 6px; padding: 12px 16px; margin: 0 0 16px; }
+.callout strong { color: var(--warn); }
+.pill { display: inline-block; font-family: var(--font-mono); font-size: .75rem; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.pill.on { background: var(--ok-soft); color: var(--ok); }
+.pill.off { background: var(--warn-soft); color: var(--warn); }
+.pill.rec { background: var(--accent-soft); color: var(--accent); }
+.options { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin: 0 0 16px; }
+.opt { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px 18px; min-width: 0; }
+.opt.chosen { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.opt h3 { margin-top: 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.opt ul { margin-bottom: 0; }
+.steps { counter-reset: m; list-style: none; padding: 0; display: grid; gap: 10px; }
+.steps li { counter-increment: m; display: grid; grid-template-columns: 52px minmax(0,1fr); gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; max-width: none; }
+.steps li::before { content: "M" counter(m); font-family: var(--font-mono); font-weight: 500; color: var(--accent); }
+.steps li:first-child::before { content: "M0"; }
+.steps b { display: block; }
+.status-done { color: var(--ok); font-size: var(--step--1); font-family: var(--font-mono); }
+a { color: var(--accent); }
+footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--line); font-size: var(--step--1); color: var(--muted); }
+</style>
+
+<div class="wrap">
+<nav class="toc" aria-label="Contents">
+  <p>Contents</p>
+  <ol>
+    <li><a href="#summary">Summary</a></li>
+    <li><a href="#guardrails">Guardrails</a></li>
+    <li><a href="#architecture">Architecture</a></li>
+    <li><a href="#model">Projects &amp; data model</a></li>
+    <li><a href="#access">Access control</a></li>
+    <li><a href="#screens">Screens</a></li>
+    <li><a href="#reports">Reports</a></li>
+    <li><a href="#confidential">Confidentiality</a></li>
+    <li><a href="#delivery">Environments &amp; rollback</a></li>
+    <li><a href="#plan">Delivery plan</a></li>
+    <li><a href="#decisions">Open decisions</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="doc">
+  <p class="eyebrow">CADB · Phase 2 · Design for sign-off · Internal only</p>
+  <h1>Partner Dashboard Design</h1>
+  <p class="lede">A separate, white-labelled dashboard where principals and management of partner school groups (first: VIBGYOR) view and download their schools' academic data, which lives in CADB. Projects (School Integrated Program and After School Program) become a first-class concept that scopes all of it.</p>
+  <div class="meta">
+    <span><b>Status</b> Draft v0.1</span>
+    <span><b>Date</b> 11 Oct 2026</span>
+    <span><b>Baseline</b> production v1.24.0</span>
+    <span><b>Branch</b> <code>phase-2</code></span>
+  </div>
+</header>
+
+<section id="summary">
+<h2>Summary</h2>
+<p>CADB already holds the data VIBGYOR management wants: students, batches, exams, marks, attendance and assignments. Phase 2 adds three things on top, without changing the live CADB app:</p>
+<ol>
+  <li><b>Projects.</b> Each partner runs one or more projects (SIP or ASP). A project has a start date, a starting academic year, grades, schools, and a board for each school's grade range. Batches are assigned to a project.</li>
+  <li><b>Partner access.</b> Partner users (principals, regional heads, management) get grants by project, by school and by report. A new user sees nothing until an administrator grants access.</li>
+  <li><b>Partner dashboard.</b> A view-only web app on a neutral domain, carrying no Centum branding, where partner users browse metrics and download PDF and Excel reports, down to individual student level where granted.</li>
+</ol>
+<p>Everything is <b>view-only</b> for partners. The only writes are internal: project setup, access grants, and a log of every view and download.</p>
+</section>
+
+<section id="guardrails">
+<h2>Guardrails</h2>
+<div class="rule">
+  <h3>1. Nothing goes live on cadb.centumacademy.com</h3>
+  <p>The CADB web app and API on production stay at v1.24.x for the whole of Phase 2 development. Phase 2 runs as separate services. The only production change at go-live is an additive database schema (new tables in their own namespace) plus the new services. See <a href="#architecture">Architecture</a>.</p>
+</div>
+<div class="rule">
+  <h3>2. Staging is a replica of production</h3>
+  <p>Staging runs the same release tag as production, and its database has the same migrations applied. After every production release, the same tag is deployed to staging the same day. Phase 2 services run beside it on staging. See <a href="#delivery">Environments</a>.</p>
+</div>
+<div class="rule">
+  <h3>3. Isolated, versioned, reversible</h3>
+  <p>All Phase 2 work happens on the <code>phase-2</code> branch, with tagged builds. Every database change only adds things and has a written reverse script. Any deployment can be rolled back by redeploying the previous tag. CADB itself never needs rolling back, because it is never changed.</p>
+</div>
+<div class="rule">
+  <h3>4. No trace of Centum in anything a partner sees</h3>
+  <p>Domain, emails, page titles, code bundles, file metadata and data fields are all neutral. An automated build check fails on any occurrence of "centum". See <a href="#confidential">Confidentiality</a>.</p>
+</div>
+</section>
+
+<section id="architecture">
+<h2>Architecture</h2>
+<p>Two shapes were considered. Option B is recommended because it is the only one that keeps guardrail 1 with no CADB release at all.</p>
+<div class="options">
+  <div class="opt">
+    <h3>A. Inside CADB</h3>
+    <ul>
+      <li>Partner API routes and the Projects / Partner Access screens added to the CADB API and portal.</li>
+      <li>Admins manage everything in the CADB portal they already use.</li>
+      <li><b>Needs a CADB production release</b> at go-live and for every later partner change. This breaks guardrail 1.</li>
+    </ul>
+  </div>
+  <div class="opt chosen">
+    <h3>B. Separate partner services <span class="pill rec">recommended</span></h3>
+    <ul>
+      <li>New <code>apps/partner-api</code>, <code>apps/partner-web</code> (dashboard) and <code>apps/partner-admin</code> (internal console) in the same repo.</li>
+      <li>Read CADB tables through a <b>read-only</b> database login. Their own tables live in a separate <code>partner</code> schema that CADB's migrations never see.</li>
+      <li>CADB app untouched. Partner services can be released and rolled back on their own schedule.</li>
+      <li>Cost: your team uses a separate internal console to manage projects and access, rather than a tab in CADB.</li>
+    </ul>
+  </div>
+</div>
+
+<h3>Request flow (option B)</h3>
+<pre>Principal's browser
+   │  sees only the neutral domain
+   ▼
+partner-web  (Next.js, separate host)        ← builds PDFs / Excel here
+   │  server-to-server, private network, service secret
+   ▼
+partner-api  (Fastify)
+   │  checks the user's grants on every request, then queries
+   ▼
+PostgreSQL "cadb"
+   ├─ public.*   CADB tables       → partner_ro login: SELECT only
+   └─ partner.*  Phase 2 tables    → partner_rw login: read/write
+
+Centum admin's browser → partner-admin (internal URL, Centum staff login)
+                         → partner-api admin routes</pre>
+
+<h3>Rules the architecture enforces</h3>
+<ul>
+  <li><b>The browser never talks to partner-api or CADB.</b> Only the partner-web server does, so no internal address, header or error message reaches a partner.</li>
+  <li><b>The database refuses writes</b> from the partner services to any CADB table. A bug cannot change student, fee or HR data.</li>
+  <li><b>Separate identities.</b> Partner users are stored in <code>partner.PartnerUser</code>, not as Employees or Students. Their credentials do not work on the CADB portal, and CADB tokens do not work on the partner API.</li>
+  <li><b>Production load.</b> Heavy totals are cached for 15–30 minutes, so dashboard traffic stays light on the live database.</li>
+  <li><b>Admin logins.</b> partner-admin is for Centum staff only. Its login is separate from partner users and sits on an internal hostname that partners are never given.</li>
+</ul>
+</section>
+
+<section id="model">
+<h2>Projects &amp; data model</h2>
+<pre>Partner            VIBGYOR · Centum Academy (internal) · …    branding, domain, email sender
+ └─ Project        SIP / ASP · start date · starting academic year · partner-facing name
+     ├─ Project school       school + board per grade range
+     ├─ Project batch        which CADB batches belong to this project
+     └─ Enrolment (stage 2)  admission no., course, fee per student per project</pre>
+
+<h3>New tables (schema <code>partner</code>, all additive)</h3>
+<div class="tbl"><table>
+<thead><tr><th>Table</th><th>Key fields</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>Partner</code></td><td>name, displayName, isInternal, brand (logo, colours), domain, emailFrom, isArchived</td><td>Centum Academy is a partner with <code>isInternal = true</code> for its own programs. It is never listed to outside partners.</td></tr>
+<tr><td><code>Project</code></td><td>partnerId, type (SIP | ASP), internalName, displayName, startDate, startAcademicYearId, status (ACTIVE | ARCHIVED)</td><td>Partners see only <code>displayName</code>. Projects are archived, not deleted, once they have batches.</td></tr>
+<tr><td><code>ProjectGrade</code></td><td>projectId, gradeId</td><td>Grades catered to. Links to CADB's existing Grade list.</td></tr>
+<tr><td><code>Board</code></td><td>code, name, isActive</td><td>Admin-editable list, seeded with CBSE, ICSE, ISC, IGCSE, CIE, IB, PUC.</td></tr>
+<tr><td><code>ProjectSchool</code></td><td>projectId, schoolId</td><td>Schools under the project. Links to CADB's School.</td></tr>
+<tr><td><code>ProjectSchoolBoard</code></td><td>projectSchoolId, boardId, gradeFromId, gradeToId</td><td>Board per grade range, e.g. ICSE 8–10, ISC 11–12 at the same school. Ranges may not overlap.</td></tr>
+<tr><td><code>ProjectBatch</code></td><td>projectId, batchId (unique)</td><td>Each CADB batch belongs to at most one project. Unassigned batches are invisible to every partner.</td></tr>
+<tr><td><code>Enrolment</code></td><td>studentId, projectId, admissionNo, academicYear, gradeId, courseId</td><td><b>Stage 2</b>, a separate later decision. Needed for per-project fees, which today live on the CADB Student record.</td></tr>
+</tbody>
+</table></div>
+
+<h3>Which students belong to a project</h3>
+<p>A student is in a project for a school when <b>both</b> are true:</p>
+<ol>
+  <li>the student is in one of the project's batches, and</li>
+  <li>the student's own school (<code>Student.schoolId</code>) is one of the project's schools.</li>
+</ol>
+<div class="callout"><strong>Why both checks.</strong> CADB batches can list more than one school. Filtering by batch alone would show a principal the names and marks of another school's children who share the batch. Students with no school set appear in no partner data at all. A data-quality report before launch lists them so they can be fixed in CADB.</div>
+
+<h3>Students in two programs</h3>
+<p>One child keeps one CADB record, never two admissions. Stage 1 handles SIP + ASP students through batches, so marks and attendance show correctly in both projects. Fees stay on the student record as today. Stage 2 (Enrolment) moves admission and fees per project. It changes CADB's fee screens, so it is outside this phase's no-CADB-change boundary and needs its own release plan.</p>
+</section>
+
+<section id="access">
+<h2>Access control</h2>
+<p>A partner user can see a piece of data only if all three checks pass. Grants are read from the database on every request, so removing access takes effect immediately.</p>
+<pre>Project grant  ×  School grant (level)  ×  Role (report × action × data groups)
+"VIBGYOR SIP"     Whitefield: FULL           Exam results: view + download
+                  Malad: BENCHMARK            Identity, Academic: on · Contact: off</pre>
+
+<h3>School levels</h3>
+<div class="tbl"><table>
+<thead><tr><th>Level</th><th>What the user sees for that school</th></tr></thead>
+<tbody>
+<tr><td><b>Full</b></td><td>All granted reports, down to batch and individual student</td></tr>
+<tr><td><b>Summary</b></td><td>School totals only. No batch or student rows.</td></tr>
+<tr><td><b>Benchmark</b></td><td>Included in group comparisons only, anonymised ("School 7 of 22"), never named</td></tr>
+<tr><td><i>No grant</i></td><td>Nothing. This is the default for every new user.</td></tr>
+</tbody>
+</table></div>
+
+<h3>Data groups</h3>
+<div class="tbl"><table>
+<thead><tr><th>Group</th><th>Fields</th><th>Default in a new role</th></tr></thead>
+<tbody>
+<tr><td>Identity</td><td>Name, roll no., grade, batch, board</td><td><span class="pill on">on</span></td></tr>
+<tr><td>Academic</td><td>Marks, ranks, attendance, assignment submissions</td><td><span class="pill on">on</span></td></tr>
+<tr><td>Personal</td><td>Date of birth, gender, photo</td><td><span class="pill off">off</span></td></tr>
+<tr><td>Parent contact</td><td>Parent name, phone, email, address</td><td><span class="pill off">off</span></td></tr>
+<tr><td>Fees</td><td>Total, paid, balance</td><td><span class="pill off">off</span></td></tr>
+</tbody>
+</table></div>
+
+<h3>Roles and overrides</h3>
+<ul>
+  <li>Admins define a handful of <b>partner roles</b> (e.g. "Principal – standard", "Regional head", "Management"). Each role sets which reports a user can view and download, and which data groups those reports include.</li>
+  <li>Each partner user has one role plus their project and school grants. Per-user exceptions override the role for that person only.</li>
+  <li>Shortcuts for 20+ principals: "grant every school in this project", "copy access from another user", bulk invite from a spreadsheet.</li>
+  <li>Every grant change is logged with who changed what, and when.</li>
+</ul>
+
+<h3>New tables for access (schema <code>partner</code>)</h3>
+<div class="tbl"><table>
+<thead><tr><th>Table</th><th>Key fields</th></tr></thead>
+<tbody>
+<tr><td><code>PartnerUser</code></td><td>partnerId, name, email, passwordHash, roleId, isActive, lastLoginAt</td></tr>
+<tr><td><code>PartnerRole</code> / <code>PartnerRolePermission</code></td><td>roleId, reportKey, canView, canDownload, dataGroups[]</td></tr>
+<tr><td><code>PartnerUserOverride</code></td><td>userId, reportKey, canView, canDownload, dataGroups[]</td></tr>
+<tr><td><code>PartnerProjectGrant</code></td><td>userId, projectId</td></tr>
+<tr><td><code>PartnerSchoolGrant</code></td><td>userId, projectId, schoolId, level (FULL | SUMMARY | BENCHMARK)</td></tr>
+<tr><td><code>PartnerSession</code></td><td>userId, tokenHash, expiresAt, ip, userAgent</td></tr>
+<tr><td><code>PartnerAccessLog</code></td><td>userId, action (VIEW | DOWNLOAD | LOGIN), reportKey, filters, rowCount, at</td></tr>
+<tr><td><code>AdminUser</code> / <code>AdminAuditLog</code></td><td>Centum staff for partner-admin, and their changes</td></tr>
+</tbody>
+</table></div>
+</section>
+
+<section id="screens">
+<h2>Screens</h2>
+<h3>partner-admin (Centum staff)</h3>
+<ul>
+  <li><b>Partners</b>: name, branding, domain, email sender.</li>
+  <li><b>Projects</b>: create, edit, archive; type, dates, starting year, grades, schools, boards per grade range.</li>
+  <li><b>Batch assignment</b>: list of CADB batches with a project picker and bulk assign; "unassigned" filter.</li>
+  <li><b>Users &amp; access</b>: invite, deactivate, role, project and school grants, overrides, copy-from.</li>
+  <li><b>Roles</b>: report × view/download × data-group matrix.</li>
+  <li><b>Activity</b>: who viewed and downloaded what, with row counts; filters by user, report, date.</li>
+  <li><b>Data quality</b>: students without a school, batches without a project, ranges that overlap.</li>
+</ul>
+<h3>partner-web (principals and management)</h3>
+<ul>
+  <li><b>Home</b>: headline numbers for the schools the user may see, with a project switcher.</li>
+  <li><b>School view</b>: enrolment vs target, attendance, exam performance, assignment submissions; drill down to grade, batch and student where the level allows.</li>
+  <li><b>Comparison</b>: schools side by side (named only at Full or Summary, anonymised at Benchmark).</li>
+  <li><b>Reports</b>: pick a report and filters, preview, download PDF or Excel.</li>
+  <li>Account: change password, sign out. Mobile-friendly throughout.</li>
+</ul>
+</section>
+
+<section id="reports">
+<h2>Reports</h2>
+<p>Working catalog, open for changes. Every report applies the user's grants, so a report contains only what that user could already see on screen.</p>
+<div class="tbl"><table>
+<thead><tr><th>Report</th><th>Detail</th><th>Format</th><th>Lowest level</th></tr></thead>
+<tbody>
+<tr><td>School overview</td><td>Enrolment, attendance %, average scores, submission rate</td><td>PDF</td><td>Summary</td></tr>
+<tr><td>Enrolment vs target</td><td>By grade and batch against batch target strength</td><td>PDF, Excel</td><td>Summary</td></tr>
+<tr><td>Exam results</td><td>Per exam: each student's marks by subject, total, rank</td><td>Excel, PDF</td><td>Full</td></tr>
+<tr><td>Student performance card</td><td>One student across all exams, attendance, submissions</td><td>PDF</td><td>Full</td></tr>
+<tr><td>Attendance</td><td>By batch, or student-wise over a date range</td><td>Excel</td><td>Summary (totals), Full (students)</td></tr>
+<tr><td>Assignment submissions</td><td>By batch, or student-wise</td><td>Excel</td><td>Summary (totals), Full (students)</td></tr>
+<tr><td>Group benchmark</td><td>All granted schools compared; others anonymised</td><td>PDF</td><td>Benchmark</td></tr>
+</tbody>
+</table></div>
+<h3>How files are made</h3>
+<ul>
+  <li>partner-web's server fetches the data from partner-api and builds the file, so all branding and templates live outside CADB.</li>
+  <li>Built on request and never stored on a server.</li>
+  <li>Every PDF page and every Excel file's properties carry "Generated for ‹user› · ‹date and time›".</li>
+  <li>File metadata (Author, Creator, Producer, Company) is set explicitly to the partner brand.</li>
+  <li>Size cap per file and a per-minute limit per user. Every download is logged with its row count.</li>
+</ul>
+</section>
+
+<section id="confidential">
+<h2>Confidentiality</h2>
+<p>The partner must not learn the Centum name from anything they can reach. Each item has an owner check before go-live.</p>
+<div class="tbl"><table>
+<thead><tr><th>Surface</th><th>Control</th></tr></thead>
+<tbody>
+<tr><td>Domain and TLS certificate</td><td>Neutral domain on its own certificate. No Centum hostnames on the certificate.</td></tr>
+<tr><td>Server</td><td>Production partner services on a separate server. Staging ports on the shared box are not opened to partners, and staging is never used for partner demos.</td></tr>
+<tr><td>Email</td><td>Sender on the neutral domain with SPF/DKIM set up. Domain registered a few weeks before launch so mail isn't flagged as spam.</td></tr>
+<tr><td>Code bundle</td><td>partner-web imports nothing from <code>apps/web</code>. Build fails if "centum" (any case) appears in the output.</td></tr>
+<tr><td>API responses</td><td>Allow-listed fields only. Teacher emails and internal names are scrubbed. Errors are generic.</td></tr>
+<tr><td>Data values</td><td>Pre-launch scan of batch, course, exam and subject names for Centum references. Partner-facing display names where needed.</td></tr>
+<tr><td>Files</td><td>Metadata and file names checked by the same automated scan on sample reports.</td></tr>
+<tr><td>Student data</td><td>Sharing of student-level personal data (DPDP Act 2023, children's data) to be confirmed against the VIBGYOR agreement by management or legal.</td></tr>
+</tbody>
+</table></div>
+</section>
+
+<section id="delivery">
+<h2>Environments, version control &amp; rollback</h2>
+<div class="tbl"><table>
+<thead><tr><th>Environment</th><th>CADB</th><th>Partner services</th><th>Database</th></tr></thead>
+<tbody>
+<tr><td>Local Mac</td><td><code>phase-2</code></td><td><code>phase-2</code></td><td>local <code>cadb</code></td></tr>
+<tr><td>Staging (shared box)</td><td>same tag as prod</td><td><code>phase-2</code> tagged builds, internal ports only</td><td><code>cadb_staging</code></td></tr>
+<tr><td>Production</td><td>v1.24.x, untouched</td><td>only after sign-off, on a separate server</td><td><code>cadb</code> + new <code>partner</code> schema</td></tr>
+</tbody>
+</table></div>
+
+<h3>Branches and tags</h3>
+<pre>main ─────── production. Fast-forwarded to each release tag (v1.24.0 now).
+ ├─ hotfix/* ─ prod fixes → tag v1.24.1 … → merged back into phase-2
+ └─ phase-2 ── all Phase 2 work, created from v1.24.0
+     └─ p2/* ── one branch per feature, merged into phase-2 after review
+
+Tags:  v1.24.x        CADB production releases (unchanged scheme)
+       p2-staging-N   each Phase 2 deploy to staging
+       partner-v1.0.0 first production release of the partner services</pre>
+
+<h3>Rollback, by layer</h3>
+<div class="tbl"><table>
+<thead><tr><th>Layer</th><th>How to roll back</th></tr></thead>
+<tbody>
+<tr><td>Partner services</td><td>Redeploy the previous tag; the previous build is kept on the server as an archive.</td></tr>
+<tr><td><code>partner</code> schema</td><td>Every migration ships with a reverse script. A database backup is taken before every migration. Dropping the whole schema removes Phase 2 completely and leaves CADB as it was.</td></tr>
+<tr><td>CADB</td><td>Nothing to roll back; it is never changed in this phase.</td></tr>
+</tbody>
+</table></div>
+
+<h3>Keeping staging a replica</h3>
+<ul>
+  <li>Same-day rule: whenever a tag goes to production, the same tag goes to staging, including migrations.</li>
+  <li>Staging uses its own database (<code>cadb_staging</code>), and its config no longer points at production (fixed 11 Oct 2026).</li>
+  <li>Staging has no email credentials, so nothing is ever sent to real people from it.</li>
+  <li>Optional: refresh staging data from the latest production backup, so testing uses realistic volumes. This is a separate decision (D2).</li>
+</ul>
+</section>
+
+<section id="plan">
+<h2>Delivery plan</h2>
+<ol class="steps">
+  <li><div><b>Foundations</b>Staging synced to v1.24.0, staging config isolated from the prod database, <code>phase-2</code> branch created. <span class="status-done">in progress 11 Oct</span></div></li>
+  <li><div><b>Partner schema &amp; database logins</b>The <code>partner</code> schema with its tables, the read-only and read-write logins, and reverse scripts. Local, then staging.</div></li>
+  <li><div><b>partner-admin: projects</b>Partners, projects, schools, boards per grade range, batch assignment, data-quality page.</div></li>
+  <li><div><b>partner-admin: access</b>Partner users, roles, project and school grants, overrides, activity log.</div></li>
+  <li><div><b>partner-api + partner-web</b>Login, grant enforcement, home, school view and comparison screens, caching.</div></li>
+  <li><div><b>Reports</b>The catalog above, PDF and Excel, watermarking, metadata, limits, download log.</div></li>
+  <li><div><b>Confidentiality audit &amp; internal test</b>"Centum" scans, data-value scan, access test matrix (every level × every report), load check, internal review on staging.</div></li>
+  <li><div><b>Go-live</b>Neutral domain, separate server, email sender, <code>partner</code> schema applied to production after a backup, services started, first principals invited.</div></li>
+</ol>
+</section>
+
+<section id="decisions">
+<h2>Open decisions</h2>
+<div class="tbl"><table>
+<thead><tr><th>#</th><th>Decision</th><th>Recommendation</th></tr></thead>
+<tbody>
+<tr><td>D1</td><td>Architecture: inside CADB (A) or separate partner services (B)</td><td>B. It is the only option that keeps guardrail 1.</td></tr>
+<tr><td>D2</td><td>Refresh staging data from a production backup</td><td>Yes, with email kept off on staging; replaces current staging test data.</td></tr>
+<tr><td>D3</td><td>Report catalog</td><td>Confirm or amend the table above.</td></tr>
+<tr><td>D4</td><td>Neutral domain and separate server</td><td>Deferred; needed by M7. Register the domain early for email reputation.</td></tr>
+<tr><td>D5</td><td>Stage 2 Enrolment (per-project fees)</td><td>After Phase 2 is live; it requires a CADB release.</td></tr>
+<tr><td>D6</td><td>Student-level data sharing under the VIBGYOR agreement</td><td>Management or legal confirmation before M7.</td></tr>
+</tbody>
+</table></div>
+</section>
+
+<footer>Internal Centum Academy document. Do not share with partner organisations: it names the arrangement the partner dashboard is designed to keep confidential.</footer>
+</main>
+</div>
