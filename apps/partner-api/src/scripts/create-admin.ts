@@ -25,8 +25,17 @@ if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error("--emai
 const role = values.role === "OWNER" ? "OWNER" : values.role === "MANAGER" ? "MANAGER" : null;
 if (!role) throw new Error("--role must be OWNER or MANAGER");
 
+// Temporary passwords are read off a screen and typed by hand, so leave out
+// characters that look alike (I l 1, O 0, S 5, B 8) and group them in fours.
+const ALPHABET = "abcdefghjkmnpqrstuvwxyzACDEFGHJKLMNPQRTUVWXYZ234679";
+function readablePassword() {
+  const bytes = randomBytes(16);
+  const chars = [...bytes].map((b) => ALPHABET[b % ALPHABET.length]).join("");
+  return chars.match(/.{4}/g)!.join("-");
+}
+
 const generated = !process.env.ADMIN_INITIAL_PASSWORD;
-const password = process.env.ADMIN_INITIAL_PASSWORD ?? randomBytes(12).toString("base64url");
+const password = process.env.ADMIN_INITIAL_PASSWORD ?? readablePassword();
 if (password.length < PASSWORD_MIN) throw new Error(`password must be at least ${PASSWORD_MIN} characters`);
 
 const existing = await partnerDb.adminUser.findUnique({ where: { email } });
