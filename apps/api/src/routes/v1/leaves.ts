@@ -219,6 +219,61 @@ async function computeLeaveBalances(employeeId: string, year: number) {
   return { data, lopDays: totalLopDays };
 }
 
+/**
+ * How many of a pending leave's days the employee's balance cannot cover.
+ *
+ * Leave beyond the balance is loss of pay by default — an approver no longer has
+ * to remember to flip a toggle for it, which is how over-balance leaves used to
+ * go through at 0 LoP. "Available" is what the balance card shows: accrued to
+ * date + carried + earned (comp-off) − already approved. Other *pending*
+ * requests are not held against this one; each is assessed when it is decided,
+ * so whichever is approved first draws the balance down for the next.
+ *
+ * An unpaid leave is all shortfall. Comp-off can't be overdrawn (apply blocks
+ * it), so it normally assesses at 0.
+ */
+async function assessLeaveLop(application: {
+  employeeId: string;
+  leaveType: string;
+  fromDate: Date;
+  totalDays: number;
+}): Promise<{ available: number; shortfall: number }> {
+  if (application.leaveType === "UNPAID") {
+    return { available: 0, shortfall: application.totalDays };
+  }
+  const year = getFiscalYear(application.fromDate);
+  const [balance, employee] = await Promise.all([
+    prisma.leaveBalance.findUnique({
+      where: {
+        employeeId_leaveType_year: {
+          employeeId: application.employeeId,
+          leaveType: application.leaveType as any,
+          year,
+        },
+      },
+    }),
+    prisma.employee.findUnique({ where: { id: application.employeeId }, select: { joiningDate: true } }),
+  ]);
+  const available = balance
+    ? Math.max(0, computeAccrued(balance.allocated, year, employee?.joiningDate ?? null)
+        + balance.carried + balance.earned - balance.used)
+    : 0;
+  // Round to the half day — accrual can produce tenths, LoP is booked in halves.
+  const shortfall = Math.max(0, Math.ceil((application.totalDays - available) * 2) / 2);
+  return { available, shortfall: Math.min(shortfall, application.totalDays) };
+}
+
+/**
+ * May the caller approve a leave with less LoP than its shortfall? The
+ * employee's immediate supervisor, plus HR Admin / Super Admin as the backstop
+ * (they are the only route for an employee with no reporting manager). Department
+ * heads and custom roles can approve, but cannot excuse the pay.
+ */
+async function canWaiveLop(user: JwtPayload, employeeId: string): Promise<boolean> {
+  if (user.sub === employeeId) return false;
+  return isLeaveAdmin(user.role) || await isImmediateSupervisor(user.sub, employeeId);
+}
+
 export async function leaveRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", authenticate);
 
@@ -816,6 +871,29 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true, data });
   });
 
+  // What approving this leave would cost in pay, for the decision modals: the
+  // days the balance can't cover (pre-filled as LoP) and whether the caller may
+  // approve with less than that. Mirrors the checks in /:id/decision exactly.
+  fastify.get("/:id/lop-assessment", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const user = request.user as JwtPayload;
+
+    const application = await prisma.leaveApplication.findUnique({ where: { id } });
+    if (!application) {
+      return reply.status(404).send({ success: false, error: "Application not found", statusCode: 404 });
+    }
+    if (!await hasLeaveAuthorityOver(user, application.employeeId, "canView")) {
+      return reply.status(403).send({ success: false, error: "Forbidden", statusCode: 403 });
+    }
+
+    const { available, shortfall } = await assessLeaveLop(application);
+    const canWaive = await canWaiveLop(user, application.employeeId);
+    return reply.send({
+      success: true,
+      data: { totalDays: application.totalDays, available, shortfall, canWaive },
+    });
+  });
+
   // Approve or reject leave
   fastify.patch("/:id/decision", async (request, reply) => {
     const { id } = request.params as { id: string };
@@ -848,17 +926,25 @@ export async function leaveRoutes(fastify: FastifyInstance) {
     // and nothing else, whatever the leave type. So an approval always writes an
     // explicit figure rather than leaving the field at its 0 default.
     //
-    // An unpaid leave is unpaid by definition, so it defaults to the whole leave.
-    // A caller may still send 0 to waive it — that is what the Waive LOP button
-    // does, and it now means "do not deduct" instead of being indistinguishable
-    // from a field nobody filled in. Paid types default to no LoP.
+    // The default is the shortfall: every day the balance can't cover is unpaid
+    // — the whole leave for UNPAID, the excess for a paid type. An approver may
+    // book *more* LoP than that, but booking less is a waiver — see canWaiveLop
+    // for who may do that.
     // Either way the figure is clamped to the days the leave actually covers.
-    const defaultLopDays = application.leaveType === "UNPAID" ? application.totalDays : 0;
-    const lopDays = body.action !== "APPROVED"
-      ? 0
-      : body.lopDays != null
-        ? Math.min(Math.max(0, body.lopDays), application.totalDays)
-        : defaultLopDays;
+    let lopDays = 0;
+    if (body.action === "APPROVED") {
+      const { shortfall } = await assessLeaveLop(application);
+      lopDays = body.lopDays != null
+        ? Math.min(Math.max(0, Number(body.lopDays) || 0), application.totalDays)
+        : shortfall;
+      if (lopDays < shortfall && !await canWaiveLop(user, application.employeeId)) {
+        return reply.status(403).send({
+          success: false,
+          error: `This leave exceeds the available balance by ${shortfall} day${shortfall !== 1 ? "s" : ""}, which must be Loss of Pay. Only the employee's reporting manager, HR or Super Admin can waive it.`,
+          statusCode: 403,
+        });
+      }
+    }
 
     const year = getFiscalYear(application.fromDate);
 
