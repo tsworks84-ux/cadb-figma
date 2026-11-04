@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -10,6 +10,7 @@ import {
 import { api } from "@/lib/api";
 import { usePermissionsState } from "@/hooks/usePermissions";
 import { ApproverLeaveBalance } from "@/components/leaves/ApproverLeaveBalance";
+import { useLopAssessment } from "@/components/leaves/useLopAssessment";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -121,6 +122,15 @@ function ReviewModal({ leave, canApprove, onClose }: {
   const [note, setNote] = useState("");
   const [lopDays, setLopDays] = useState(String(leave.leaveType === "UNPAID" ? leave.totalDays : 0));
   const [mode, setMode] = useState<"APPROVED" | "REJECTED" | null>(null);
+
+  // Days beyond the balance are LoP by default; only the reporting manager, HR or SA may
+  // book fewer. The API enforces the same floor.
+  const { data: lop, isLoading: lopLoading } = useLopAssessment(leave.id, canApprove && leave.status === "PENDING");
+  const minLop = lop && !lop.canWaive ? lop.shortfall : 0;
+  useEffect(() => {
+    if (lop) setLopDays(String(lop.shortfall));
+  }, [lop]);
+  const lopTooLow = mode === "APPROVED" && (Number(lopDays) || 0) < minLop;
 
   const decide = useMutation({
     mutationFn: (action: "APPROVED" | "REJECTED") =>
@@ -258,16 +268,28 @@ function ReviewModal({ leave, canApprove, onClose }: {
                       <label className="text-xs uppercase tracking-wide text-gray-400">Loss of pay (days)</label>
                       <input
                         type="number"
-                        min={0}
+                        min={minLop}
                         max={leave.totalDays}
                         step="0.5"
                         value={lopDays}
                         onChange={(e) => setLopDays(e.target.value)}
                         className={`${FIELD} mt-1`}
                       />
-                      <p className="mt-1 text-xs text-gray-400">
-                        Deducted from pay. Set 0 to waive it — nothing else drives the deduction.
-                      </p>
+                      {lop && lop.shortfall > 0 ? (
+                        <p className={`mt-1 text-xs ${lopTooLow ? "text-red-600" : "text-rose-700"}`}>
+                          {leave.leaveType === "UNPAID"
+                            ? "Unpaid leave — every day is Loss of Pay."
+                            : `${lop.available} day${lop.available === 1 ? "" : "s"} of balance available, so ${lop.shortfall} of ${leave.totalDays} days are Loss of Pay.`}
+                          {" "}
+                          {lop.canWaive
+                            ? "You can reduce or waive it."
+                            : `Only the reporting manager, HR or Super Admin can go below ${lop.shortfall}.`}
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-xs text-gray-400">
+                          Within balance — no Loss of Pay unless you add it here.
+                        </p>
+                      )}
                     </div>
                   )}
                   <div>
@@ -284,7 +306,7 @@ function ReviewModal({ leave, canApprove, onClose }: {
                   </div>
                   <div className="flex flex-col sm:flex-row gap-2">
                     <button
-                      disabled={decide.isPending || (mode === "REJECTED" && !note.trim())}
+                      disabled={decide.isPending || (mode === "REJECTED" && !note.trim()) || (mode === "APPROVED" && (lopLoading || lopTooLow))}
                       onClick={() => decide.mutate(mode)}
                       className={`flex-1 rounded-md px-4 py-2 text-sm font-medium text-white disabled:opacity-50 ${
                         mode === "APPROVED" ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700"

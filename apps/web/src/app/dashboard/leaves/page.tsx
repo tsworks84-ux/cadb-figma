@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuthStore } from "@/store/auth";
 import { ApproverLeaveBalance } from "@/components/leaves/ApproverLeaveBalance";
+import { useLopAssessment } from "@/components/leaves/useLopAssessment";
 import { CalendarDays, Plus, Paperclip, XCircle, ChevronRight, ChevronDown, Clock, AlertTriangle, X, FileText, CheckCircle2, Users, Trash2, Heart, Calendar, CalendarOff, Info, Search } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -576,6 +577,19 @@ function ReviewLeaveModal({
   const [lopEnabled, setLopEnabled] = useState(leave.leaveType === "UNPAID");
   const [lopDays, setLopDays] = useState(leave.totalDays);
 
+  // Days beyond the applicant's balance are Loss of Pay by default. Only their
+  // reporting manager, HR or Super Admin may go below that; for anyone else it is the floor, and
+  // the API refuses less.
+  const { data: lop, isLoading: lopLoading } = useLopAssessment(leave.id);
+  const shortfall = lop?.shortfall ?? 0;
+  const minLop = lop && !lop.canWaive ? shortfall : 0;
+  useEffect(() => {
+    if (lop && lop.shortfall > 0) {
+      setLopEnabled(true);
+      setLopDays(lop.shortfall);
+    }
+  }, [lop]);
+
   const lopDates = useMemo(
     () => lopDayLabels(leave.fromDate, leave.toDate, lopDays),
     [leave.fromDate, leave.toDate, lopDays],
@@ -687,21 +701,32 @@ function ReviewLeaveModal({
             <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 space-y-3">
               <label className="flex items-center gap-3 cursor-pointer select-none">
                 <div
-                  onClick={() => setLopEnabled((e) => !e)}
-                  className={`w-9 h-5 rounded-full relative transition-colors ${lopEnabled ? "bg-rose-500" : "bg-gray-300"}`}
+                  onClick={() => { if (minLop <= 0) setLopEnabled((e) => !e); }}
+                  className={`w-9 h-5 rounded-full relative transition-colors ${lopEnabled ? "bg-rose-500" : "bg-gray-300"} ${minLop > 0 ? "opacity-60 cursor-not-allowed" : ""}`}
                 >
                   <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${lopEnabled ? "translate-x-4" : "translate-x-0.5"}`} />
                 </div>
                 <span className="text-sm text-gray-700">Approve with <span className="font-semibold text-rose-600">Loss of Pay</span></span>
               </label>
+              {shortfall > 0 && (
+                <p className="text-xs text-rose-700">
+                  {leave.leaveType === "UNPAID"
+                    ? `Unpaid leave — all ${shortfall} day${shortfall !== 1 ? "s are" : " is"} Loss of Pay.`
+                    : `Only ${lop?.available ?? 0} day${lop?.available === 1 ? "" : "s"} of ${LEAVE_LABEL[leave.leaveType] ?? leave.leaveType} balance available, so ${shortfall} of ${leave.totalDays} days become Loss of Pay.`}
+                  {" "}
+                  {lop?.canWaive
+                    ? "You can reduce or waive it."
+                    : "Only the reporting manager, HR or Super Admin can waive it."}
+                </p>
+              )}
               {lopEnabled && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-3 flex-wrap">
                     <span className="text-xs text-gray-600">LoP days:</span>
                     <input
-                      type="number" min={0.5} max={leave.totalDays} step={0.5}
+                      type="number" min={Math.max(0.5, minLop)} max={leave.totalDays} step={0.5}
                       value={lopDays}
-                      onChange={(e) => setLopDays(Math.min(leave.totalDays, Math.max(0, parseFloat(e.target.value) || 0)))}
+                      onChange={(e) => setLopDays(Math.min(leave.totalDays, Math.max(minLop, parseFloat(e.target.value) || 0)))}
                       className="w-20 border border-rose-200 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-rose-400 bg-white"
                     />
                     <span className="text-xs text-gray-400">of {leave.totalDays} total days</span>
@@ -756,7 +781,7 @@ function ReviewLeaveModal({
           </button>
           <button
             onClick={handleSubmit}
-            disabled={!decision || !comments.trim() || decisionPending}
+            disabled={!decision || !comments.trim() || decisionPending || (decision === "approve" && lopLoading)}
             className={`px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 transition-colors ${
               decision === "approve" ? "bg-green-600 hover:bg-green-700" :
               decision === "reject" ? "bg-red-600 hover:bg-red-700" :
@@ -789,6 +814,9 @@ function LOPApprovalModal({
 }) {
   const [decision, setDecision] = useState<"approve" | "waive" | null>(null);
   const [notes, setNotes] = useState("");
+  // Waiving is for the reporting manager, HR or Super Admin; the API enforces the same.
+  const { data: lop } = useLopAssessment(leave.id);
+  const canWaive = lop?.canWaive ?? false;
 
   function handleSubmit() {
     if (!decision || !notes.trim()) { toast.error("Notes are required"); return; }
@@ -866,14 +894,16 @@ function LOPApprovalModal({
                 </div>
               </button>
               <button
-                onClick={() => setDecision("waive")}
-                className={`p-4 rounded-lg border-2 transition-all ${decision === "waive" ? "border-green-500 bg-green-50" : "border-gray-200 hover:border-green-300"}`}
+                onClick={() => canWaive && setDecision("waive")}
+                disabled={!canWaive}
+                title={canWaive ? undefined : "Only the reporting manager, HR or Super Admin can waive Loss of Pay"}
+                className={`p-4 rounded-lg border-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed ${decision === "waive" ? "border-green-500 bg-green-50" : "border-gray-200 hover:border-green-300"}`}
               >
                 <div className="flex items-start gap-3">
                   <Heart size={24} className={decision === "waive" ? "text-green-600" : "text-gray-400"} />
                   <div className="text-left">
                     <p className={`text-sm font-medium ${decision === "waive" ? "text-green-900" : "text-gray-700"}`}>Waive LOP</p>
-                    <p className="text-xs text-gray-500 mt-1">Excuse absence, no deduction</p>
+                    <p className="text-xs text-gray-500 mt-1">{canWaive ? "Excuse absence, no deduction" : "Manager, HR or Super Admin only"}</p>
                   </div>
                 </div>
               </button>
