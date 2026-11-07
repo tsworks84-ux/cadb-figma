@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn, resolvePhotoUrl } from "@/lib/utils";
@@ -8,7 +8,7 @@ import {
   Users, Home, CalendarOff, Receipt, Shield,
   GraduationCap, Settings, LogOut, BarChart3, Building2, User,
   CalendarDays, UsersRound, ListTodo, Megaphone, ClipboardList, School, MessageSquare, IndianRupee, X,
-  Archive, FolderOpen,
+  Archive, FolderOpen, ChevronRight, Briefcase, Wallet, BookOpen,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useRouter } from "next/navigation";
@@ -23,6 +23,30 @@ const STALE = {
   long: 5 * 60 * 1000,
   medium: 2 * 60 * 1000,
 };
+
+type NavItem = { name: string; href: string; icon: React.ElementType; badge?: number };
+type NavGroup = { key: string; label: string; icon: React.ElementType; items: NavItem[] };
+
+/** Which groups were left open, remembered per browser. Purely a convenience. */
+const OPEN_GROUPS_KEY = "cadb_sidebar_open_groups";
+function readOpenGroups(): string[] {
+  try {
+    const raw = localStorage.getItem(OPEN_GROUPS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((k) => typeof k === "string") : [];
+  } catch {
+    return [];
+  }
+}
+function writeOpenGroups(keys: string[]) {
+  try { localStorage.setItem(OPEN_GROUPS_KEY, JSON.stringify(keys)); } catch { /* private mode etc. */ }
+}
+
+/** Does `href` (which may carry a query string) own the current route? */
+function isActiveHref(pathname: string, href: string): boolean {
+  const path = href.split("?")[0];
+  return pathname === path || pathname.startsWith(path + "/");
+}
 
 interface SidebarProps {
   /** Drawer state — only meaningful below the `lg` breakpoint. */
@@ -69,21 +93,9 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
     ? { name: "Employees", href: "/dashboard/employees", icon: Users }
     : { name: "My Profile", href: user?.id ? `/dashboard/employees/${user.id}` : "#", icon: User };
 
-  const mainNav = [
-    { name: "Home", href: "/dashboard/home", icon: Home },
-    { name: "Notice Board", href: "/dashboard/announcements", icon: Megaphone },
-    { name: "My Team", href: "/dashboard/my-team", icon: UsersRound },
-    { name: "My To-Do", href: "/dashboard/todos", icon: ListTodo },
-    { name: "Leaves & Holidays", href: "/dashboard/leaves", icon: CalendarOff },
-    ...(isPartTime ? [{ name: "My Timesheet", href: "/dashboard/timesheet", icon: ClipboardList }] : []),
-    { name: "Claims", href: "/dashboard/claims", icon: Receipt },
-    { name: "Policies", href: "/dashboard/policies", icon: Shield },
-    { name: "Training", href: "/dashboard/training", icon: GraduationCap },
-    ...(permissions.RESOURCES?.canView ? [{ name: "Resources", href: "/dashboard/resources", icon: FolderOpen }] : []),
-    // Settings is self-service only (own photo, password, preferences), so every
-    // role gets it — employees included.
-    { name: "Settings", href: "/dashboard/settings", icon: Settings },
-  ];
+  // Settings is self-service only (own photo, password, preferences), so every
+  // role gets it — employees included. It lives as a gear in the user footer.
+  const settingsHref = "/dashboard/settings";
 
   const { data: feedbackSummary } = useQuery({
     queryKey: ["feedback-summary"],
@@ -104,15 +116,63 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
   // Academics is only offered to roles that actually hold an academics grant
   const canViewAcademicsNav = canViewAcademics(role, permissions);
 
-  const mgmtNav: { name: string; href: string; icon: React.ElementType; badge?: number }[] = [
-    profileEntry,
-    ...(canViewAdminSection ? [{ name: "Administration", href: "/dashboard/admin",  icon: Building2    }] : []),
-    ...(canViewAcademicsNav ? [{ name: "Academics",   href: academicsHref,          icon: School       }] : []),
-    ...(canViewAdmin ? [{ name: "Student Feedback",   href: "/dashboard/feedback",  icon: MessageSquare, badge: openFeedbackCount }] : []),
-    ...(canViewAdmin ? [{ name: "Revenue",            href: "/dashboard/revenue",   icon: IndianRupee  }] : []),
-    ...(canViewMIS   ? [{ name: "MIS Reports",        href: "/dashboard/mis",       icon: BarChart3    }] : []),
-    ...(canViewDeletionLog ? [{ name: "Deletion Log", href: "/dashboard/deletion-log", icon: Archive   }] : []),
+  // Home stays a plain link; everything else folds into groups so the panel
+  // reads as a handful of rows. Items a role can't open are dropped first, and
+  // a group left with a single item is shown as that item, not a one-line dropdown.
+  const homeItem: NavItem = { name: "Home", href: "/dashboard/home", icon: Home };
+
+  const myGroups: NavGroup[] = [
+    { key: "workspace", label: "Workspace", icon: Briefcase, items: [
+      { name: "Notice Board", href: "/dashboard/announcements", icon: Megaphone },
+      { name: "My Team",      href: "/dashboard/my-team",       icon: UsersRound },
+      { name: "My To-Do",     href: "/dashboard/todos",         icon: ListTodo },
+    ] },
+    { key: "leave-claims", label: "Leave & Claims", icon: Wallet, items: [
+      { name: "Leaves & Holidays", href: "/dashboard/leaves", icon: CalendarOff },
+      ...(isPartTime ? [{ name: "My Timesheet", href: "/dashboard/timesheet", icon: ClipboardList }] : []),
+      { name: "Claims", href: "/dashboard/claims", icon: Receipt },
+    ] },
+    { key: "learning", label: "Learning", icon: BookOpen, items: [
+      { name: "Policies", href: "/dashboard/policies", icon: Shield },
+      { name: "Training", href: "/dashboard/training", icon: GraduationCap },
+      ...(permissions.RESOURCES?.canView ? [{ name: "Resources", href: "/dashboard/resources", icon: FolderOpen }] : []),
+    ] },
   ];
+
+  const mgmtGroups: NavGroup[] = [
+    { key: "people", label: "People", icon: Users, items: [
+      profileEntry,
+      ...(canViewAdminSection ? [{ name: "Administration", href: "/dashboard/admin",        icon: Building2 }] : []),
+      ...(canViewDeletionLog  ? [{ name: "Deletion Log",   href: "/dashboard/deletion-log", icon: Archive   }] : []),
+    ] },
+    { key: "academics", label: "Academics", icon: School, items: [
+      ...(canViewAcademicsNav ? [{ name: "Academics",        href: academicsHref,         icon: School }] : []),
+      ...(canViewAdmin        ? [{ name: "Student Feedback", href: "/dashboard/feedback", icon: MessageSquare, badge: openFeedbackCount }] : []),
+    ] },
+    { key: "finance", label: "Finance & Reports", icon: BarChart3, items: [
+      ...(canViewAdmin ? [{ name: "Revenue",     href: "/dashboard/revenue", icon: IndianRupee }] : []),
+      ...(canViewMIS   ? [{ name: "MIS Reports", href: "/dashboard/mis",     icon: BarChart3   }] : []),
+    ] },
+  ].filter((g) => g.items.length > 0);
+
+  // Open groups: whatever the user left open, plus the one holding the current
+  // page — opened on every navigation so you can always see where you are.
+  const [openGroups, setOpenGroups] = useState<string[]>([]);
+  useEffect(() => { setOpenGroups(readOpenGroups()); }, []);
+  const activeGroupKey = [...myGroups, ...mgmtGroups]
+    .find((g) => g.items.some((i) => isActiveHref(pathname, i.href)))?.key;
+  useEffect(() => {
+    if (!activeGroupKey) return;
+    setOpenGroups((prev) => (prev.includes(activeGroupKey) ? prev : [...prev, activeGroupKey]));
+  }, [activeGroupKey]);
+
+  const toggleGroup = (key: string) => {
+    setOpenGroups((prev) => {
+      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+      writeOpenGroups(next);
+      return next;
+    });
+  };
 
   // Fire API prefetches when the user hovers a link — data is ready by the time they click
   const prefetch = useCallback((href: string) => {
@@ -235,6 +295,66 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
     logoutBtn: "text-gray-400 hover:text-gray-700",
   };
 
+  function renderLink(item: NavItem, nested = false) {
+    const active = isActiveHref(pathname, item.href);
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        prefetch={true}
+        onMouseEnter={() => prefetch(item.href)}
+        onClick={onMobileClose}
+        className={cn(
+          "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+          nested && "py-1.5",
+          active ? theme.activeLink : theme.inactiveLink,
+        )}
+      >
+        <item.icon className="h-4 w-4 shrink-0" />
+        <span className="flex-1 truncate">{item.name}</span>
+        {!!item.badge && <Badge count={item.badge} />}
+      </Link>
+    );
+  }
+
+  function renderGroup(group: NavGroup) {
+    if (group.items.length === 1) return renderLink(group.items[0]);
+    const open = openGroups.includes(group.key);
+    const holdsActive = group.key === activeGroupKey;
+    const badgeTotal = group.items.reduce((n, i) => n + (i.badge ?? 0), 0);
+    const panelId = `nav-group-${group.key}`;
+    return (
+      <div key={group.key}>
+        <button
+          type="button"
+          onClick={() => toggleGroup(group.key)}
+          aria-expanded={open}
+          aria-controls={panelId}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+            holdsActive && !open ? "text-[#1e3464] bg-[#1e3464]/10" : theme.inactiveLink,
+          )}
+        >
+          <group.icon className="h-4 w-4 shrink-0" />
+          <span className="flex-1 truncate text-left">{group.label}</span>
+          {!open && badgeTotal > 0 && <Badge count={badgeTotal} />}
+          <ChevronRight className={cn("h-4 w-4 shrink-0 text-gray-400 transition-transform duration-200", open && "rotate-90")} />
+        </button>
+        {/* grid-rows 0fr→1fr animates to the content's own height */}
+        <div
+          id={panelId}
+          className={cn("grid transition-[grid-template-rows] duration-200 ease-out", open ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}
+        >
+          <div className="overflow-hidden">
+            <div className="ml-5 mt-1 mb-1 space-y-0.5 border-l border-gray-200 pl-2" inert={!open || undefined}>
+              {group.items.map((item) => renderLink(item, true))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       {/* Mobile backdrop — tap to dismiss the drawer */}
@@ -279,61 +399,21 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
         <p className={cn("px-3 mb-2 text-xs font-semibold uppercase tracking-wider", theme.sectionLabel)}>
           My Dashboard
         </p>
-        {mainNav.map((item) => {
-          const active = pathname === item.href || pathname.startsWith(item.href + "/");
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              prefetch={true}
-              onMouseEnter={() => prefetch(item.href)}
-              onClick={onMobileClose}
-              className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                active ? theme.activeLink : theme.inactiveLink
-              )}
-            >
-              <item.icon className="h-4 w-4 shrink-0" />
-              {item.name}
-            </Link>
-          );
-        })}
+        {renderLink(homeItem)}
+        {myGroups.map(renderGroup)}
 
-        {mgmtNav.length > 0 && (
+        {mgmtGroups.length > 0 && (
           <>
-            <p className={cn("px-3 mt-6 mb-2 text-xs font-semibold uppercase tracking-wider", theme.sectionLabel)}>Management</p>
-            {mgmtNav.map((item) => {
-              const itemPath = item.href.split("?")[0];
-              const active = pathname.startsWith(itemPath);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  prefetch={true}
-                  onMouseEnter={() => prefetch(item.href)}
-                  onClick={onMobileClose}
-                  className={cn(
-                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                    active ? theme.activeLink : theme.inactiveLink
-                  )}
-                >
-                  <item.icon className="h-4 w-4 shrink-0" />
-                  <span className="flex-1">{item.name}</span>
-                  {!!item.badge && (
-                    <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-semibold text-white leading-none">
-                      {item.badge > 99 ? "99+" : item.badge}
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
+            {/* padding, not margin: the nav's space-y rule overrides a top margin here */}
+            <p className={cn("px-3 pt-5 pb-1 text-xs font-semibold uppercase tracking-wider", theme.sectionLabel)}>Management</p>
+            {mgmtGroups.map(renderGroup)}
           </>
         )}
       </nav>
 
       {/* User */}
       <div className={cn("border-t px-4 py-3", theme.userBorder)}>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full overflow-hidden bg-[#1e3464]">
             <img
               src={user?.photoUrl ? resolvePhotoUrl(user.photoUrl)! : "/default-avatar.svg"}
@@ -345,12 +425,32 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
             <p className={cn("text-sm font-medium truncate", theme.userName)}>{user ? `${user.firstName} ${user.lastName}` : "Loading..."}</p>
             <p className={cn("text-xs truncate", theme.userRole)}>{user?.role?.replace(/_/g, " ")}</p>
           </div>
-          <button onClick={handleLogout} className={cn("transition-colors", theme.logoutBtn)}>
+          <Link
+            href={settingsHref}
+            onClick={onMobileClose}
+            aria-label="Settings"
+            title="Settings"
+            className={cn(
+              "rounded-md p-1.5 transition-colors",
+              isActiveHref(pathname, settingsHref) ? "bg-[#1e3464] text-white" : cn(theme.logoutBtn, "hover:bg-gray-200"),
+            )}
+          >
+            <Settings className="h-4 w-4" />
+          </Link>
+          <button onClick={handleLogout} aria-label="Log out" title="Log out" className={cn("rounded-md p-1.5 transition-colors hover:bg-gray-200", theme.logoutBtn)}>
             <LogOut className="h-4 w-4" />
           </button>
         </div>
       </div>
       </aside>
     </>
+  );
+}
+
+function Badge({ count }: { count: number }) {
+  return (
+    <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-semibold text-white leading-none">
+      {count > 99 ? "99+" : count}
+    </span>
   );
 }
