@@ -414,12 +414,40 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
     if (q.gradeId)   where.batches  = { some: { batch: { gradeId: q.gradeId   } } };
     if (q.subjectId) where.subjects = { some: { subjectId:        q.subjectId } };
 
-    const [data, total] = await Promise.all([
-      prisma.exam.findMany({ where, include: examInclude, orderBy: { examDate: "desc" }, skip: offset, take: limit }),
-      prisma.exam.count({ where }),
+    // The stat cards count everything the other sidebar filters match, not just the
+    // page in hand — counting the page made "Due for Marking" top out at the
+    // page size and drop to 0 under the Due chip.
+    const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+    // The status chip is left out too: the cards summarise every status.
+    const { status: _status, ...countsWhere } = where;
+
+    // Toolbar search: test name, batch or subject. Server-side, because the list
+    // is paged — filtering only the loaded page hid any test outside it (an
+    // older exam date under "All" with more than one page of tests).
+    const listWhere: any = { ...where };
+    const term = (q.q ?? "").trim();
+    if (term) {
+      listWhere.AND = [{
+        OR: [
+          { name:     { contains: term, mode: "insensitive" } },
+          { batches:  { some: { batch:   { name: { contains: term, mode: "insensitive" } } } } },
+          { subjects: { some: { subject: { name: { contains: term, mode: "insensitive" } } } } },
+        ],
+      }];
+    }
+
+    const [data, total, upcoming, dueForMarking, completed] = await Promise.all([
+      prisma.exam.findMany({ where: listWhere, include: examInclude, orderBy: { examDate: "desc" }, skip: offset, take: limit }),
+      prisma.exam.count({ where: listWhere }),
+      prisma.exam.count({ where: { AND: [countsWhere, { status: "DUE", examDate: { gte: startOfToday } }] } }),
+      prisma.exam.count({ where: { AND: [countsWhere, { status: "COMPLETED" }] } }),
+      prisma.exam.count({ where: { AND: [countsWhere, { status: "MARKED" }] } }),
     ]);
 
-    return reply.send({ success: true, data, meta: { total, limit, offset } });
+    return reply.send({
+      success: true, data,
+      meta: { total, limit, offset, counts: { upcoming, dueForMarking, completed } },
+    });
   });
 
   // ── POST / ────────────────────────────────────────────────────────────────
@@ -697,7 +725,11 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
 
     const { rows, errors, totalRows } = parseMarksWorkbook(
       workbook, ctx.slots, ctx.exam.numPapers, ctx.exam.totalMarks,
-      ctx.students.map((s) => ({ id: s.id, rollNumber: s.rollNumber, name: fullName(s) })),
+      ctx.students.map((s) => ({
+        id: s.id, rollNumber: s.rollNumber, name: fullName(s),
+        // Blank Present cells keep this rather than resetting to present.
+        savedAttended: ctx.resultMap.get(s.id)?.attended ?? null,
+      })),
     );
 
     // A row naming a student who was taken off this exam gets a message that says
