@@ -7,7 +7,7 @@ import { sendCredentialsMail } from "../../utils/mailer.js";
 import type { JwtPayload } from "@cadb/types";
 import { randomUUID } from "crypto";
 import { uploadFile } from "../../utils/s3.js";
-import { computeAccrued, computeCarryForward, lopDaysInMonth, IN_FORCE_LEAVE_STATUSES } from "../../utils/leave.js";
+import { computeAccrued, computeCarryForward, lopDaysInMonth, roundDays, IN_FORCE_LEAVE_STATUSES } from "../../utils/leave.js";
 import { hasAnyPermission, ACADEMICS_MODULES } from "../../utils/permissions.js";
 import { createWriteStream, mkdirSync } from "fs";
 import { join, dirname } from "path";
@@ -1196,7 +1196,7 @@ export async function employeeRoutes(fastify: FastifyInstance) {
         availed,
         // `earned` — approved comp-off days — is added whole: it is credited on
         // approval rather than accrued across the year like an allocation.
-        balance: Math.max(0, accrued + b.carried + b.earned - availed),
+        balance: roundDays(Math.max(0, accrued + b.carried + b.earned - availed)),
       };
     });
 

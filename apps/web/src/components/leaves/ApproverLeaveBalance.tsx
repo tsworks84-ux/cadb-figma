@@ -10,6 +10,9 @@ const LEAVE_LABEL: Record<string, string> = {
   COMPENSATORY: "Comp-off", UNPAID: "Unpaid", SPECIAL: "Special",
 };
 
+/** Day counts to at most two decimals — 1.8, not 1.7999999999999998. */
+const fmtDays = (n: number) => String(Math.round(n * 100) / 100);
+
 type Balance = {
   leaveType: string;
   allocated: number;
@@ -85,17 +88,17 @@ export function ApproverLeaveBalance({ employeeId, leaveType, totalDays }: {
             return (
               <div
                 key={b.leaveType}
-                className={`rounded-lg border px-3 py-2 ${isRequested ? "border-[#2C3E7C] bg-blue-50/60" : "border-gray-200 bg-white"}`}
+                className={`min-w-0 rounded-lg border px-3 py-2 ${isRequested ? "border-[#2C3E7C] bg-blue-50/60" : "border-gray-200 bg-white"}`}
               >
                 <p className={`text-xs truncate ${isRequested ? "font-medium text-[#2C3E7C]" : "text-gray-500"}`}>
                   {LEAVE_LABEL[b.leaveType] ?? b.leaveType}{isRequested && " · requested"}
                 </p>
-                <p className="text-lg font-semibold text-gray-900 leading-tight mt-0.5">
-                  {b.balance}
+                <p className="text-lg font-semibold text-gray-900 leading-tight mt-0.5 tabular-nums truncate">
+                  {fmtDays(b.balance)}
                   <span className="text-xs font-normal text-gray-400"> left</span>
                 </p>
-                <p className="text-[11px] text-gray-400 mt-0.5">
-                  {b.used} used · {b.pending} pending
+                <p className="text-[11px] text-gray-400 mt-0.5 tabular-nums truncate">
+                  {fmtDays(b.used)} used · {fmtDays(b.pending)} pending
                 </p>
               </div>
             );
