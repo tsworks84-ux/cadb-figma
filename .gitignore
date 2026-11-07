@@ -12,6 +12,7 @@ ecosystem.staging.config.cjs
 prisma/migrations/
 uploads/
 .claude/
+*.tsbuildinfo
 
 # Phase 2 partner-db generated Prisma client
 packages/partner-db/generated/
