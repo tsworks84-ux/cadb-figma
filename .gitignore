@@ -12,3 +12,4 @@ ecosystem.staging.config.cjs
 prisma/migrations/
 uploads/
 .claude/
+*.tsbuildinfo
