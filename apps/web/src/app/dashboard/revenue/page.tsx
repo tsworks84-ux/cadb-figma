@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatCurrencyCompact } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth";
 import Link from "next/link";
 import {
@@ -85,24 +85,33 @@ function collectionColor(p: number) {
 // ── Summary Card ──────────────────────────────────────────────────────────────
 
 function SummaryCard({
-  icon: Icon, label, value, sub, accent, iconBg,
+  icon: Icon, label, amount, sub, accent, iconBg,
 }: {
   icon: React.ElementType;
   label: string;
-  value: string;
+  amount: number;
   sub: string;
   accent: string;
   iconBg: string;
 }) {
+  // Headline in short form (₹3.65 Cr) so six cards fit a row; the exact rupee
+  // figure sits right under it, so nothing is lost to rounding.
+  const exact = formatCurrency(amount);
+  const compact = formatCurrencyCompact(amount);
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex items-start gap-4">
-      <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${iconBg}`}>
-        <Icon className="h-5 w-5" style={{ color: accent }} />
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 sm:p-5 flex flex-col gap-3 min-w-0">
+      <div className="flex items-center gap-2.5 min-w-0">
+        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${iconBg}`}>
+          <Icon className="h-[18px] w-[18px]" style={{ color: accent }} />
+        </div>
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide leading-tight">{label}</p>
       </div>
       <div className="min-w-0">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">{label}</p>
-        <p className="text-2xl font-black text-gray-900 leading-tight mt-0.5">{value}</p>
-        <p className="text-xs text-gray-400 mt-1">{sub}</p>
+        <p className="text-2xl font-black text-gray-900 leading-tight tabular-nums truncate" title={exact}>{compact}</p>
+        {compact !== exact && (
+          <p className="text-xs font-medium text-gray-500 tabular-nums truncate mt-0.5" title={exact}>{exact}</p>
+        )}
+        <p className="text-xs text-gray-400 mt-1.5 leading-snug">{sub}</p>
       </div>
     </div>
   );
@@ -278,17 +287,14 @@ export default function RevenuePage() {
   const [studentSearch, setStudentSearch] = useState("");
   const [showStudents, setShowStudents] = useState(false);
 
-  // Guard: only SUPER_ADMIN
-  if (!["SUPER_ADMIN", "HR_ADMIN"].includes(role)) {
-    return (
-      <div className="flex h-64 items-center justify-center text-gray-400 text-sm">
-        You do not have permission to view this page.
-      </div>
-    );
-  }
+  // Only Super Admin / HR. The check itself sits below the hooks: returning
+  // before them made the first render (role still loading, so "") run fewer
+  // hooks than the next, and React threw error #310 — a blank crash page.
+  const canView = ["SUPER_ADMIN", "HR_ADMIN"].includes(role);
 
   // Filter metadata
   const { data: meta } = useQuery<Meta>({
+    enabled: canView,
     queryKey: ["revenue-meta"],
     queryFn: () => api.get("/api/v1/revenue/meta").then((r) => r.data.data),
     staleTime: 5 * 60 * 1000,
@@ -306,6 +312,7 @@ export default function RevenuePage() {
   }, [academicYear, batchId, schoolId, dateFrom, dateTo]);
 
   const { data: report, isLoading } = useQuery<ReportData>({
+    enabled: canView,
     queryKey: ["revenue-report", reportParams],
     queryFn: () => {
       const qs = new URLSearchParams(reportParams).toString();
@@ -330,6 +337,14 @@ export default function RevenuePage() {
   }
 
   const hasFilters = !!(academicYear || batchId || schoolId || dateFrom || dateTo);
+
+  if (!canView) {
+    return (
+      <div className="flex h-64 items-center justify-center text-gray-400 text-sm">
+        {user ? "You do not have permission to view this page." : null}
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -430,11 +445,11 @@ export default function RevenuePage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-3 sm:gap-4">
         <SummaryCard
           icon={Wallet}
           label="Gross Fee"
-          value={formatCurrency(summary?.totalFee ?? 0)}
+          amount={summary?.totalFee ?? 0}
           sub={`Before discounts · ${summary?.studentCount ?? 0} students`}
           accent="#6366f1"
           iconBg="bg-indigo-50"
@@ -442,7 +457,7 @@ export default function RevenuePage() {
         <SummaryCard
           icon={IndianRupee}
           label="Fee Receivable"
-          value={formatCurrency(summary?.netReceivable ?? 0)}
+          amount={summary?.netReceivable ?? 0}
           sub={`Net after discounts · ${summary?.studentCount ?? 0} students`}
           accent="#2563eb"
           iconBg="bg-blue-50"
@@ -450,7 +465,7 @@ export default function RevenuePage() {
         <SummaryCard
           icon={TrendingUp}
           label="Fee Received"
-          value={formatCurrency(summary?.totalReceived ?? 0)}
+          amount={summary?.totalReceived ?? 0}
           sub={`Net of refunds · ${pct(summary?.totalReceived ?? 0, summary?.netReceivable ?? 0)}% collection rate`}
           accent="#16a34a"
           iconBg="bg-green-50"
@@ -458,7 +473,7 @@ export default function RevenuePage() {
         <SummaryCard
           icon={Undo2}
           label="Fee Refunded"
-          value={formatCurrency(summary?.totalRefunded ?? 0)}
+          amount={summary?.totalRefunded ?? 0}
           sub="Paid back to students"
           accent="#e11d48"
           iconBg="bg-rose-50"
@@ -466,7 +481,7 @@ export default function RevenuePage() {
         <SummaryCard
           icon={TrendingDown}
           label="Fee Due"
-          value={formatCurrency(summary?.totalDue ?? 0)}
+          amount={summary?.totalDue ?? 0}
           sub="Outstanding balance"
           accent="#dc2626"
           iconBg="bg-red-50"
@@ -474,7 +489,7 @@ export default function RevenuePage() {
         <SummaryCard
           icon={Tag}
           label="Discount Given"
-          value={formatCurrency(summary?.totalDiscount ?? 0)}
+          amount={summary?.totalDiscount ?? 0}
           sub="Total waivers applied"
           accent="#d97706"
           iconBg="bg-amber-50"

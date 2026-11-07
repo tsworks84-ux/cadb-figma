@@ -4,7 +4,7 @@ import { prisma } from "@cadb/db";
 import { authenticate } from "../../middleware/authenticate.js";
 import type { JwtPayload } from "@cadb/types";
 import { notifyLeaveEvent } from "../../utils/notify/index.js";
-import { getFiscalYear, computeAccrued, computeCarryForward, countLeaveDays, IN_FORCE_LEAVE_STATUSES } from "../../utils/leave.js";
+import { getFiscalYear, computeAccrued, computeCarryForward, countLeaveDays, roundDays, IN_FORCE_LEAVE_STATUSES } from "../../utils/leave.js";
 import { hasPermission, isCustomRole } from "../../utils/permissions.js";
 import { recordAudit, describeEmployee } from "../../utils/auditLog.js";
 import {
@@ -210,7 +210,7 @@ async function computeLeaveBalances(employeeId: string, year: number) {
       availed,
       // `earned` (approved comp-offs) is added whole — it is credited on
       // approval, not accrued month by month like an allocation.
-      balance: Math.max(0, accrued + b.carried + b.earned - availed),
+      balance: roundDays(Math.max(0, accrued + b.carried + b.earned - availed)),
       carried: b.carried,
       earned: b.earned,
     };
@@ -255,8 +255,8 @@ async function assessLeaveLop(application: {
     prisma.employee.findUnique({ where: { id: application.employeeId }, select: { joiningDate: true } }),
   ]);
   const available = balance
-    ? Math.max(0, computeAccrued(balance.allocated, year, employee?.joiningDate ?? null)
-        + balance.carried + balance.earned - balance.used)
+    ? roundDays(Math.max(0, computeAccrued(balance.allocated, year, employee?.joiningDate ?? null)
+        + balance.carried + balance.earned - balance.used))
     : 0;
   // Round to the half day — accrual can produce tenths, LoP is booked in halves.
   const shortfall = Math.max(0, Math.ceil((application.totalDays - available) * 2) / 2);
@@ -324,8 +324,8 @@ export async function leaveRoutes(fastify: FastifyInstance) {
         select: { joiningDate: true },
       });
       const available = balance
-        ? computeAccrued(balance.allocated, year, employee?.joiningDate ?? null)
-          + balance.carried + balance.earned - balance.used - balance.pending
+        ? roundDays(computeAccrued(balance.allocated, year, employee?.joiningDate ?? null)
+          + balance.carried + balance.earned - balance.used - balance.pending)
         : 0;
       if (totalDays > available) {
         return reply.status(400).send({

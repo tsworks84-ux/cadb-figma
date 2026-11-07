@@ -127,6 +127,15 @@ function monthIndex(date: Date, fyYear: number): number {
 }
 
 /**
+ * Day counts to two decimals. Balances add tenths (accrual) and halves (half
+ * days), and binary floating point turns 2.3 − 0.5 into 1.7999999999999998 —
+ * which the approver's balance card printed verbatim.
+ */
+export function roundDays(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/**
  * Days accrued so far in FY `fyYear`, pro-rated by joining date.
  *
  * - A full-year employee (joined before this FY) accrues monthly from April.

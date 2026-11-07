@@ -15,6 +15,21 @@ export function formatCurrency(amount: number) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(amount);
 }
 
+/**
+ * Rupees in Indian short form for headline figures: ₹3.65 Cr, ₹86.89 L. Below a
+ * lakh it is the plain amount. Use where a full ₹3,64,80,312 would not fit; show
+ * the exact figure alongside (or in a title) when precision matters.
+ */
+export function formatCurrencyCompact(amount: number) {
+  const abs = Math.abs(amount);
+  const sign = amount < 0 ? "−" : "";
+  const short = (n: number, unit: string) =>
+    `${sign}₹${new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(n)} ${unit}`;
+  if (abs >= 1e7) return short(abs / 1e7, "Cr");
+  if (abs >= 1e5) return short(abs / 1e5, "L");
+  return formatCurrency(amount);
+}
+
 export function getInitials(firstName: string, lastName: string) {
   return `${firstName[0]}${lastName[0]}`.toUpperCase();
 }
