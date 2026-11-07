@@ -114,7 +114,7 @@ export function buildMarksTemplate(
     if (max != null) head.getCell(6 + i).note = `Out of ${max}`;
   });
   head.getCell(1).note = "Do not edit — this is how each row is matched back to a student.";
-  head.getCell(5).note = "Yes for present, No for absent. Absent students must have no marks.";
+  head.getCell(5).note = "Yes for present, No for absent. Blank keeps the attendance already saved. Absent students must have no marks.";
 
   const firstMarkCol = 6;
   const lastMarkCol  = 5 + headers.length;
@@ -171,7 +171,7 @@ export function buildMarksTemplate(
     ["1.", `Fill in the "${SHEET_MARKS}" sheet. One row per student — the rows are already filled in for you.`],
     ["2.", "Do not add, delete or reorder rows, and do not edit the Student ID column — it is how each row is matched back."],
     ["3.", "Enter a number in each subject column. Leave a cell blank if that paper was not marked."],
-    ["4.", "Present: Yes or No. An absent student must have every mark left blank."],
+    ["4.", "Present: Yes or No. Left blank, the attendance already saved for the student is kept (present if none). An absent student must have every mark left blank."],
     ["5.", "Marks cannot be negative or above the ceiling shown in the header note for that column."],
     ["6.", "The Total column is a formula for your own checking — it is ignored on upload."],
     ["7.", "Save the file and upload it on the exam page. Only the students in the file are updated."],
@@ -246,7 +246,7 @@ export function parseMarksWorkbook(
   slots: ExamSlot[],
   numPapers: number,
   totalMarks: number | null,
-  students: { id: string; rollNumber: string | null; name: string }[],
+  students: { id: string; rollNumber: string | null; name: string; savedAttended?: boolean | null }[],
 ): ParseMarksResult {
   const errors: RowError[] = [];
   const ws = wb.getWorksheet(SHEET_MARKS) ?? wb.worksheets[0];
@@ -333,8 +333,14 @@ export function parseMarksWorkbook(
     }
     seenStudents.set(studentId, rowNumber);
 
-    // Attendance — blank means present, matching the marks-entry screen's default.
-    let attended = true;
+    // Attendance. A blank Present cell (or a file with no Present column) keeps
+    // whatever is already saved for the student — attendance is usually marked on
+    // the marks screen first and the results uploaded afterwards, and reading
+    // blank as "present" silently undid that. A student with nothing saved yet
+    // falls back to present, the screen's own default.
+    const saved = byId.get(studentId)!.savedAttended;
+    let attended = saved ?? true;
+    const presentFromFile = fixedCol.has(COL_PRESENT);
     const presentText = fixedCol.has(COL_PRESENT) ? cellText(row.getCell(fixedCol.get(COL_PRESENT)!).value) : "";
     if (presentText) {
       const p = presentText.toLowerCase();
@@ -390,7 +396,9 @@ export function parseMarksWorkbook(
     if (!attended && anyMark) {
       errors.push({
         row: rowNumber, column: COL_PRESENT,
-        message: `${byId.get(studentId)!.name} is marked absent but has marks — clear the marks or set Present to Yes`,
+        message: presentText
+          ? `${byId.get(studentId)!.name} is marked absent but has marks — clear the marks or set Present to Yes`
+          : `${byId.get(studentId)!.name} is marked absent on the marks screen but has marks here — set Present to Yes${presentFromFile ? "" : " (add a Present column)"} or clear the marks`,
       });
       return;
     }

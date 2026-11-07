@@ -13,6 +13,9 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { hasAcademicsAction } from "@/lib/academicsAccess";
 import { invalidateAssessments } from "@/lib/assessmentCache";
 import { useRouter, useSearchParams } from "next/navigation";
+
+/** Tests fetched per page on the list; "Load more" adds another page. */
+const PAGE_SIZE = 200;
 import { format, parseISO } from "date-fns";
 import { AssessmentStatsPanel } from "./StatsPanel";
 import { EXAM_PRESETS, PRESET_LABELS, resolveSubjectId, type ExamPreset } from "./examPresets";
@@ -894,6 +897,15 @@ function AssessmentsPage() {
   const [modalOpen,        setModalOpen]        = useState(false);
   const [editTarget,       setEditTarget]       = useState<any | null>(null);
   const [toolbarSearch,    setToolbarSearch]    = useState("");
+  const [toolbarQuery,     setToolbarQuery]     = useState("");
+  const [pageLimit,        setPageLimit]        = useState(PAGE_SIZE);
+
+  // The toolbar search runs on the server (the list is paged), so wait for a
+  // pause in typing before asking.
+  useEffect(() => {
+    const t = setTimeout(() => setToolbarQuery(toolbarSearch.trim()), 300);
+    return () => clearTimeout(t);
+  }, [toolbarSearch]);
 
   const batchesUrl = teacherId
     ? `/api/v1/academics/batches?teacherId=${teacherId}`
@@ -926,29 +938,27 @@ function AssessmentsPage() {
   else if (teacherId)         params.set("teacherId",    teacherId);
   if (filterGrade)            params.set("gradeId",      filterGrade);
   if (filterSubject)          params.set("subjectId",    filterSubject);
-  params.set("limit", "200");
+  if (toolbarQuery)           params.set("q",            toolbarQuery);
 
-  const { data: examData, isLoading } = useQuery({
+  // Any filter change starts again from the first page.
+  const filterKey = params.toString();
+  useEffect(() => { setPageLimit(PAGE_SIZE); }, [filterKey]);
+  params.set("limit", String(pageLimit));
+
+  const { data: examData, isLoading, isFetching } = useQuery({
     queryKey: ["assessments", params.toString()],
     queryFn:  () => api.get(`/api/v1/academics/assessments?${params.toString()}`).then((r) => r.data),
+    placeholderData: (prev) => prev,
   });
-  const allExams: any[] = examData?.data ?? [];
+  // Search and filters are applied by the server across every test, not just
+  // the page that happens to be loaded — that is what hid older tests under All.
+  const exams: any[] = examData?.data ?? [];
+  const totalExams: number = examData?.meta?.total ?? exams.length;
 
-  const exams = toolbarSearch
-    ? allExams.filter((e) => {
-        const q = toolbarSearch.toLowerCase();
-        return (
-          e.name?.toLowerCase().includes(q) ||
-          e.batches?.some((eb: any) => eb.batch?.name?.toLowerCase().includes(q)) ||
-          e.subjects?.some((es: any) => es.subject?.name?.toLowerCase().includes(q))
-        );
-      })
-    : allExams;
-
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const upcomingCount  = allExams.filter((e) => e.status === "DUE" && new Date(e.examDate) >= today).length;
-  const dueMarkCount   = allExams.filter((e) => e.status === "COMPLETED").length;
-  const completedCount = allExams.filter((e) => e.status === "MARKED").length;
+  const counts = examData?.meta?.counts;
+  const upcomingCount  = counts?.upcoming      ?? 0;
+  const dueMarkCount   = counts?.dueForMarking ?? 0;
+  const completedCount = counts?.completed     ?? 0;
 
   const statusMut = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
@@ -1137,7 +1147,7 @@ function AssessmentsPage() {
           <div className="grid gap-3 mb-5" style={{ gridTemplateColumns: "minmax(0,1fr) auto auto", alignItems: "center" }}>
             <DInput placeholder="Search assessments by test name, batch, subject, or faculty" value={toolbarSearch}
               onChange={(e) => setToolbarSearch(e.target.value)} style={{ minHeight: 48, borderRadius: 14, fontSize: 15 }} />
-            <span style={{ color: D.muted, fontWeight: 850, whiteSpace: "nowrap" }}>{exams.length} test{exams.length !== 1 ? "s" : ""}</span>
+            <span style={{ color: D.muted, fontWeight: 850, whiteSpace: "nowrap" }}>{totalExams} test{totalExams !== 1 ? "s" : ""}</span>
             {canCreate && <DBtn primary onClick={() => { setEditTarget(null); setModalOpen(true); }}>+ New Test</DBtn>}
           </div>
 
@@ -1192,6 +1202,14 @@ function AssessmentsPage() {
                   onDelete={(id) => { if (confirm("Delete this assessment?")) deleteMut.mutate(id); }}
                   onStatus={(id, status) => statusMut.mutate({ id, status })} />
               ))}
+              {exams.length < totalExams && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, padding: 16, borderTop: `1px solid ${D.line}`, flexWrap: "wrap" }}>
+                  <span style={{ color: D.muted, fontSize: 13, fontWeight: 700 }}>Showing {exams.length} of {totalExams}</span>
+                  <DBtn onClick={() => setPageLimit((n) => n + PAGE_SIZE)} disabled={isFetching}>
+                    {isFetching ? "Loading…" : "Load more"}
+                  </DBtn>
+                </div>
+              )}
             </div>
           )}
         </main>

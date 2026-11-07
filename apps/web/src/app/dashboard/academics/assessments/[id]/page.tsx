@@ -239,6 +239,37 @@ export default function ExamDetailPage() {
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to save marks"),
   });
 
+  // Has the grid been changed since the last save? Attendance is often ticked
+  // here and the marks uploaded from a file straight after — without saving in
+  // between, the import re-seeds the grid from the server and those ticks are
+  // gone. So Import Marks saves pending edits first.
+  const hasUnsavedChanges = activeRows.some((r) => {
+    const sid = r.student.id;
+    if (!initialized.has(sid)) return false;
+    if ((attendanceMap[sid] ?? true) !== (r.result?.attended ?? true)) return true;
+    const saved = new Map<string, string>(
+      (r.result?.marks ?? []).map((m: any) => [slotKey(m.paperNum, m.subjectSlot), m.marks != null ? String(m.marks) : ""]),
+    );
+    return slots.some((slot) => {
+      const k = slotKey(slot.paperNum, slot.subjectSlot);
+      const local = marksMap[sid]?.[k] ?? "";
+      const server = saved.get(k) ?? "";
+      return local === "" || server === "" ? local !== server : parseFloat(local) !== parseFloat(server);
+    });
+  });
+
+  const openImport = async () => {
+    if (hasUnsavedChanges) {
+      try {
+        const res = await saveMut.mutateAsync();
+        if (!res?.success) return;  // onSuccess already showed the error
+      } catch {
+        return;                     // onError already showed it
+      }
+    }
+    setImportOpen(true);
+  };
+
   const excludeMut = useMutation({
     mutationFn: (studentId: string) =>
       api.patch(`/api/v1/academics/assessments/${id}/results/${studentId}`, { isExcluded: true }).then((r) => r.data),
@@ -805,9 +836,11 @@ export default function ExamDetailPage() {
               </span>
             </div>
             {canEdit && (
-              <button onClick={() => setImportOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 transition-colors">
-                <FileUp className="h-3.5 w-3.5" /> Import Marks
+              <button onClick={openImport} disabled={saveMut.isPending}
+                title={hasUnsavedChanges ? "Saves your attendance and marks first, then opens the import" : undefined}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 transition-colors disabled:opacity-50">
+                {saveMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileUp className="h-3.5 w-3.5" />}
+                {hasUnsavedChanges ? "Save & Import Marks" : "Import Marks"}
               </button>
             )}
           </div>
