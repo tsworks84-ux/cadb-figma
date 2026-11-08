@@ -46,6 +46,24 @@ export type NotifyPayload = {
   claimedAmount?: string;
   approvedAmount?: string;
 
+  // Exam events
+  examName?: string;
+  examDate?: string;
+  examTime?: string;
+  stageName?: string;
+  subjectLabel?: string;
+  plannedDate?: string;
+  daysOverdue?: string;
+  ownerName?: string;
+  taskCount?: string;
+  taskSummary?: string;     // newline-separated "Stage — due date" lines
+  syllabus?: string;        // newline-separated "Subject: topics" lines
+  studentName?: string;
+  scoreLine?: string;       // "212 / 300"
+  scoreDetail?: string;     // newline-separated "Subject: marks / max" lines
+  /** Footer sign-off; student emails don't use the HR one. */
+  signOff?: string;
+
   // Shared
   reason?: string;
   cancelReason?: string;
@@ -71,14 +89,19 @@ function optionalRow(label: string, value: string | undefined): string {
   return value ? row(label, value) : "";
 }
 
-function shell(heading: string, lead: string, rows: string, cta: string, link: string): string {
+/** Multi-line user text as escaped HTML lines. */
+function lines(value: string | undefined): string {
+  return esc(value).replace(/\n/g, "<br>");
+}
+
+function shell(heading: string, lead: string, rows: string, cta: string, link: string, signOff = "Centum Academy HR System"): string {
   return `
     <div style="font-family:-apple-system,Segoe UI,sans-serif;max-width:560px;margin:0 auto;padding:24px">
       <h2 style="color:${BRAND};margin:0 0 16px;font-size:18px">${heading}</h2>
       <p style="color:#374151;font-size:14px;margin:0 0 12px">${lead}</p>
       <table style="border-collapse:collapse;margin:16px 0">${rows}</table>
       <a href="${link}" style="display:inline-block;background:${BRAND};color:#fff;padding:10px 22px;border-radius:6px;text-decoration:none;font-weight:600;font-size:14px">${cta}</a>
-      <p style="color:#9ca3af;font-size:12px;margin-top:28px">— Centum Academy HR System</p>
+      <p style="color:#9ca3af;font-size:12px;margin-top:28px">— ${esc(signOff)}</p>
     </div>`;
 }
 
@@ -257,6 +280,77 @@ export function renderEmail(event: NotifyEvent, p: NotifyPayload): { subject: st
         ),
       };
 
+    case "EXAM_TASKS_ASSIGNED":
+      return {
+        subject: `Exam tasks assigned: ${p.examName} (${p.examDate})`,
+        html: shell(
+          "You have exam tasks",
+          `Dear ${esc(p.recipientName)}, you own ${esc(p.taskCount)} task(s) for <b>${esc(p.examName)}</b>, held on ${esc(p.examDate)}.`,
+          `<tr><td style="padding:6px 0;font-size:13px;color:#111827">${lines(p.taskSummary)}</td></tr>`,
+          "Open my exam tasks →",
+          p.link,
+          "Examinations Team",
+        ),
+      };
+
+    case "EXAM_STAGE_DUE_SOON":
+      return {
+        subject: `Due ${p.plannedDate}: ${p.stageName} — ${p.examName}`,
+        html: shell(
+          "Exam task due soon",
+          `Dear ${esc(p.recipientName)}, this task is due in the next two days.`,
+          row("Exam", p.examName) + row("Exam date", p.examDate) + row("Task", p.stageName) +
+            optionalRow("Subject", p.subjectLabel) + row("Due", p.plannedDate),
+          "Open my exam tasks →",
+          p.link,
+          "Examinations Team",
+        ),
+      };
+
+    case "EXAM_STAGE_OVERDUE":
+      return {
+        subject: `Overdue: ${p.stageName} — ${p.examName}`,
+        html: shell(
+          "Exam task overdue",
+          `Dear ${esc(p.recipientName)}, the task below has passed its due date and is not done.`,
+          row("Exam", p.examName) + row("Exam date", p.examDate) + row("Task", p.stageName) +
+            optionalRow("Subject", p.subjectLabel) + row("Owner", p.ownerName) +
+            row("Was due", p.plannedDate) + row("Days overdue", p.daysOverdue),
+          "Open exam tracker →",
+          p.link,
+          "Examinations Team",
+        ),
+      };
+
+    case "EXAM_SCHEDULED":
+      return {
+        subject: `Exam notice: ${p.examName} on ${p.examDate}`,
+        html: shell(
+          `${esc(p.examName)} — exam notice`,
+          `Dear Parent / ${esc(p.studentName)}, the exam below has been scheduled.`,
+          row("Exam", p.examName) + row("Date", p.examDate) + row("Time", p.examTime) +
+            `<tr><td style="padding:6px 16px 6px 0;color:#6b7280;font-size:13px;vertical-align:top">Syllabus</td><td style="padding:6px 0;font-size:13px;color:#111827">${lines(p.syllabus)}</td></tr>`,
+          "Open student portal →",
+          p.link,
+          p.signOff ?? "Examinations Team",
+        ),
+      };
+
+    case "EXAM_RESULTS_RELEASED":
+      return {
+        subject: `Result: ${p.examName} — ${p.studentName}`,
+        html: shell(
+          `${esc(p.examName)} — result`,
+          `Dear Parent / ${esc(p.studentName)}, the result for this exam has been published.`,
+          row("Student", p.studentName) + row("Exam", p.examName) + row("Exam date", p.examDate) +
+            row("Score", p.scoreLine) +
+            (p.scoreDetail ? `<tr><td style="padding:6px 16px 6px 0;color:#6b7280;font-size:13px;vertical-align:top">By subject</td><td style="padding:6px 0;font-size:13px;color:#111827">${lines(p.scoreDetail)}</td></tr>` : ""),
+          "See full analysis →",
+          p.link,
+          p.signOff ?? "Examinations Team",
+        ),
+      };
+
     case "ANNOUNCEMENT_POSTED":
       return null;
   }
@@ -358,6 +452,11 @@ export function whatsappTemplate(event: NotifyEvent, p: NotifyPayload): { name: 
       return build(p.recipientName, p.claimNumber, p.claimedAmount, p.approverName, p.decisionNote);
     case "CLAIM_PAID":
       return build(p.recipientName, p.claimNumber, p.approvedAmount ?? p.claimedAmount);
+    case "EXAM_TASKS_ASSIGNED":
+    case "EXAM_STAGE_DUE_SOON":
+    case "EXAM_STAGE_OVERDUE":
+    case "EXAM_SCHEDULED":
+    case "EXAM_RESULTS_RELEASED":
     case "ANNOUNCEMENT_POSTED":
       return null;
   }
@@ -402,6 +501,16 @@ export function renderInApp(event: NotifyEvent, p: NotifyPayload): { title: stri
       return { title: "Your claim was rejected", body: `${p.claimNumber} · ${p.claimedAmount}${p.decisionNote ? ` · ${p.decisionNote}` : ""}` };
     case "CLAIM_PAID":
       return { title: "Your claim has been paid", body: `${p.claimNumber} · ${p.approvedAmount ?? p.claimedAmount}` };
+
+    case "EXAM_TASKS_ASSIGNED":
+      return { title: `${p.taskCount} exam task(s) assigned to you`, body: `${p.examName} · ${p.examDate}` };
+    case "EXAM_STAGE_DUE_SOON":
+      return { title: `Due ${p.plannedDate}: ${p.stageName}`, body: `${p.examName}${p.subjectLabel ? ` · ${p.subjectLabel}` : ""}` };
+    case "EXAM_STAGE_OVERDUE":
+      return { title: `Overdue: ${p.stageName}`, body: `${p.examName}${p.subjectLabel ? ` · ${p.subjectLabel}` : ""} · ${p.ownerName} · ${p.daysOverdue} day(s) late` };
+    case "EXAM_SCHEDULED":
+    case "EXAM_RESULTS_RELEASED":
+      return { title: p.examName ?? "Exam", body: "" };
 
     case "ANNOUNCEMENT_POSTED":
       return { title: p.announcementTitle ?? "New announcement", body: p.announcementBody ?? "" };

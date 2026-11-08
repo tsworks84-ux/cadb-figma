@@ -48,7 +48,9 @@ import { revenueRoutes } from "./routes/v1/revenue.js";
 import { notificationSettingRoutes } from "./routes/v1/notificationSettings.js";
 import { notificationRoutes } from "./routes/v1/notifications.js";
 import { resourceRoutes, cleanupAbandonedUploads } from "./routes/v1/resources.js";
+import { examRoutes } from "./routes/v1/exams.js";
 import { confirmExpiredProbations } from "./utils/probation.js";
+import { runExamStageSweep } from "./utils/examSweep.js";
 import { drainNotifications } from "./utils/notify/dispatcher.js";
 import { createReadStream, existsSync } from "fs";
 import { join, dirname, extname } from "path";
@@ -151,6 +153,7 @@ await server.register(revenueRoutes,            { prefix: "/api/v1/revenue" });
 await server.register(notificationSettingRoutes, { prefix: "/api/v1/notification-settings" });
 await server.register(notificationRoutes,        { prefix: "/api/v1/notifications" });
 await server.register(resourceRoutes,            { prefix: "/api/v1/resources" });
+await server.register(examRoutes,                { prefix: "/api/v1/exams" });
 const MIME: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -233,6 +236,19 @@ try {
     }
   };
   setInterval(runUploadCleanup, 60 * 60 * 1000).unref();
+
+  // Exam stages: due-soon reminders and overdue alerts. Hourly is plenty —
+  // deadlines are whole days, and each notice is sent once per deadline.
+  const runExamSweep = async () => {
+    try {
+      const { reminders, overdue } = await runExamStageSweep();
+      if (reminders || overdue) console.log(`Exam sweep: ${reminders} reminder(s), ${overdue} overdue alert(s)`);
+    } catch (err) {
+      server.log.error({ err }, "Exam stage sweep failed");
+    }
+  };
+  await runExamSweep();
+  setInterval(runExamSweep, 60 * 60 * 1000).unref();
 } catch (err) {
   server.log.error(err);
   process.exit(1);

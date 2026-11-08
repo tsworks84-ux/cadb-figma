@@ -455,6 +455,12 @@ model Employee {
   notifications        Notification[]      @relation("NotificationRecipient")
   resourcesOwned       Resource[]          @relation("ResourceOwner")
   resourceItemsAdded   ResourceItem[]      @relation("ResourceItemCreator")
+  examTeamMembership   ExamTeamMember?     @relation("ExamTeamMember")
+  examsControlled      Exam[]              @relation("ExamController")
+  examsExecuted        Exam[]              @relation("ExamExecutive")
+  examPapersSet        ExamSubjectTeam[]   @relation("ExamPaperSetter")
+  examPapersReviewed   ExamSubjectTeam[]   @relation("ExamPaperReviewer")
+  examStagesOwned      ExamStage[]         @relation("ExamStageOwner")
 
   @@index([departmentId])
   @@index([designationId])
@@ -1783,13 +1789,31 @@ model Exam {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
+  // ── Exam operations tracking (all nullable: an exam with no examTypeId is an
+  // ordinary assessment and behaves exactly as before) ──
+  examTypeId          String?
+  mode                ExamMode?
+  controllerId        String?
+  executiveId         String?
+  // Students see marks only once this is set. Untracked exams get it at
+  // creation; tracked exams get it when their RELEASE_RESULTS stage is done.
+  resultsReleasedAt   DateTime?
+  resultsReleasedById String?
+  studentsNotifiedAt  DateTime?
+
   batches  ExamBatch[]
   subjects ExamSubject[]
   results  ExamResult[]
+  examType     ExamType?         @relation(fields: [examTypeId],   references: [id], onDelete: Restrict)
+  controller   Employee?         @relation("ExamController", fields: [controllerId], references: [id], onDelete: SetNull)
+  executive    Employee?         @relation("ExamExecutive",  fields: [executiveId],  references: [id], onDelete: SetNull)
+  subjectTeams ExamSubjectTeam[]
+  stages       ExamStage[]
 
   @@index([academicYear])
   @@index([status])
   @@index([examDate])
+  @@index([examTypeId])
 }
 
 model ExamSubject {
@@ -2180,4 +2204,171 @@ model ResourceItem {
 
   @@index([resourceId, parentId])
   @@index([status, createdAt])
+}
+
+// ─── EXAM OPERATIONS ─────────────────────────────────────────────────────────
+// Tracks how an exam is run, from calendar to closure. Each exam with a type
+// gets a set of stages copied from that type's template. Every stage has one
+// owner, a planned date counted from the exam date, and a status. Template edits
+// never touch exams already created: stages are snapshots.
+
+enum ExamMode {
+  PEN_PAPER   // paper stored on the Drive, printed and dispatched
+  ONLINE      // computer-based test hosted on Learnyst
+}
+
+enum ExamTeamRole {
+  CONTROLLER  // Controller of Examinations
+  EXECUTIVE   // Examination Executive
+}
+
+enum ExamStageOwnerRole {
+  CONTROLLER
+  EXECUTIVE
+  PAPER_SETTER
+  REVIEWER
+}
+
+enum ExamStageScope {
+  EXAM     // one stage for the whole exam
+  SUBJECT  // one stage per paper/subject slot (setting, review, freeze...)
+}
+
+enum ExamStageStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  DONE
+  BYPASSED    // skipped by the Controller with a recorded reason
+}
+
+// What the system does when a stage is marked done.
+enum ExamStageAction {
+  NOTIFY_STUDENTS   // email the exam notice + syllabus to students and parents
+  RELEASE_RESULTS   // make marks visible on the student portal + email scores
+}
+
+// The standing exam team, set by Super Admin. Faculty who set and review papers
+// are not listed here; they are assigned per exam.
+model ExamTeamMember {
+  id         String       @id @default(cuid())
+  employeeId String       @unique
+  role       ExamTeamRole
+  createdAt  DateTime     @default(now())
+
+  employee Employee @relation("ExamTeamMember", fields: [employeeId], references: [id], onDelete: Cascade)
+}
+
+// Exam types and their timings are parameters, set per academic year.
+model ExamType {
+  id           String   @id @default(cuid())
+  academicYear String
+  name         String
+  description  String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  stages ExamStageTemplate[]
+  exams  Exam[]
+
+  @@unique([academicYear, name])
+  @@index([academicYear])
+}
+
+model ExamStageTemplate {
+  id          String             @id @default(cuid())
+  examTypeId  String
+  sequenceNo  Int
+  name        String
+  description String?
+  offsetDays  Int                // negative = before the exam, positive = after
+  ownerRole   ExamStageOwnerRole
+  scope       ExamStageScope     @default(EXAM)
+  mode        ExamMode?          // null = applies to both modes
+  action      ExamStageAction?
+  canBypass   Boolean            @default(false)
+
+  examType ExamType @relation(fields: [examTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([examTypeId, sequenceNo])
+  @@index([examTypeId])
+}
+
+// Who sets and who reviews each paper/subject slot. Keyed by slot rather than
+// by ExamSubject.id because editing an assessment recreates its ExamSubject rows.
+model ExamSubjectTeam {
+  id          String  @id @default(cuid())
+  examId      String
+  paperNum    Int
+  subjectSlot Int
+  setterId    String?
+  reviewerId  String?
+
+  exam     Exam      @relation(fields: [examId],     references: [id], onDelete: Cascade)
+  setter   Employee? @relation("ExamPaperSetter",   fields: [setterId],   references: [id], onDelete: SetNull)
+  reviewer Employee? @relation("ExamPaperReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  @@unique([examId, paperNum, subjectSlot])
+  @@index([examId])
+  @@index([setterId])
+  @@index([reviewerId])
+}
+
+model ExamStage {
+  id              String             @id @default(cuid())
+  examId          String
+  templateId      String?
+  sequenceNo      Int
+  name            String
+  description     String?
+  ownerRole       ExamStageOwnerRole
+  scope           ExamStageScope
+  action          ExamStageAction?
+  canBypass       Boolean            @default(false)
+  offsetDays      Int
+  // 0/0 for exam-wide stages, so the unique key below works for both scopes.
+  paperNum        Int                @default(0)
+  subjectSlot     Int                @default(0)
+  subjectLabel    String?
+  plannedDate     DateTime           @db.Date
+  ownerId         String?
+  // Set when someone reassigns the owner by hand, so later team changes don't undo it.
+  ownerOverridden Boolean            @default(false)
+  status          ExamStageStatus    @default(NOT_STARTED)
+  startedAt       DateTime?
+  completedAt     DateTime?
+  completedById   String?
+  remarks         String?
+  evidenceUrl     String?
+  bypassReason    String?
+  reminderSentAt     DateTime?
+  overdueAlertSentAt DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  exam   Exam             @relation(fields: [examId],  references: [id], onDelete: Cascade)
+  owner  Employee?        @relation("ExamStageOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  events ExamStageEvent[]
+
+  @@unique([examId, sequenceNo, paperNum, subjectSlot])
+  @@index([examId])
+  @@index([ownerId, status])
+  @@index([plannedDate])
+}
+
+// Append-only history of every change to a stage: who, what, when, why.
+model ExamStageEvent {
+  id         String   @id @default(cuid())
+  stageId    String
+  actorId    String?
+  actorName  String
+  action     String   // STARTED | DONE | BYPASSED | REOPENED | OWNER_CHANGED | RESCHEDULED | UPDATED
+  fromStatus String?
+  toStatus   String?
+  note       String?
+  createdAt  DateTime @default(now())
+
+  stage ExamStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+
+  @@index([stageId])
 }

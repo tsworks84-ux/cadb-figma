@@ -8,7 +8,7 @@ import {
   Users, Home, CalendarOff, Receipt, Shield,
   GraduationCap, Settings, LogOut, BarChart3, Building2, User,
   CalendarDays, UsersRound, ListTodo, Megaphone, ClipboardList, School, MessageSquare, IndianRupee, X,
-  Archive, FolderOpen, ChevronRight, Briefcase, Wallet, BookOpen,
+  Archive, FolderOpen, ChevronRight, Briefcase, Wallet, BookOpen, ClipboardCheck, ListChecks,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useRouter } from "next/navigation";
@@ -17,6 +17,7 @@ import { api } from "@/lib/api";
 import Image from "next/image";
 import { usePermissions, ADMIN_MODULES } from "@/hooks/usePermissions";
 import { canViewAcademics, firstAcademicsHref } from "@/lib/academicsAccess";
+import { useExamMe } from "@/components/exams/shared";
 
 // How long cached data stays fresh — must match each page's staleTime
 const STALE = {
@@ -116,6 +117,11 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
   // Academics is only offered to roles that actually hold an academics grant
   const canViewAcademicsNav = canViewAcademics(role, permissions);
 
+  // Examinations: the board for the exam team, My Exam Tasks for anyone who
+  // owns a stage. Hidden entirely for people with no part in exams.
+  const { data: examMe } = useExamMe();
+  const showExamTasks = !!examMe && (examMe.canViewBoard || examMe.openTasks > 0);
+
   // Home stays a plain link; everything else folds into groups so the panel
   // reads as a handful of rows. Items a role can't open are dropped first, and
   // a group left with a single item is shown as that item, not a one-line dropdown.
@@ -148,6 +154,10 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
     { key: "academics", label: "Academics", icon: School, items: [
       ...(canViewAcademicsNav ? [{ name: "Academics",        href: academicsHref,         icon: School }] : []),
       ...(canViewAdmin        ? [{ name: "Student Feedback", href: "/dashboard/feedback", icon: MessageSquare, badge: openFeedbackCount }] : []),
+    ] },
+    { key: "exams", label: "Examinations", icon: ClipboardCheck, items: [
+      ...(examMe?.canViewBoard ? [{ name: "Exam Board",    href: "/dashboard/exams",       icon: ClipboardCheck }] : []),
+      ...(showExamTasks        ? [{ name: "My Exam Tasks", href: "/dashboard/exams/tasks", icon: ListChecks, badge: examMe?.overdueTasks ?? 0 }] : []),
     ] },
     { key: "finance", label: "Finance & Reports", icon: BarChart3, items: [
       ...(canViewAdmin ? [{ name: "Revenue",     href: "/dashboard/revenue", icon: IndianRupee }] : []),
@@ -296,7 +306,11 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
   };
 
   function renderLink(item: NavItem, nested = false) {
-    const active = isActiveHref(pathname, item.href);
+    // A nested route (/dashboard/exams/tasks) belongs to its own link, not
+    // also to a parent link (/dashboard/exams) that happens to prefix it.
+    const allHrefs = [...myGroups, ...mgmtGroups].flatMap((g) => g.items.map((i) => i.href.split("?")[0]));
+    const longerMatch = allHrefs.some((h) => h !== item.href.split("?")[0] && h.length > item.href.split("?")[0].length && isActiveHref(pathname, h));
+    const active = isActiveHref(pathname, item.href) && !longerMatch;
     return (
       <Link
         key={item.href}

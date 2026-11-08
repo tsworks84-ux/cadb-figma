@@ -299,8 +299,12 @@ export async function studentPortalRoutes(fastify: FastifyInstance) {
         const total = r.marks.reduce((s: number, m: any) => s + (m.marks ?? 0), 0);
         totalsMap.set(r.studentId, total);
       }
-      const allTotals = [...totalsMap.values()].filter((t) => t > 0).sort((a, b) => b - a);
-      const myResult  = myResultMap.get(exam.id) ?? null;
+      const allTotals = exam.resultsReleasedAt === null ? []
+        : [...totalsMap.values()].filter((t) => t > 0).sort((a, b) => b - a);
+      // Marks stay hidden until the exam's results are released (tracked exams
+      // release at their "Results released" stage; untracked ones at creation).
+      const released = exam.resultsReleasedAt !== null;
+      const myResult  = released ? (myResultMap.get(exam.id) ?? null) : null;
       const myTotal   = myResult ? myResult.marks.reduce((s: number, m: any) => s + (m.marks ?? 0), 0) : null;
 
       let rank: number | null = null;
@@ -332,6 +336,7 @@ export async function studentPortalRoutes(fastify: FastifyInstance) {
         },
         result: myResult ? { id: myResult.id, attended: myResult.attended, isExcluded: myResult.isExcluded, total: myTotal, marks: myMarks } : null,
         marksRecorded: myResult !== null,
+        resultsPending: !released,
         stats: { rank, percentile, classMax, classAvg, totalStudents: allTotals.length },
       };
     });

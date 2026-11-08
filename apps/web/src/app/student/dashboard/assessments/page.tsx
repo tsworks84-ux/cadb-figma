@@ -44,10 +44,12 @@ function ExamDetail({ row }: { row: any }) {
     return (
       <div className="px-5 py-8 text-center">
         <div className="inline-flex items-center gap-2 rounded-full bg-amber-50 border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700">
-          <Clock className="h-4 w-4" /> Marks not entered yet
+          <Clock className="h-4 w-4" /> {row.resultsPending ? "Results not published yet" : "Marks not entered yet"}
         </div>
         <p className="text-xs text-gray-400 mt-3">
-          This exam is scheduled for your batch. Once marks are entered, your scores will appear here.
+          {row.resultsPending
+            ? "Your scores will appear here once the results have been checked and published."
+            : "This exam is scheduled for your batch. Once marks are entered, your scores will appear here."}
         </p>
       </div>
     );

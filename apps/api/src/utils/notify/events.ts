@@ -20,6 +20,11 @@ export const NOTIFY_EVENTS = [
   "CLAIM_REJECTED",
   "CLAIM_PAID",
   "ANNOUNCEMENT_POSTED",
+  "EXAM_TASKS_ASSIGNED",
+  "EXAM_STAGE_DUE_SOON",
+  "EXAM_STAGE_OVERDUE",
+  "EXAM_SCHEDULED",
+  "EXAM_RESULTS_RELEASED",
 ] as const;
 
 export type NotifyEvent = (typeof NOTIFY_EVENTS)[number];
@@ -33,7 +38,7 @@ export type NotifyChannel = (typeof NOTIFY_CHANNELS)[number];
 const ALL_CHANNELS: readonly NotifyChannel[] = NOTIFY_CHANNELS;
 
 type EventMeta = {
-  group: "Leaves" | "Comp-off" | "Claims" | "Announcements";
+  group: "Leaves" | "Comp-off" | "Claims" | "Announcements" | "Examinations";
   label: string;
   audience: string;
   /**
@@ -61,6 +66,14 @@ export const EVENT_META: Record<NotifyEvent, EventMeta> = {
   // Bell only. A notice already reaches everyone on the Notice Board, so
   // mailing all staff on every announcement would be a new kind of spam.
   ANNOUNCEMENT_POSTED:    { group: "Announcements", label: "Announcement published", audience: "Everyone",                     channels: ["IN_APP"] },
+  // Exam operations. Staff notices go to the stage owner (overdue also to the
+  // exam's Controller and Executive). Student notices are email-only and go to
+  // the student and their parents; they ship switched off (see the migration).
+  EXAM_TASKS_ASSIGNED:    { group: "Examinations", label: "Exam tasks assigned",     audience: "Stage owner",                          channels: ["EMAIL", "IN_APP"] },
+  EXAM_STAGE_DUE_SOON:    { group: "Examinations", label: "Exam task due in 2 days", audience: "Stage owner",                          channels: ["EMAIL", "IN_APP"] },
+  EXAM_STAGE_OVERDUE:     { group: "Examinations", label: "Exam task overdue",       audience: "Stage owner, Controller, Executive",   channels: ["EMAIL", "IN_APP"] },
+  EXAM_SCHEDULED:         { group: "Examinations", label: "Exam notice to students", audience: "Students and parents",                 channels: ["EMAIL"] },
+  EXAM_RESULTS_RELEASED:  { group: "Examinations", label: "Results to students",     audience: "Students and parents",                 channels: ["EMAIL"] },
 };
 
 /** Events whose notice goes back to the person who raised the request. */

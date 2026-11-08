@@ -6,6 +6,8 @@ import { getTeacherBatchIds } from "./teacherUtils.js";
 import { authenticate } from "../../middleware/authenticate.js";
 import { requireModulePermission } from "../../utils/permissions.js";
 import { fullName } from "../../utils/name.js";
+import { syncExamStages, actorFor } from "../../utils/examTracking.js";
+import { notifyAssignments } from "./exams.js";
 import {
   buildMarksTemplate, loadWorkbook, parseMarksWorkbook, slotKey,
   type ExamSlot, type TemplateStudent,
@@ -474,6 +476,9 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
             examDate:   new Date(examDate),
             note:       note       ?? null,
             totalMarks: totalMarks ?? null,
+            // Untracked exams show marks as soon as they're entered, as before.
+            // Setting up exam tracking clears this until results are released.
+            resultsReleasedAt: new Date(),
             batches:    { create: batchIds.map((batchId) => ({ batchId })) },
             subjects:   { create: subjectRows },
           },
@@ -542,6 +547,14 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
       }
       return tx.exam.update({ where: { id }, data: updates, include: examInclude });
     });
+
+    // A tracked exam's stages follow its date and subject grid.
+    const tracked = await prisma.exam.findUnique({ where: { id }, select: { examTypeId: true } });
+    if (tracked?.examTypeId && (examDate !== undefined || paperSubjects !== undefined || numPapers !== undefined)) {
+      const actor = await actorFor((req.user as any).sub);
+      const sync = await syncExamStages(prisma, id, actor);
+      await notifyAssignments(id, sync);
+    }
 
     return reply.send({ success: true, data: exam });
   });
