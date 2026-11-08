@@ -16,6 +16,7 @@ import {
 } from "@/components/exams/shared";
 import { MarkDoneDialog, BypassDialog, ReassignDialog, Notice, useInvalidateExams } from "@/components/exams/StageDialogs";
 import { BlueprintDialog, blueprintModeFor, type BlueprintStage } from "@/components/exams/Blueprint";
+import { StepProgress, stepPercent, type Step } from "@/components/exams/StepProgress";
 
 type Stage = BlueprintStage & {
   id: string; sequenceNo: number; name: string; description: string | null;
@@ -40,6 +41,7 @@ type ExamDetail = {
   subjectTeams: { paperNum: number; subjectSlot: number; setter: Person | null; reviewer: Person | null; approver: Person | null }[];
   daysToExam: number;
   summary: { total: number; done: number; overdue: number; health: string } | null;
+  steps: Step[];
   stages: Stage[];
   permissions: { canManage: boolean; isController: boolean; isSA: boolean; userId: string };
 };
@@ -301,21 +303,34 @@ function StageTimeline({ exam, onFlash }: { exam: ExamDetail; onFlash: (m: strin
     toggled[seq] ?? (seq === currentSeq || list.some((s) => s.status === "PENDING_APPROVAL"));
   const allOpen = groups.every(([seq, list]) => isOpen(seq, list));
   const closedCount = groups.filter(([, list]) => isClosed(list)).length;
+  const current = groups.find(([, list]) => !isClosed(list));
 
   return (
     <div className="rounded-2xl border border-gray-100 bg-white">
-      <div className="px-4 py-3 sm:px-6 border-b border-gray-100 flex items-start gap-3">
-        <div className="flex-1 min-w-0">
-          <h2 className="text-base font-semibold text-gray-900">Stages</h2>
-          <p className="text-xs text-gray-500">{closedCount} of {groups.length} steps finished. Each step unlocks once the steps before it are done.</p>
+      <div className="px-4 pt-4 pb-4 sm:px-6 border-b border-gray-100 space-y-4">
+        <div className="flex items-start gap-3">
+          <div className="flex-1 min-w-0">
+            <h2 className="text-base font-semibold text-gray-900">Progress</h2>
+            <p className="text-xs text-gray-500">
+              {closedCount} of {groups.length} steps finished{current ? <> · now on <span className="font-medium text-gray-700">{current[1][0].name}</span></> : ""}
+            </p>
+          </div>
+          <p className="text-3xl font-semibold text-gray-900 leading-none tabular-nums">{stepPercent(exam.steps)}<span className="text-base text-gray-400">%</span></p>
         </div>
-        <button className="text-xs font-semibold text-[#2C3E7C] hover:underline whitespace-nowrap mt-1"
-          onClick={() => setToggled(Object.fromEntries(groups.map(([seq]) => [seq, !allOpen])))}>
-          {allOpen ? "Collapse all" : "Expand all"}
-        </button>
+        <StepProgress steps={exam.steps} size="tall" onSelect={(seq) => {
+          setToggled((t) => ({ ...t, [seq]: true }));
+          requestAnimationFrame(() => document.getElementById(`step-${seq}`)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+        }} />
+        <div className="flex items-center justify-between gap-3 pt-1">
+          <p className="text-xs text-gray-500">Tap a block to jump to that step. Each step unlocks once the steps before it are done.</p>
+          <button className="text-xs font-semibold text-[#2C3E7C] hover:underline whitespace-nowrap"
+            onClick={() => setToggled(Object.fromEntries(groups.map(([seq]) => [seq, !allOpen])))}>
+            {allOpen ? "Collapse all" : "Expand all"}
+          </button>
+        </div>
       </div>
       <ol className="divide-y divide-gray-50">
-        {groups.map(([seq, stages]) => {
+        {groups.map(([seq, stages], idx) => {
           const first = stages[0];
           const allClosed = stages.every((s) => s.status === "DONE" || s.status === "BYPASSED");
           const anyLate = stages.some((s) => s.overdue);
@@ -324,13 +339,13 @@ function StageTimeline({ exam, onFlash }: { exam: ExamDetail; onFlash: (m: strin
           const lastClosed = allClosed ? stages.map((s) => s.completedAt).filter(Boolean).sort().pop() : null;
           const pendingCount = stages.filter((s) => s.status === "PENDING_APPROVAL").length;
           return (
-            <li key={seq} className="px-4 py-3 sm:px-6">
+            <li key={seq} id={`step-${seq}`} className="px-4 py-3 sm:px-6 scroll-mt-20">
               <button type="button" aria-expanded={expanded}
                 onClick={() => setToggled((t) => ({ ...t, [seq]: !expanded }))}
                 className="w-full flex items-center gap-3 text-left -mx-2 px-2 py-1 rounded-lg hover:bg-gray-50 active:bg-gray-100">
                 <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
                   allClosed ? "bg-emerald-100 text-emerald-700" : anyLate ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-600"}`}>
-                  {allClosed ? <CheckCircle2 className="h-4 w-4" /> : seq}
+                  {allClosed ? <CheckCircle2 className="h-4 w-4" /> : idx + 1}
                 </span>
                 <div className="flex-1 min-w-0">
                   <p className={`text-sm font-semibold ${allClosed ? "text-gray-600" : "text-gray-900"}`}>{first.name}</p>

@@ -140,6 +140,30 @@ function examSummary(stages: any[], today: Date) {
   };
 }
 
+/**
+ * One entry per step (sequence number) for the progress bar: how many of its
+ * stages (one per subject for subject steps) are closed, and the step's state.
+ * State precedence: overdue > awaiting approval > started > not started; a step
+ * is done only when every one of its stages is closed.
+ */
+function stepStrip(stages: any[], today: Date) {
+  const bySeq = new Map<number, any[]>();
+  for (const st of stages) bySeq.set(st.sequenceNo, [...(bySeq.get(st.sequenceNo) ?? []), st]);
+  return [...bySeq.entries()].sort((a, b) => a[0] - b[0]).map(([seq, list]) => {
+    const total = list.length;
+    const done = list.filter((x) => x.status === "DONE" || x.status === "BYPASSED").length;
+    const pending = list.filter((x) => x.status === "PENDING_APPROVAL").length;
+    const overdue = list.filter((x) => isOverdue(x, today)).length;
+    const started = list.filter((x) => x.status === "IN_PROGRESS").length;
+    const planned = list.map((x) => utcDay(x.plannedDate).getTime());
+    const state = done === total ? "DONE" : overdue ? "OVERDUE" : pending ? "PENDING" : started || done ? "ACTIVE" : "TODO";
+    return {
+      seq, name: list[0].name, offsetDays: list[0].offsetDays,
+      plannedDate: new Date(Math.min(...planned)), total, done, pending, overdue, state,
+    };
+  });
+}
+
 // ─── Notifications ───────────────────────────────────────────────────────────
 
 export async function notifyAssignments(examId: string, sync: SyncResult) {
@@ -561,6 +585,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
       resultsReleasedAt: e.resultsReleasedAt,
       daysToExam: daysBetween(today, e.examDate),
       summary: e.examTypeId ? examSummary(e.stages, today) : null,
+      steps: e.examTypeId ? stepStrip(e.stages, today) : [],
       overdueStages: e.stages
         .filter((s) => isOverdue(s, today))
         .sort((x, y) => x.plannedDate.getTime() - y.plannedDate.getTime())
@@ -673,6 +698,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
         ...rest,
         daysToExam: daysBetween(today, exam.examDate),
         summary: exam.examTypeId ? examSummary(stages, today) : null,
+        steps: exam.examTypeId ? stepStrip(stages, today) : [],
         stages: stages.map((s) => stageView(s, stages, today, exam.subjects)),
         permissions: {
           canManage: canManageExam(a, exam),

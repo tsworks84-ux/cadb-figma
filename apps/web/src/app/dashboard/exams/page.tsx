@@ -9,6 +9,7 @@ import {
   ExamsHeader, HealthChip, AccessDenied, Select, fmtDay, fmtDayShort, relDays, personName, useExamMe, Chip,
   type Person,
 } from "@/components/exams/shared";
+import { StepProgress, StepLegend, stepPercent, type Step } from "@/components/exams/StepProgress";
 
 type BoardExam = {
   id: string;
@@ -29,6 +30,7 @@ type BoardExam = {
     total: number; done: number; overdue: number; health: string;
     currentStage: { name: string; subjectLabel: string | null; plannedDate: string; overdue: boolean } | null;
   } | null;
+  steps: Step[];
   overdueStages: { id: string; name: string; subjectLabel: string | null; plannedDate: string; owner: Person | null; daysLate: number }[];
 };
 
@@ -109,6 +111,7 @@ export default function ExamBoardPage() {
         </div>
       ) : (
         <div className="space-y-2">
+          {exams.some((e) => e.tracked) && <div className="px-1"><StepLegend /></div>}
           {exams.map((e) => <ExamRow key={e.id} exam={e} />)}
         </div>
       )}
@@ -129,7 +132,8 @@ function Kpi({ label, value, hint, tone = "default" }: { label: string; value: R
 
 function ExamRow({ exam: e }: { exam: BoardExam }) {
   const s = e.summary;
-  const pct = s && s.total ? Math.round((s.done / s.total) * 100) : 0;
+  const pct = stepPercent(e.steps);
+  const stepsDone = e.steps.filter((x) => x.state === "DONE").length;
   const late = (s?.overdue ?? 0) > 0;
 
   return (
@@ -162,11 +166,9 @@ function ExamRow({ exam: e }: { exam: BoardExam }) {
           <div className="lg:w-80 shrink-0 space-y-1.5">
             <div className="flex items-center justify-between gap-2">
               <HealthChip health={s.health} />
-              <span className="text-xs text-gray-500">{s.done}/{s.total} stages</span>
+              <span className="text-xs text-gray-500"><span className="font-semibold text-gray-900">{pct}%</span> · {stepsDone}/{e.steps.length} steps</span>
             </div>
-            <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-              <div className={`h-full rounded-full ${late ? "bg-red-500" : "bg-emerald-500"}`} style={{ width: `${pct}%` }} />
-            </div>
+            <StepProgress steps={e.steps} legend={false} />
             {s.currentStage && (
               <p className={`text-xs truncate ${s.currentStage.overdue ? "text-red-600 font-medium" : "text-gray-600"}`}>
                 Now: {s.currentStage.name}{s.currentStage.subjectLabel ? ` (${s.currentStage.subjectLabel})` : ""} · due {fmtDay(s.currentStage.plannedDate)}
