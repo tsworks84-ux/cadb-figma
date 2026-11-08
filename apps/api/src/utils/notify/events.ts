@@ -23,6 +23,8 @@ export const NOTIFY_EVENTS = [
   "EXAM_TASKS_ASSIGNED",
   "EXAM_STAGE_DUE_SOON",
   "EXAM_STAGE_OVERDUE",
+  "EXAM_APPROVAL_REQUESTED",
+  "EXAM_APPROVAL_DECIDED",
   "EXAM_SCHEDULED",
   "EXAM_RESULTS_RELEASED",
 ] as const;
@@ -72,6 +74,8 @@ export const EVENT_META: Record<NotifyEvent, EventMeta> = {
   EXAM_TASKS_ASSIGNED:    { group: "Examinations", label: "Exam tasks assigned",     audience: "Stage owner",                          channels: ["EMAIL", "IN_APP"] },
   EXAM_STAGE_DUE_SOON:    { group: "Examinations", label: "Exam task due in 2 days", audience: "Stage owner",                          channels: ["EMAIL", "IN_APP"] },
   EXAM_STAGE_OVERDUE:     { group: "Examinations", label: "Exam task overdue",       audience: "Stage owner, Controller, Executive",   channels: ["EMAIL", "IN_APP"] },
+  EXAM_APPROVAL_REQUESTED: { group: "Examinations", label: "Exam stage awaiting approval", audience: "Approver (subject head / Controller)", channels: ["EMAIL", "IN_APP"] },
+  EXAM_APPROVAL_DECIDED:  { group: "Examinations", label: "Exam stage approved / sent back", audience: "Stage owner",            channels: ["EMAIL", "IN_APP"] },
   EXAM_SCHEDULED:         { group: "Examinations", label: "Exam notice to students", audience: "Students and parents",                 channels: ["EMAIL"] },
   EXAM_RESULTS_RELEASED:  { group: "Examinations", label: "Results to students",     audience: "Students and parents",                 channels: ["EMAIL"] },
 };

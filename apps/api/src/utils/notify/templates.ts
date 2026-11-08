@@ -56,6 +56,7 @@ export type NotifyPayload = {
   daysOverdue?: string;
   ownerName?: string;
   taskCount?: string;
+  decision?: string;        // "approved" | "sent back" | "reopened"
   taskSummary?: string;     // newline-separated "Stage — due date" lines
   syllabus?: string;        // newline-separated "Subject: topics" lines
   studentName?: string;
@@ -322,6 +323,38 @@ export function renderEmail(event: NotifyEvent, p: NotifyPayload): { subject: st
         ),
       };
 
+    case "EXAM_APPROVAL_REQUESTED":
+      return {
+        subject: `Approval needed: ${p.stageName}${p.subjectLabel ? ` (${p.subjectLabel})` : ""} — ${p.examName}`,
+        html: shell(
+          "Waiting for your approval",
+          `Dear ${esc(p.recipientName)}, ${esc(p.ownerName)} has submitted the work below for your approval. Approving it closes the stage; you can also send it back with a comment.`,
+          row("Exam", p.examName) + row("Exam date", p.examDate) + row("Stage", p.stageName) +
+            optionalRow("Subject", p.subjectLabel) + row("Submitted by", p.ownerName) + row("Due", p.plannedDate),
+          "Review it →",
+          p.link,
+          "Examinations Team",
+        ),
+      };
+
+    case "EXAM_APPROVAL_DECIDED":
+      return {
+        subject: `${p.decision === "approved" ? "Approved" : p.decision === "sent back" ? "Sent back" : "Reopened"}: ${p.stageName}${p.subjectLabel ? ` (${p.subjectLabel})` : ""} — ${p.examName}`,
+        html: shell(
+          p.decision === "approved" ? "Your submission was approved" : p.decision === "sent back" ? "Your submission needs changes" : "Your stage was reopened",
+          p.decision === "approved"
+            ? `Dear ${esc(p.recipientName)}, ${esc(p.approverName)} approved your work below. The stage is done.`
+            : p.decision === "sent back"
+              ? `Dear ${esc(p.recipientName)}, ${esc(p.approverName)} sent your work back. Make the changes and submit it again.`
+              : `Dear ${esc(p.recipientName)}, the stage below was reopened and needs to be submitted again.`,
+          row("Exam", p.examName) + row("Stage", p.stageName) + optionalRow("Subject", p.subjectLabel) +
+            optionalRow("Comment", p.decisionNote) + row("Due", p.plannedDate),
+          "Open my exam tasks →",
+          p.link,
+          "Examinations Team",
+        ),
+      };
+
     case "EXAM_SCHEDULED":
       return {
         subject: `Exam notice: ${p.examName} on ${p.examDate}`,
@@ -455,6 +488,8 @@ export function whatsappTemplate(event: NotifyEvent, p: NotifyPayload): { name: 
     case "EXAM_TASKS_ASSIGNED":
     case "EXAM_STAGE_DUE_SOON":
     case "EXAM_STAGE_OVERDUE":
+    case "EXAM_APPROVAL_REQUESTED":
+    case "EXAM_APPROVAL_DECIDED":
     case "EXAM_SCHEDULED":
     case "EXAM_RESULTS_RELEASED":
     case "ANNOUNCEMENT_POSTED":
@@ -508,6 +543,13 @@ export function renderInApp(event: NotifyEvent, p: NotifyPayload): { title: stri
       return { title: `Due ${p.plannedDate}: ${p.stageName}`, body: `${p.examName}${p.subjectLabel ? ` · ${p.subjectLabel}` : ""}` };
     case "EXAM_STAGE_OVERDUE":
       return { title: `Overdue: ${p.stageName}`, body: `${p.examName}${p.subjectLabel ? ` · ${p.subjectLabel}` : ""} · ${p.ownerName} · ${p.daysOverdue} day(s) late` };
+    case "EXAM_APPROVAL_REQUESTED":
+      return { title: `Approve: ${p.stageName}${p.subjectLabel ? ` · ${p.subjectLabel}` : ""}`, body: `${p.examName} · from ${p.ownerName}` };
+    case "EXAM_APPROVAL_DECIDED":
+      return {
+        title: `${p.decision === "approved" ? "Approved" : p.decision === "sent back" ? "Sent back" : "Reopened"}: ${p.stageName}${p.subjectLabel ? ` · ${p.subjectLabel}` : ""}`,
+        body: `${p.examName}${p.decisionNote ? ` · ${p.decisionNote}` : ""}`,
+      };
     case "EXAM_SCHEDULED":
     case "EXAM_RESULTS_RELEASED":
       return { title: p.examName ?? "Exam", body: "" };

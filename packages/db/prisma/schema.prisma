@@ -461,6 +461,9 @@ model Employee {
   examPapersSet        ExamSubjectTeam[]   @relation("ExamPaperSetter")
   examPapersReviewed   ExamSubjectTeam[]   @relation("ExamPaperReviewer")
   examStagesOwned      ExamStage[]         @relation("ExamStageOwner")
+  examStagesToApprove  ExamStage[]         @relation("ExamStageApprover")
+  examPapersApproved   ExamSubjectTeam[]   @relation("ExamPaperApprover")
+  subjectsHeaded       Subject[]           @relation("SubjectHead")
 
   @@index([departmentId])
   @@index([designationId])
@@ -1438,9 +1441,13 @@ model Subject {
   name        String
   description String?
   isActive    Boolean  @default(true)
+  // Head of the subject (HoD): approves exam blueprints for this subject unless
+  // an exam names someone else for the paper.
+  headId      String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  head          Employee?      @relation("SubjectHead", fields: [headId], references: [id], onDelete: SetNull)
   batchSubjects BatchSubject[]
   schedules     Schedule[]
   assignments   Assignment[]
@@ -2237,8 +2244,20 @@ enum ExamStageScope {
 enum ExamStageStatus {
   NOT_STARTED
   IN_PROGRESS
+  PENDING_APPROVAL // submitted by the owner; waiting for the approver
   DONE
   BYPASSED    // skipped by the Controller with a recorded reason
+}
+
+// Who must sign a stage off before it counts as done. null = the owner closes it.
+enum ExamStageApprover {
+  SUBJECT_HEAD  // the paper's approver on the exam, else the subject's head, else the Controller
+  CONTROLLER    // the exam's Controller
+}
+
+// Structured input a stage collects instead of a bare "done".
+enum ExamStageForm {
+  BLUEPRINT  // marks, question count and type per syllabus chapter + difficulty mix
 }
 
 // What the system does when a stage is marked done.
@@ -2287,6 +2306,8 @@ model ExamStageTemplate {
   mode        ExamMode?          // null = applies to both modes
   action      ExamStageAction?
   canBypass   Boolean            @default(false)
+  approver    ExamStageApprover?
+  form        ExamStageForm?
 
   examType ExamType @relation(fields: [examTypeId], references: [id], onDelete: Cascade)
 
@@ -2303,15 +2324,19 @@ model ExamSubjectTeam {
   subjectSlot Int
   setterId    String?
   reviewerId  String?
+  // Approves this paper's blueprint. Blank = the subject's head.
+  approverId  String?
 
   exam     Exam      @relation(fields: [examId],     references: [id], onDelete: Cascade)
   setter   Employee? @relation("ExamPaperSetter",   fields: [setterId],   references: [id], onDelete: SetNull)
   reviewer Employee? @relation("ExamPaperReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  approver Employee? @relation("ExamPaperApprover", fields: [approverId], references: [id], onDelete: SetNull)
 
   @@unique([examId, paperNum, subjectSlot])
   @@index([examId])
   @@index([setterId])
   @@index([reviewerId])
+  @@index([approverId])
 }
 
 model ExamStage {
@@ -2325,6 +2350,13 @@ model ExamStage {
   scope           ExamStageScope
   action          ExamStageAction?
   canBypass       Boolean            @default(false)
+  approver        ExamStageApprover?
+  form            ExamStageForm?
+  // The form's answers (for BLUEPRINT: { maxMarks, chapters[], difficulty }).
+  formData        Json?
+  // Who must approve it — resolved when the owner submits, refreshed by sync.
+  approverId      String?
+  submittedAt     DateTime?
   offsetDays      Int
   // 0/0 for exam-wide stages, so the unique key below works for both scopes.
   paperNum        Int                @default(0)
@@ -2347,12 +2379,14 @@ model ExamStage {
   updatedAt       DateTime           @updatedAt
 
   exam   Exam             @relation(fields: [examId],  references: [id], onDelete: Cascade)
-  owner  Employee?        @relation("ExamStageOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  owner    Employee?      @relation("ExamStageOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  approverPerson Employee? @relation("ExamStageApprover", fields: [approverId], references: [id], onDelete: SetNull)
   events ExamStageEvent[]
 
   @@unique([examId, sequenceNo, paperNum, subjectSlot])
   @@index([examId])
   @@index([ownerId, status])
+  @@index([approverId, status])
   @@index([plannedDate])
 }
 
@@ -2362,7 +2396,7 @@ model ExamStageEvent {
   stageId    String
   actorId    String?
   actorName  String
-  action     String   // STARTED | DONE | BYPASSED | REOPENED | OWNER_CHANGED | RESCHEDULED | UPDATED
+  action     String   // STARTED | DONE | BYPASSED | REOPENED | OWNER_CHANGED | RESCHEDULED | UPDATED | SUBMITTED | APPROVED | SENT_BACK | WITHDRAWN
   fromStatus String?
   toStatus   String?
   note       String?

@@ -11,6 +11,9 @@ const DAY = 86400000;
  *   • due within 2 days → one reminder to the owner
  *   • past due          → one alert to the owner, the exam's Controller and Executive
  *
+ * A stage awaiting approval is the approver's to move, so the reminder goes to
+ * the approver instead, and the overdue alert includes them.
+ *
  * Each is sent once per deadline (reminderSentAt / overdueAlertSentAt). Moving
  * the exam date or reassigning the stage clears both, so the new deadline or
  * new owner gets their own notices.
@@ -26,8 +29,11 @@ export async function runExamStageSweep(): Promise<{ reminders: number; overdue:
 
   const dueSoon = await prisma.examStage.findMany({
     where: {
-      status: { in: [...OPEN_STATUSES] }, ownerId: { not: null }, reminderSentAt: null,
-      plannedDate: { gte: today, lte: soon }, exam: liveExam,
+      reminderSentAt: null, plannedDate: { gte: today, lte: soon }, exam: liveExam,
+      OR: [
+        { status: { in: ["NOT_STARTED", "IN_PROGRESS"] }, ownerId: { not: null } },
+        { status: "PENDING_APPROVAL", approverId: { not: null } },
+      ],
     },
     include,
   });
@@ -37,7 +43,7 @@ export async function runExamStageSweep(): Promise<{ reminders: number; overdue:
     if (claim.count === 0) continue;
     await notifyExamStaff("EXAM_STAGE_DUE_SOON", {
       examId: s.exam.id,
-      employeeIds: [s.ownerId!],
+      employeeIds: [s.status === "PENDING_APPROVAL" ? s.approverId! : s.ownerId!],
       path: "/dashboard/exams/tasks",
       fields: {
         examName: s.exam.name, examDate: fmt(s.exam.examDate), stageName: s.name,
@@ -59,7 +65,8 @@ export async function runExamStageSweep(): Promise<{ reminders: number; overdue:
     const ownerName = s.owner ? `${s.owner.firstName} ${s.owner.lastName}`.trim() : "Unassigned";
     await notifyExamStaff("EXAM_STAGE_OVERDUE", {
       examId: s.exam.id,
-      employeeIds: [s.ownerId, s.exam.controllerId, s.exam.executiveId].filter((x): x is string => !!x),
+      employeeIds: [s.ownerId, s.status === "PENDING_APPROVAL" ? s.approverId : null, s.exam.controllerId, s.exam.executiveId]
+        .filter((x): x is string => !!x),
       path: `/dashboard/exams/${s.exam.id}`,
       fields: {
         examName: s.exam.name, examDate: fmt(s.exam.examDate), stageName: s.name,

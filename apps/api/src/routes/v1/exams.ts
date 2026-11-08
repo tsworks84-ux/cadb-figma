@@ -4,8 +4,8 @@ import { z } from "zod";
 import type { JwtPayload } from "@cadb/types";
 import { authenticate } from "../../middleware/authenticate.js";
 import {
-  DEFAULT_STAGES, OPEN_STATUSES, actorFor, daysBetween, isOverdue, openBlockers,
-  syncExamStages, todayIST, utcDay, type SyncResult,
+  DEFAULT_STAGES, OPEN_STATUSES, QUESTION_TYPES, actorFor, approverFor, blueprintProblems, daysBetween, isOverdue,
+  openBlockers, syllabusOf, syncExamStages, todayIST, utcDay, type Blueprint, type SyncResult,
 } from "../../utils/examTracking.js";
 import { notifyExamStaff, notifyExamStudents } from "../../utils/notify/exam.js";
 
@@ -20,6 +20,9 @@ import { notifyExamStaff, notifyExamStudents } from "../../utils/notify/exam.js"
  *   • A stage can be updated by its owner, the exam's Controller/Executive,
  *     any Controller on the team, or a Super Admin. Bypass, reopen and the
  *     results release can only be undone at Controller level.
+ *   • A stage with an approver (e.g. the blueprint) can't be marked done
+ *     directly: the owner submits it, and only the named approver (or a Super
+ *     Admin) approves it, which closes it, or sends it back with a comment.
  */
 
 const dateFmt = new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
@@ -61,6 +64,8 @@ const stageDefSchema = z.object({
   mode:        z.enum(["PEN_PAPER", "ONLINE"]).nullable().optional(),
   action:      z.enum(["NOTIFY_STUDENTS", "RELEASE_RESULTS"]).nullable().optional(),
   canBypass:   z.boolean().optional(),
+  approver:    z.enum(["SUBJECT_HEAD", "CONTROLLER"]).nullable().optional(),
+  form:        z.enum(["BLUEPRINT"]).nullable().optional(),
 });
 
 function validateStageList(stages: z.infer<typeof stageDefSchema>[]): string | null {
@@ -76,12 +81,25 @@ function validateStageList(stages: z.infer<typeof stageDefSchema>[]): string | n
   if (stages.some((s) => s.scope === "EXAM" && (s.ownerRole === "PAPER_SETTER" || s.ownerRole === "REVIEWER"))) {
     return "Paper setter and reviewer stages must be per subject";
   }
+  if (stages.some((s) => s.scope === "EXAM" && (s.form === "BLUEPRINT" || s.approver === "SUBJECT_HEAD"))) {
+    return "Blueprint and subject-head approval stages must be per subject";
+  }
+  if (stages.some((s) => s.form === "BLUEPRINT" && !s.approver)) return "A blueprint stage needs an approver";
   return null;
 }
 
 // ─── Stage view model ────────────────────────────────────────────────────────
 
-function stageView(s: any, all: any[], today: Date) {
+type SubjectRow = { paperNum: number; subjectSlot: number; topics: string | null; maxMarks: number | null };
+
+/** What a blueprint form needs: the exam's chapters and max marks for that slot. */
+function blueprintContext(s: any, subjects: SubjectRow[]) {
+  if (s.form !== "BLUEPRINT") return null;
+  const row = subjects.find((x) => x.paperNum === s.paperNum && x.subjectSlot === s.subjectSlot);
+  return { chapters: syllabusOf(row?.topics), maxMarks: row?.maxMarks ?? null, questionTypes: QUESTION_TYPES };
+}
+
+function stageView(s: any, all: any[], today: Date, subjects: SubjectRow[] = []) {
   const overdue = isOverdue(s, today);
   return {
     id: s.id, sequenceNo: s.sequenceNo, name: s.name, description: s.description,
@@ -91,6 +109,14 @@ function stageView(s: any, all: any[], today: Date) {
     completedAt: s.completedAt, remarks: s.remarks, evidenceUrl: s.evidenceUrl,
     bypassReason: s.bypassReason, ownerOverridden: s.ownerOverridden,
     owner: s.owner ?? null,
+    approver: s.approver, form: s.form, formData: s.formData ?? null,
+    approverPerson: s.approverPerson ?? null, submittedAt: s.submittedAt,
+    blueprint: blueprintContext(s, subjects),
+    lastFeedback: (() => {
+      if (s.status !== "IN_PROGRESS") return null;
+      const e = (s.events ?? []).find((x: any) => x.action === "SENT_BACK" || x.action === "REOPENED");
+      return e ? { actorName: e.actorName, action: e.action, note: e.note, createdAt: e.createdAt } : null;
+    })(),
     overdue,
     daysLate: overdue ? daysBetween(s.plannedDate, today)
       : s.completedAt ? Math.max(0, daysBetween(s.plannedDate, utcDay(s.completedAt))) : 0,
@@ -117,6 +143,8 @@ function examSummary(stages: any[], today: Date) {
 // ─── Notifications ───────────────────────────────────────────────────────────
 
 export async function notifyAssignments(examId: string, sync: SyncResult) {
+  for (const r of sync.reopened) await notifyDecision(r.stageId, "REOPENED", r.reason);
+  for (const id of sync.newApprovals) await notifyApprovalRequested(id);
   if (sync.newAssignments.size === 0) return;
   const exam = await prisma.exam.findUnique({ where: { id: examId }, select: { name: true, examDate: true } });
   if (!exam) return;
@@ -135,6 +163,45 @@ export async function notifyAssignments(examId: string, sync: SyncResult) {
         taskCount: String(mine.length),
         taskSummary: mine.map((s) => `${s.name}${s.subjectLabel ? ` (${s.subjectLabel})` : ""} — due ${fmt(s.plannedDate)}`).join("\n"),
       };
+    },
+  });
+}
+
+const stageNoticeInclude = {
+  exam: { select: { id: true, name: true, examDate: true } },
+  owner: { select: { firstName: true, lastName: true } },
+} as const;
+
+/** Tell the approver a stage is waiting for them. */
+async function notifyApprovalRequested(stageId: string) {
+  const s = await prisma.examStage.findUnique({ where: { id: stageId }, include: stageNoticeInclude });
+  if (!s?.approverId) return;
+  await notifyExamStaff("EXAM_APPROVAL_REQUESTED", {
+    examId: s.exam.id,
+    employeeIds: [s.approverId],
+    path: "/dashboard/exams/tasks",
+    fields: {
+      examName: s.exam.name, examDate: fmt(s.exam.examDate), stageName: s.name,
+      subjectLabel: s.subjectLabel ?? undefined, plannedDate: fmt(s.plannedDate),
+      ownerName: s.owner ? `${s.owner.firstName} ${s.owner.lastName}`.trim() : "Unassigned",
+    },
+  });
+}
+
+/** Tell the owner their submission was approved, sent back, or reopened by a syllabus change. */
+async function notifyDecision(stageId: string, decision: "APPROVED" | "SENT_BACK" | "REOPENED", note: string | null, approverName?: string) {
+  const s = await prisma.examStage.findUnique({ where: { id: stageId }, include: stageNoticeInclude });
+  if (!s?.ownerId) return;
+  await notifyExamStaff("EXAM_APPROVAL_DECIDED", {
+    examId: s.exam.id,
+    employeeIds: [s.ownerId],
+    path: "/dashboard/exams/tasks",
+    fields: {
+      examName: s.exam.name, examDate: fmt(s.exam.examDate), stageName: s.name,
+      subjectLabel: s.subjectLabel ?? undefined, plannedDate: fmt(s.plannedDate),
+      decision: decision === "APPROVED" ? "approved" : decision === "SENT_BACK" ? "sent back" : "reopened",
+      approverName: approverName ?? undefined,
+      decisionNote: note ?? undefined,
     },
   });
 }
@@ -210,18 +277,27 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get("/me", async (req, reply) => {
     const a = await accessOf(req.user as JwtPayload);
     const today = todayIST();
-    const open = await prisma.examStage.findMany({
-      where: { ownerId: a.user.sub, status: { in: [...OPEN_STATUSES] }, exam: { status: { notIn: ["CANCELLED", "ARCHIVED"] } } },
-      select: { status: true, plannedDate: true },
-    });
+    const live = { status: { notIn: ["CANCELLED" as const, "ARCHIVED" as const] } };
+    const [open, approvals] = await Promise.all([
+      // Submitted stages are in the approver's court, not the owner's.
+      prisma.examStage.findMany({
+        where: { ownerId: a.user.sub, status: { in: ["NOT_STARTED", "IN_PROGRESS"] }, exam: live },
+        select: { status: true, plannedDate: true },
+      }),
+      prisma.examStage.findMany({
+        where: { approverId: a.user.sub, status: "PENDING_APPROVAL", exam: live },
+        select: { status: true, plannedDate: true },
+      }),
+    ]);
     return reply.send({
       success: true,
       data: {
         teamRole: a.teamRole,
         canViewBoard: canViewBoard(a),
         canManageSettings: a.isSA,
-        openTasks: open.length,
-        overdueTasks: open.filter((s) => isOverdue(s, today)).length,
+        openTasks: open.length + approvals.length,
+        overdueTasks: [...open, ...approvals].filter((s) => isOverdue(s, today)).length,
+        pendingApprovals: approvals.length,
       },
     });
   });
@@ -279,6 +355,41 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.send({ success: true });
   });
 
+  /** Subject heads (HoDs): approve blueprints for their subject. */
+  fastify.get("/settings/subject-heads", async (req, reply) => {
+    const a = await accessOf(req.user as JwtPayload);
+    if (!canViewBoard(a)) return forbidden(reply);
+    const data = await prisma.subject.findMany({
+      where: { isActive: true },
+      select: { id: true, code: true, name: true, head: nameSel },
+      orderBy: { name: "asc" },
+    });
+    return reply.send({ success: true, data });
+  });
+
+  fastify.put("/settings/subject-heads/:subjectId", async (req, reply) => {
+    const a = await accessOf(req.user as JwtPayload);
+    if (!a.isSA) return forbidden(reply, "Only a Super Admin can set subject heads");
+    const body = z.object({ headId: z.string().min(1).nullable() }).safeParse(req.body);
+    if (!body.success) return reply.status(400).send({ success: false, error: "Pick a person" });
+    const subjectId = (req.params as any).subjectId as string;
+    const data = await prisma.subject.update({
+      where: { id: subjectId },
+      data: { headId: body.data.headId },
+      select: { id: true, code: true, name: true, head: nameSel },
+    });
+    // Blueprints already waiting on the old head move to the new one.
+    const exams = await prisma.examStage.findMany({
+      where: { status: "PENDING_APPROVAL", approver: "SUBJECT_HEAD", exam: { subjects: { some: { subjectId } } } },
+      select: { examId: true }, distinct: ["examId"],
+    });
+    for (const e of exams) {
+      const sync = await syncExamStages(prisma, e.examId, await actorFor(a.user.sub));
+      await notifyAssignments(e.examId, sync);
+    }
+    return reply.send({ success: true, data });
+  });
+
   fastify.get("/settings/academic-years", async (req, reply) => {
     const a = await accessOf(req.user as JwtPayload);
     if (!canViewBoard(a)) return forbidden(reply);
@@ -319,6 +430,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
     const stages = (source ?? DEFAULT_STAGES).map((s: any) => ({
       sequenceNo: s.sequenceNo, name: s.name, description: s.description ?? null, offsetDays: s.offsetDays,
       ownerRole: s.ownerRole, scope: s.scope, mode: s.mode ?? null, action: s.action ?? null, canBypass: s.canBypass ?? false,
+      approver: s.approver ?? null, form: s.form ?? null,
     }));
     const data = await prisma.examType.create({
       data: { ...fields, stages: { create: stages } },
@@ -388,6 +500,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
           examTypeId: id, sequenceNo: s.sequenceNo, name: s.name, description: s.description ?? null,
           offsetDays: s.offsetDays, ownerRole: s.ownerRole, scope: s.scope, mode: s.mode ?? null,
           action: s.action ?? null, canBypass: s.canBypass ?? false,
+          approver: s.approver ?? null, form: s.form ?? null,
         })),
       });
       return tx.examType.findUnique({
@@ -485,14 +598,21 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
     const recentCutoff = new Date(Date.now() - 14 * 86400000);
     const stages = await prisma.examStage.findMany({
       where: {
-        ownerId: user.sub,
         exam: { status: { notIn: ["CANCELLED", "ARCHIVED"] } },
-        OR: [{ status: { in: [...OPEN_STATUSES] } }, { completedAt: { gte: recentCutoff } }],
+        OR: [
+          { ownerId: user.sub, status: { in: [...OPEN_STATUSES] } },
+          { ownerId: user.sub, completedAt: { gte: recentCutoff } },
+          { approverId: user.sub, status: "PENDING_APPROVAL" },
+        ],
       },
       include: {
+        owner: nameSel,
+        approverPerson: nameSel,
+        events: { where: { action: { in: ["SENT_BACK", "REOPENED"] } }, orderBy: { createdAt: "desc" }, take: 1 },
         exam: {
           select: {
             id: true, name: true, examDate: true, mode: true,
+            subjects: { select: { paperNum: true, subjectSlot: true, topics: true, maxMarks: true } },
             stages: { select: { id: true, sequenceNo: true, scope: true, paperNum: true, subjectSlot: true, status: true, name: true, subjectLabel: true } },
           },
         },
@@ -503,6 +623,12 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
       id: s.id, name: s.name, description: s.description, subjectLabel: s.subjectLabel,
       plannedDate: s.plannedDate, status: s.status, action: s.action, remarks: s.remarks,
       evidenceUrl: s.evidenceUrl, completedAt: s.completedAt,
+      approver: s.approver, form: s.form, formData: s.formData ?? null, submittedAt: s.submittedAt,
+      owner: s.owner, approverPerson: s.approverPerson,
+      isOwner: s.ownerId === user.sub,
+      awaitingMyApproval: s.status === "PENDING_APPROVAL" && s.approverId === user.sub,
+      lastFeedback: s.status === "IN_PROGRESS" && s.events[0] ? { actorName: s.events[0].actorName, action: s.events[0].action, note: s.events[0].note, createdAt: s.events[0].createdAt } : null,
+      blueprint: blueprintContext(s, s.exam.subjects),
       overdue: isOverdue(s, today),
       daysLeft: daysBetween(today, s.plannedDate),
       blockedBy: openBlockers(s, s.exam.stages).map((b) => ({ id: b.id, name: b.name, subjectLabel: b.subjectLabel })),
@@ -523,10 +649,10 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
         controller: nameSel,
         executive: nameSel,
         batches: { include: { batch: { select: { id: true, name: true } } } },
-        subjects: { include: { subject: { select: { id: true, name: true } } }, orderBy: [{ paperNum: "asc" }, { subjectSlot: "asc" }] },
-        subjectTeams: { include: { setter: nameSel, reviewer: nameSel } },
+        subjects: { include: { subject: { select: { id: true, name: true, head: nameSel } } }, orderBy: [{ paperNum: "asc" }, { subjectSlot: "asc" }] },
+        subjectTeams: { include: { setter: nameSel, reviewer: nameSel, approver: nameSel } },
         stages: {
-          include: { owner: nameSel, events: { orderBy: { createdAt: "desc" }, take: 20 } },
+          include: { owner: nameSel, approverPerson: nameSel, events: { orderBy: { createdAt: "desc" }, take: 20 } },
           orderBy: [{ sequenceNo: "asc" }, { paperNum: "asc" }, { subjectSlot: "asc" }],
         },
       },
@@ -534,7 +660,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
     if (!exam) return reply.status(404).send({ success: false, error: "Exam not found" });
 
     // Board viewers see everything; anyone else only an exam they own a stage in.
-    const ownsStage = exam.stages.some((s) => s.ownerId === a.user.sub);
+    const ownsStage = exam.stages.some((s) => s.ownerId === a.user.sub || s.approverId === a.user.sub);
     if (!canViewBoard(a) && !ownsStage && exam.controllerId !== a.user.sub && exam.executiveId !== a.user.sub) {
       return forbidden(reply);
     }
@@ -547,10 +673,11 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
         ...rest,
         daysToExam: daysBetween(today, exam.examDate),
         summary: exam.examTypeId ? examSummary(stages, today) : null,
-        stages: stages.map((s) => stageView(s, stages, today)),
+        stages: stages.map((s) => stageView(s, stages, today, exam.subjects)),
         permissions: {
           canManage: canManageExam(a, exam),
           isController: isControllerFor(a, exam),
+          isSA: a.isSA,
           userId: a.user.sub,
         },
       },
@@ -571,6 +698,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
         subjectSlot: z.number().int().min(1),
         setterId: z.string().nullable().optional(),
         reviewerId: z.string().nullable().optional(),
+        approverId: z.string().nullable().optional(),
       })).default([]),
     }).safeParse(req.body);
     if (!body.success) return reply.status(400).send({ success: false, error: body.error.issues[0]?.message });
@@ -615,8 +743,8 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
       for (const t of subjectTeams) {
         await tx.examSubjectTeam.upsert({
           where: { examId_paperNum_subjectSlot: { examId, paperNum: t.paperNum, subjectSlot: t.subjectSlot } },
-          create: { examId, paperNum: t.paperNum, subjectSlot: t.subjectSlot, setterId: t.setterId ?? null, reviewerId: t.reviewerId ?? null },
-          update: { setterId: t.setterId ?? null, reviewerId: t.reviewerId ?? null },
+          create: { examId, paperNum: t.paperNum, subjectSlot: t.subjectSlot, setterId: t.setterId ?? null, reviewerId: t.reviewerId ?? null, approverId: t.approverId ?? null },
+          update: { setterId: t.setterId ?? null, reviewerId: t.reviewerId ?? null, approverId: t.approverId ?? null },
         });
       }
       return syncExamStages(tx, examId, actor);
@@ -634,6 +762,8 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
         exam: {
           select: {
             id: true, name: true, status: true, controllerId: true, executiveId: true,
+            subjects: { select: { paperNum: true, subjectSlot: true, topics: true, maxMarks: true, subject: { select: { headId: true } } } },
+            subjectTeams: { select: { paperNum: true, subjectSlot: true, approverId: true } },
             stages: { select: { id: true, sequenceNo: true, scope: true, paperNum: true, subjectSlot: true, status: true, name: true, subjectLabel: true } },
           },
         },
@@ -668,6 +798,13 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
     const wasClosed = stage.status === "DONE" || stage.status === "BYPASSED";
     let eventAction = "UPDATED";
 
+    if (status === "DONE" && stage.approver) {
+      return reply.status(409).send({ success: false, error: "This stage needs approval: submit it for approval instead" });
+    }
+    if (stage.status === "PENDING_APPROVAL" && status && status !== "IN_PROGRESS") {
+      return reply.status(409).send({ success: false, error: "This stage is waiting for approval" });
+    }
+
     if (status && status !== stage.status) {
       if (wasClosed) {
         // Reopening undoes accountability, so it's Controller-level and logged.
@@ -693,8 +830,13 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
       }
       if (status === "IN_PROGRESS") {
         data.startedAt = stage.startedAt ?? new Date();
-        if (!wasClosed) eventAction = "STARTED";
+        if (stage.status === "PENDING_APPROVAL") {
+          // The owner pulls a submission back to change it.
+          data.submittedAt = null; data.approverId = null;
+          eventAction = "WITHDRAWN";
+        } else if (!wasClosed) eventAction = "STARTED";
       }
+      if (eventAction === "REOPENED" && stage.approver) { data.submittedAt = null; data.approverId = null; }
       data.status = status;
     }
     if (Object.keys(data).length === 0) return reply.send({ success: true, data: stage });
@@ -720,6 +862,175 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
     if (eventAction === "DONE" && stage.action) message = await runStageAction(stage.action, stage.exam.id, a.user.sub);
     if (eventAction === "REOPENED" && stage.action === "RELEASE_RESULTS") message = "Results are hidden from students again until this stage is done.";
     return reply.send({ success: true, data: updated, message });
+  });
+
+  // ── Forms & approval ──────────────────────────────────────────────────────
+
+  const blueprintSchema = z.object({
+    chapters: z.array(z.object({
+      chapter: z.string().trim().min(1).max(200),
+      marks: z.number().min(0).max(10000),
+      questions: z.number().int().min(0).max(1000),
+      questionType: z.string().trim().max(40),
+    })).max(200),
+    difficulty: z.object({
+      easy: z.number().min(0).max(100),
+      medium: z.number().min(0).max(100),
+      hard: z.number().min(0).max(100),
+    }),
+  });
+
+  function slotOf(stage: NonNullable<Awaited<ReturnType<typeof loadStage>>>) {
+    const subj = stage.exam.subjects.find((x) => x.paperNum === stage.paperNum && x.subjectSlot === stage.subjectSlot) ?? null;
+    const team = stage.exam.subjectTeams.find((x) => x.paperNum === stage.paperNum && x.subjectSlot === stage.subjectSlot) ?? null;
+    return { subj, team, chapters: syllabusOf(subj?.topics), maxMarks: subj?.maxMarks ?? null };
+  }
+
+  /** Keep only the exam's chapters, in the exam's order, so the form can't drift from the syllabus. */
+  function shapeBlueprint(input: z.infer<typeof blueprintSchema>, chapters: string[], maxMarks: number | null): Blueprint {
+    const byName = new Map(input.chapters.map((c) => [c.chapter.trim().toLowerCase(), c]));
+    return {
+      maxMarks,
+      chapters: chapters.map((ch) => {
+        const c = byName.get(ch.toLowerCase());
+        return { chapter: ch, marks: c?.marks ?? 0, questions: c?.questions ?? 0, questionType: c?.questionType ?? "" };
+      }),
+      difficulty: input.difficulty,
+    };
+  }
+
+  /** Save a draft of the stage's form. Owner or exam team; not while it's awaiting approval. */
+  fastify.put("/stages/:stageId/form", async (req, reply) => {
+    const a = await accessOf(req.user as JwtPayload);
+    const body = blueprintSchema.safeParse(req.body);
+    if (!body.success) return reply.status(400).send({ success: false, error: body.error.issues[0]?.message });
+    const stage = await loadStage((req.params as any).stageId);
+    if (!stage) return reply.status(404).send({ success: false, error: "Stage not found" });
+    if (stage.form !== "BLUEPRINT") return reply.status(400).send({ success: false, error: "This stage has no form" });
+    if (stage.ownerId !== a.user.sub && !canManageExam(a, stage.exam)) return forbidden(reply, "Only the stage owner or the exam team can edit this");
+    if (stage.status !== "NOT_STARTED" && stage.status !== "IN_PROGRESS") {
+      return reply.status(409).send({ success: false, error: stage.status === "PENDING_APPROVAL" ? "It's waiting for approval. Withdraw it to make changes." : "This stage is closed" });
+    }
+    const { chapters, maxMarks } = slotOf(stage);
+    const formData = shapeBlueprint(body.data, chapters, maxMarks);
+    const updated = await prisma.examStage.update({
+      where: { id: stage.id },
+      data: { formData, ...(stage.status === "NOT_STARTED" ? { status: "IN_PROGRESS", startedAt: new Date() } : {}) },
+    });
+    return reply.send({ success: true, data: updated, problems: blueprintProblems(formData, chapters, maxMarks) });
+  });
+
+  /** Owner submits the stage (with its form) for approval. */
+  fastify.post("/stages/:stageId/submit", async (req, reply) => {
+    const a = await accessOf(req.user as JwtPayload);
+    const stage = await loadStage((req.params as any).stageId);
+    if (!stage) return reply.status(404).send({ success: false, error: "Stage not found" });
+    if (!stage.approver) return reply.status(400).send({ success: false, error: "This stage doesn't need approval; mark it done instead" });
+    if (stage.ownerId !== a.user.sub && !canManageExam(a, stage.exam)) return forbidden(reply, "Only the stage owner or the exam team can submit this");
+    if (["CANCELLED", "ARCHIVED"].includes(stage.exam.status)) return reply.status(409).send({ success: false, error: "This exam is cancelled or archived" });
+    if (stage.status !== "NOT_STARTED" && stage.status !== "IN_PROGRESS") return reply.status(409).send({ success: false, error: "This stage is already submitted or closed" });
+
+    const blockers = openBlockers(stage, stage.exam.stages);
+    if (blockers.length) {
+      return reply.status(409).send({ success: false, error: `Finish the earlier step(s) first: ${blockers.slice(0, 3).map((b) => b.name + (b.subjectLabel ? ` (${b.subjectLabel})` : "")).join(", ")}` });
+    }
+
+    const { subj, team, chapters, maxMarks } = slotOf(stage);
+    let formData: Blueprint | null = null;
+    if (stage.form === "BLUEPRINT") {
+      // Accept the form in the submit itself, or use the saved draft.
+      const parsed = req.body && Object.keys(req.body as object).length ? blueprintSchema.safeParse(req.body) : null;
+      if (parsed && !parsed.success) return reply.status(400).send({ success: false, error: parsed.error.issues[0]?.message });
+      const draft = stage.formData as any;
+      if (!parsed && !draft) return reply.status(400).send({ success: false, error: "Fill in the blueprint first" });
+      formData = shapeBlueprint(parsed ? parsed.data : draft, chapters, maxMarks);
+      const problems = blueprintProblems(formData, chapters, maxMarks);
+      if (problems.length) return reply.status(400).send({ success: false, error: problems[0], problems });
+    }
+
+    const approverId = approverFor(stage.approver, { exam: stage.exam, team, subject: subj, ownerId: stage.ownerId });
+    if (!approverId) {
+      return reply.status(409).send({ success: false, error: "Nobody can approve this yet. Set a subject head in Exam Settings, or a Controller on the exam." });
+    }
+
+    const actor = await actorFor(a.user.sub);
+    const approver = await actorFor(approverId);
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.examStage.update({
+        where: { id: stage.id },
+        data: {
+          status: "PENDING_APPROVAL", approverId, submittedAt: new Date(),
+          startedAt: stage.startedAt ?? new Date(),
+          ...(formData ? { formData } : {}),
+          // The approver gets their own due-date notices from here on.
+          reminderSentAt: null,
+        },
+      });
+      await tx.examStageEvent.create({
+        data: { stageId: stage.id, actorId: actor.id, actorName: actor.name, action: "SUBMITTED", fromStatus: stage.status, toStatus: "PENDING_APPROVAL", note: `Sent to ${approver.name} for approval` },
+      });
+      return u;
+    });
+    await notifyApprovalRequested(stage.id);
+    return reply.send({ success: true, data: updated, message: `Submitted to ${approver.name} for approval.` });
+  });
+
+  /** The approver signs it off: the stage closes as done. */
+  fastify.post("/stages/:stageId/approve", async (req, reply) => {
+    const a = await accessOf(req.user as JwtPayload);
+    const body = z.object({ comment: z.string().trim().max(1000).optional() }).safeParse(req.body ?? {});
+    if (!body.success) return reply.status(400).send({ success: false, error: body.error.issues[0]?.message });
+    const stage = await loadStage((req.params as any).stageId);
+    if (!stage) return reply.status(404).send({ success: false, error: "Stage not found" });
+    if (stage.status !== "PENDING_APPROVAL") return reply.status(409).send({ success: false, error: "This stage isn't waiting for approval" });
+    if (stage.approverId !== a.user.sub && !a.isSA) return forbidden(reply, "Only the named approver can approve this");
+    if (stage.ownerId === a.user.sub && !a.isSA) return forbidden(reply, "You can't approve your own submission");
+    const blockers = openBlockers(stage, stage.exam.stages);
+    if (blockers.length) {
+      return reply.status(409).send({ success: false, error: `An earlier step was reopened and must be finished first: ${blockers.slice(0, 3).map((b) => b.name + (b.subjectLabel ? ` (${b.subjectLabel})` : "")).join(", ")}` });
+    }
+
+    const actor = await actorFor(a.user.sub);
+    const comment = body.data.comment || null;
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.examStage.update({
+        where: { id: stage.id },
+        data: { status: "DONE", completedAt: new Date(), completedById: a.user.sub },
+      });
+      await tx.examStageEvent.create({
+        data: { stageId: stage.id, actorId: actor.id, actorName: actor.name, action: "APPROVED", fromStatus: "PENDING_APPROVAL", toStatus: "DONE", note: comment },
+      });
+      return u;
+    });
+    await notifyDecision(stage.id, "APPROVED", comment, actor.name);
+    let message: string | null = `Approved. "${stage.name}" is done.`;
+    if (stage.action) message = (await runStageAction(stage.action, stage.exam.id, a.user.sub)) ?? message;
+    return reply.send({ success: true, data: updated, message });
+  });
+
+  /** The approver returns it to the owner with what to change. */
+  fastify.post("/stages/:stageId/send-back", async (req, reply) => {
+    const a = await accessOf(req.user as JwtPayload);
+    const body = z.object({ comment: z.string().trim().min(5, "Say what needs changing (at least 5 characters)").max(1000) }).safeParse(req.body);
+    if (!body.success) return reply.status(400).send({ success: false, error: body.error.issues[0]?.message });
+    const stage = await loadStage((req.params as any).stageId);
+    if (!stage) return reply.status(404).send({ success: false, error: "Stage not found" });
+    if (stage.status !== "PENDING_APPROVAL") return reply.status(409).send({ success: false, error: "This stage isn't waiting for approval" });
+    if (stage.approverId !== a.user.sub && !a.isSA) return forbidden(reply, "Only the named approver can send this back");
+
+    const actor = await actorFor(a.user.sub);
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.examStage.update({
+        where: { id: stage.id },
+        data: { status: "IN_PROGRESS", submittedAt: null, approverId: null },
+      });
+      await tx.examStageEvent.create({
+        data: { stageId: stage.id, actorId: actor.id, actorName: actor.name, action: "SENT_BACK", fromStatus: "PENDING_APPROVAL", toStatus: "IN_PROGRESS", note: body.data.comment },
+      });
+      return u;
+    });
+    await notifyDecision(stage.id, "SENT_BACK", body.data.comment, actor.name);
+    return reply.send({ success: true, data: updated, message: "Sent back to the owner with your comment." });
   });
 
   /** Skip a stage with a reason. Controller-level, and only where the type allows it. */
@@ -771,7 +1082,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
       });
       return u;
     });
-    await notifyAssignments(stage.exam.id, { newAssignments: new Map([[body.data.ownerId, [stage.id]]]), rescheduled: 0 });
+    await notifyAssignments(stage.exam.id, { newAssignments: new Map([[body.data.ownerId, [stage.id]]]), rescheduled: 0, reopened: [], newApprovals: [] });
     return reply.send({ success: true, data: updated });
   });
 };

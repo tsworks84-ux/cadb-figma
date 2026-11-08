@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, ChevronDown, Copy, Save, Users, Layers, Info } from "lucide-react";
+import { Plus, Trash2, ChevronDown, Copy, Save, Users, Layers, Info, ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
 import {
   ExamsHeader, AccessDenied, Select, Field, PersonPicker, inputCls, btnPrimary, btnSecondary, btnDanger,
@@ -15,6 +15,7 @@ type StageDef = {
   sequenceNo: number; name: string; description: string | null; offsetDays: number;
   ownerRole: OwnerRole; scope: "EXAM" | "SUBJECT"; mode: "PEN_PAPER" | "ONLINE" | null;
   action: "NOTIFY_STUDENTS" | "RELEASE_RESULTS" | null; canBypass: boolean;
+  approver: "SUBJECT_HEAD" | "CONTROLLER" | null; form: "BLUEPRINT" | null;
 };
 type ExamType = {
   id: string; academicYear: string; name: string; description: string | null; isActive: boolean;
@@ -36,6 +37,7 @@ export default function ExamSettingsPage() {
           : "Read-only — only a Super Admin can change these."}
       />
       <TeamSection canEdit={canEdit} />
+      <SubjectHeadsSection canEdit={canEdit} />
       <TypesSection canEdit={canEdit} />
     </div>
   );
@@ -104,6 +106,66 @@ function TeamSection({ canEdit }: { canEdit: boolean }) {
             <button className={btnPrimary} onClick={add} disabled={!person}><Plus className="h-4 w-4" /> Add</button>
           </div>
         )}
+        {err && <p className="text-sm text-red-600">{err}</p>}
+      </div>
+    </section>
+  );
+}
+
+// ─── Subject heads ────────────────────────────────────────────────────────────
+
+type SubjectHead = { id: string; code: string; name: string; head: Person | null };
+
+function SubjectHeadsSection({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { data: subjects = [], isLoading } = useQuery<SubjectHead[]>({
+    queryKey: ["exam-subject-heads"],
+    queryFn: () => api.get("/api/v1/exams/settings/subject-heads").then((r) => r.data.data),
+  });
+  const [err, setErr] = useState<string | null>(null);
+  const [saving, setSaving] = useState<string | null>(null);
+
+  const setHead = async (subjectId: string, head: Person | null) => {
+    setErr(null); setSaving(subjectId);
+    try {
+      await api.put(`/api/v1/exams/settings/subject-heads/${subjectId}`, { headId: head?.id ?? null });
+      qc.invalidateQueries({ queryKey: ["exam-subject-heads"] });
+      qc.invalidateQueries({ queryKey: ["exam-detail"] });
+    } catch (e) { setErr(apiError(e)); } finally { setSaving(null); }
+  };
+
+  return (
+    <section className="rounded-2xl border border-gray-100 bg-white">
+      <div className="px-4 py-3 sm:px-6 border-b border-gray-100 flex items-center gap-2">
+        <ShieldCheck className="h-4 w-4 text-gray-400" />
+        <h2 className="text-base font-semibold text-gray-900">Subject heads</h2>
+      </div>
+      <div className="px-4 py-4 sm:px-6 space-y-3">
+        <p className="text-xs text-gray-500">
+          The subject head (HoD) approves each exam&apos;s blueprint for their subject. An exam can name a different approver for a paper in its setup.
+          With no head set, the exam&apos;s Controller approves. Nobody approves their own blueprint: if the head set the paper, it goes to the Controller.
+        </p>
+        {isLoading ? <p className="text-sm text-gray-400">Loading…</p>
+          : subjects.length === 0 ? <p className="text-sm text-gray-400">No active subjects.</p>
+          : (
+            <ul className="divide-y divide-gray-50">
+              {subjects.map((sub) => (
+                <li key={sub.id} className="grid grid-cols-1 sm:grid-cols-[12rem_1fr] gap-2 py-2.5 sm:items-center">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">{sub.name}</p>
+                    <p className="text-[11px] text-gray-400">{sub.code}</p>
+                  </div>
+                  {canEdit ? (
+                    <div className={saving === sub.id ? "opacity-60 pointer-events-none" : ""}>
+                      <PersonPicker value={sub.head} onChange={(p) => setHead(sub.id, p)} />
+                    </div>
+                  ) : (
+                    <p className={`text-sm ${sub.head ? "text-gray-800" : "text-gray-400"}`}>{sub.head ? personName(sub.head) : "Not set (Controller approves)"}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         {err && <p className="text-sm text-red-600">{err}</p>}
       </div>
     </section>
@@ -243,7 +305,7 @@ function TypeCard({ type: t, canEdit, onChanged }: { type: ExamType; canEdit: bo
   const removeRow = (i: number) => { setStages((s) => s.filter((_, j) => j !== i)); setDirty(true); };
   const addRow = () => {
     const next = Math.max(0, ...stages.map((s) => s.sequenceNo)) + 1;
-    setStages((s) => [...s, { sequenceNo: next, name: "", description: null, offsetDays: 0, ownerRole: "EXECUTIVE", scope: "EXAM", mode: null, action: null, canBypass: false }]);
+    setStages((s) => [...s, { sequenceNo: next, name: "", description: null, offsetDays: 0, ownerRole: "EXECUTIVE", scope: "EXAM", mode: null, action: null, canBypass: false, approver: null, form: null }]);
     setDirty(true);
   };
   const save = async () => {
@@ -312,7 +374,7 @@ function TypeCard({ type: t, canEdit, onChanged }: { type: ExamType; canEdit: bo
                   <div className="lg:col-span-2">
                     <Field label="Applies to">
                       <Select disabled={!canEdit} value={s.scope} onChange={(e) => update(i, { scope: e.target.value as any })}>
-                        <option value="EXAM" disabled={s.ownerRole === "PAPER_SETTER" || s.ownerRole === "REVIEWER"}>Whole exam</option>
+                        <option value="EXAM" disabled={s.ownerRole === "PAPER_SETTER" || s.ownerRole === "REVIEWER" || s.form === "BLUEPRINT" || s.approver === "SUBJECT_HEAD"}>Whole exam</option>
                         <option value="SUBJECT">Each paper/subject</option>
                       </Select>
                     </Field>
@@ -332,6 +394,29 @@ function TypeCard({ type: t, canEdit, onChanged }: { type: ExamType; canEdit: bo
                         <option value="">Nothing extra</option>
                         <option value="NOTIFY_STUDENTS">Email exam notice to students &amp; parents</option>
                         <option value="RELEASE_RESULTS">Release results to students &amp; parents</option>
+                      </Select>
+                    </Field>
+                  </div>
+                  <div className="lg:col-span-3">
+                    <Field label="Approved by" hint={s.approver ? "Owner submits; approval closes it" : "Owner marks it done"}>
+                      <Select disabled={!canEdit} value={s.approver ?? ""} onChange={(e) => {
+                        const approver = (e.target.value || null) as StageDef["approver"];
+                        update(i, { approver, ...(approver === "SUBJECT_HEAD" ? { scope: "SUBJECT" as const } : {}), ...(!approver ? { form: null } : {}) });
+                      }}>
+                        <option value="">No approval</option>
+                        <option value="SUBJECT_HEAD">Subject head (HoD)</option>
+                        <option value="CONTROLLER">Controller of Examinations</option>
+                      </Select>
+                    </Field>
+                  </div>
+                  <div className="lg:col-span-3">
+                    <Field label="Form">
+                      <Select disabled={!canEdit} value={s.form ?? ""} onChange={(e) => {
+                        const form = (e.target.value || null) as StageDef["form"];
+                        update(i, { form, ...(form === "BLUEPRINT" ? { scope: "SUBJECT" as const, approver: s.approver ?? "SUBJECT_HEAD" } : {}) });
+                      }}>
+                        <option value="">None</option>
+                        <option value="BLUEPRINT">Blueprint (marks per chapter, difficulty)</option>
                       </Select>
                     </Field>
                   </div>

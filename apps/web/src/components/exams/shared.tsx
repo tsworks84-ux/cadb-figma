@@ -11,7 +11,7 @@ import { useAuthStore } from "@/store/auth";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type Person = { id: string; firstName: string; lastName: string; employeeCode?: string };
-export type StageStatus = "NOT_STARTED" | "IN_PROGRESS" | "DONE" | "BYPASSED";
+export type StageStatus = "NOT_STARTED" | "IN_PROGRESS" | "PENDING_APPROVAL" | "DONE" | "BYPASSED";
 export type OwnerRole = "CONTROLLER" | "EXECUTIVE" | "PAPER_SETTER" | "REVIEWER";
 
 export type ExamMe = {
@@ -20,6 +20,7 @@ export type ExamMe = {
   canManageSettings: boolean;
   openTasks: number;
   overdueTasks: number;
+  pendingApprovals: number;
 };
 
 export const OWNER_ROLE_LABEL: Record<OwnerRole, string> = {
@@ -130,10 +131,12 @@ export function AccessDenied({ message }: { message: string }) {
 // ─── Chips ────────────────────────────────────────────────────────────────────
 
 export function StatusChip({ status, overdue }: { status: StageStatus; overdue?: boolean }) {
-  if (overdue) return <Chip className="bg-red-100 text-red-700">Overdue</Chip>;
+  // Awaiting approval says whose court it's in even when late; the due line shows the lateness.
+  if (overdue && status !== "PENDING_APPROVAL") return <Chip className="bg-red-100 text-red-700">Overdue</Chip>;
   const map: Record<StageStatus, [string, string]> = {
     NOT_STARTED: ["Not started", "bg-gray-100 text-gray-600"],
     IN_PROGRESS: ["In progress", "bg-blue-100 text-blue-700"],
+    PENDING_APPROVAL: ["Awaiting approval", "bg-amber-100 text-amber-800"],
     DONE: ["Done", "bg-emerald-100 text-emerald-700"],
     BYPASSED: ["Bypassed", "bg-amber-100 text-amber-700"],
   };
@@ -263,7 +266,7 @@ export function PersonPicker({
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
 
-export function Modal({ title, onClose, children, footer }: { title: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode }) {
+export function Modal({ title, onClose, children, footer, wide }: { title: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode; wide?: boolean }) {
   useEffect(() => {
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", esc);
@@ -271,13 +274,13 @@ export function Modal({ title, onClose, children, footer }: { title: string; onC
   }, [onClose]);
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4" onClick={onClose}>
-      <div className="w-full sm:max-w-lg max-h-[90vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <div className={`w-full ${wide ? "sm:max-w-3xl" : "sm:max-w-lg"} max-h-[90vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-white shadow-xl`} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <h2 className="text-base font-semibold text-gray-900">{title}</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-700" aria-label="Close"><X className="h-5 w-5" /></button>
         </div>
         <div className="px-5 py-4 space-y-4">{children}</div>
-        {footer && <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-100">{footer}</div>}
+        {footer && <div className="flex flex-wrap justify-end gap-2 px-5 py-4 border-t border-gray-100">{footer}</div>}
       </div>
     </div>
   );

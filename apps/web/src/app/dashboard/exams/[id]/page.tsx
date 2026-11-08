@@ -6,7 +6,7 @@ import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft, CheckCircle2, ChevronDown, ExternalLink, History, Lock, Play, RotateCcw, SkipForward,
-  UserCog, Settings2, Info, Mail, Send,
+  UserCog, Settings2, Info, Mail, Send, ClipboardList, Hourglass, Undo2, ShieldCheck,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import {
@@ -15,8 +15,9 @@ import {
   type Person, type StageStatus, type OwnerRole,
 } from "@/components/exams/shared";
 import { MarkDoneDialog, BypassDialog, ReassignDialog, Notice, useInvalidateExams } from "@/components/exams/StageDialogs";
+import { BlueprintDialog, blueprintModeFor, type BlueprintStage } from "@/components/exams/Blueprint";
 
-type Stage = {
+type Stage = BlueprintStage & {
   id: string; sequenceNo: number; name: string; description: string | null;
   ownerRole: OwnerRole; scope: "EXAM" | "SUBJECT"; action: string | null; canBypass: boolean;
   paperNum: number; subjectSlot: number; subjectLabel: string | null;
@@ -25,6 +26,7 @@ type Stage = {
   owner: Person | null; overdue: boolean; daysLate: number;
   blockedBy: { id: string; name: string; subjectLabel: string | null }[];
   events: { id: string; actorName: string; action: string; note: string | null; createdAt: string }[];
+  approver: "SUBJECT_HEAD" | "CONTROLLER" | null; form: "BLUEPRINT" | null;
 };
 
 type ExamDetail = {
@@ -34,12 +36,12 @@ type ExamDetail = {
   controller: Person | null; executive: Person | null;
   resultsReleasedAt: string | null; studentsNotifiedAt: string | null;
   batches: { batch: { id: string; name: string } }[];
-  subjects: { paperNum: number; subjectSlot: number; topics: string | null; subject: { id: string; name: string } | null }[];
-  subjectTeams: { paperNum: number; subjectSlot: number; setter: Person | null; reviewer: Person | null }[];
+  subjects: { paperNum: number; subjectSlot: number; topics: string | null; subject: { id: string; name: string; head: Person | null } | null }[];
+  subjectTeams: { paperNum: number; subjectSlot: number; setter: Person | null; reviewer: Person | null; approver: Person | null }[];
   daysToExam: number;
   summary: { total: number; done: number; overdue: number; health: string } | null;
   stages: Stage[];
-  permissions: { canManage: boolean; isController: boolean; userId: string };
+  permissions: { canManage: boolean; isController: boolean; isSA: boolean; userId: string };
 };
 
 export default function ExamDetailPage() {
@@ -122,7 +124,7 @@ function Fact({ label, value, sub }: { label: string; value: string; sub?: strin
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-type TypeOpt = { id: string; name: string; isActive: boolean; academicYear: string; stages: { scope: string; ownerRole: string }[] };
+type TypeOpt = { id: string; name: string; isActive: boolean; academicYear: string; stages: { scope: string; ownerRole: string; approver: string | null }[] };
 type TeamMember = { id: string; role: "CONTROLLER" | "EXECUTIVE"; employee: Person };
 
 function SetupCard({ exam, subjectLabel, onSaved }: { exam: ExamDetail; subjectLabel: (p: number, s: number) => string; onSaved: (msg: string) => void }) {
@@ -141,10 +143,10 @@ function SetupCard({ exam, subjectLabel, onSaved }: { exam: ExamDetail; subjectL
   const [controller, setController] = useState<Person | null>(exam.controller);
   const [executive, setExecutive] = useState<Person | null>(exam.executive);
   const slots = exam.subjects.map((s) => ({ paperNum: s.paperNum, subjectSlot: s.subjectSlot }));
-  const [teams, setTeams] = useState<Record<string, { setter: Person | null; reviewer: Person | null }>>(() =>
+  const [teams, setTeams] = useState<Record<string, { setter: Person | null; reviewer: Person | null; approver: Person | null }>>(() =>
     Object.fromEntries(slots.map((s) => {
       const t = exam.subjectTeams.find((x) => x.paperNum === s.paperNum && x.subjectSlot === s.subjectSlot);
-      return [`${s.paperNum}_${s.subjectSlot}`, { setter: t?.setter ?? null, reviewer: t?.reviewer ?? null }];
+      return [`${s.paperNum}_${s.subjectSlot}`, { setter: t?.setter ?? null, reviewer: t?.reviewer ?? null, approver: t?.approver ?? null }];
     })));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -161,6 +163,7 @@ function SetupCard({ exam, subjectLabel, onSaved }: { exam: ExamDetail; subjectL
   const activeTypes = types.filter((t) => t.isActive || t.id === exam.examTypeId);
   const chosen = types.find((t) => t.id === typeId);
   const needsPaperTeam = !!chosen?.stages.some((s) => s.ownerRole === "PAPER_SETTER" || s.ownerRole === "REVIEWER");
+  const needsHead = !!chosen?.stages.some((s) => s.approver === "SUBJECT_HEAD");
   const missingPaperTeam = needsPaperTeam && slots.some((s) => { const t = teams[`${s.paperNum}_${s.subjectSlot}`]; return !t?.setter || !t?.reviewer; });
 
   const save = async () => {
@@ -171,7 +174,7 @@ function SetupCard({ exam, subjectLabel, onSaved }: { exam: ExamDetail; subjectL
         controllerId: controller?.id ?? "", executiveId: executive?.id ?? "",
         subjectTeams: slots.map((s) => {
           const t = teams[`${s.paperNum}_${s.subjectSlot}`];
-          return { ...s, setterId: t?.setter?.id ?? null, reviewerId: t?.reviewer?.id ?? null };
+          return { ...s, setterId: t?.setter?.id ?? null, reviewerId: t?.reviewer?.id ?? null, approverId: t?.approver?.id ?? null };
         }),
       });
       invalidate();
@@ -217,19 +220,28 @@ function SetupCard({ exam, subjectLabel, onSaved }: { exam: ExamDetail; subjectL
 
       {needsPaperTeam && (
         <div className="space-y-2">
-          <p className="text-xs font-semibold text-gray-600">Paper setters and reviewers</p>
-          <p className="text-[11px] text-gray-400 -mt-1">The reviewer must be a different person from the setter.</p>
+          <p className="text-xs font-semibold text-gray-600">Paper setters and reviewers{needsHead ? ", blueprint approvers" : ""}</p>
+          <p className="text-[11px] text-gray-400 -mt-1">
+            The reviewer must be a different person from the setter.
+            {needsHead ? " Leave the blueprint approver blank to use the subject head from Exam Settings." : ""}
+          </p>
           <div className="space-y-3">
             {slots.map((s) => {
               const key = `${s.paperNum}_${s.subjectSlot}`;
-              const t = teams[key] ?? { setter: null, reviewer: null };
+              const t = teams[key] ?? { setter: null, reviewer: null, approver: null };
+              const head = exam.subjects.find((x) => x.paperNum === s.paperNum && x.subjectSlot === s.subjectSlot)?.subject?.head ?? null;
               const same = t.setter && t.reviewer && t.setter.id === t.reviewer.id;
               return (
                 <div key={key} className="rounded-xl border border-gray-100 p-3">
                   <p className="text-sm font-medium text-gray-800 mb-2">{subjectLabel(s.paperNum, s.subjectSlot)}</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className={`grid grid-cols-1 sm:grid-cols-2 ${needsHead ? "lg:grid-cols-3" : ""} gap-3`}>
                     <Field label="Setter"><PersonPicker value={t.setter} onChange={(p) => setTeams((x) => ({ ...x, [key]: { ...t, setter: p } }))} /></Field>
                     <Field label="Reviewer"><PersonPicker value={t.reviewer} onChange={(p) => setTeams((x) => ({ ...x, [key]: { ...t, reviewer: p } }))} /></Field>
+                    {needsHead && (
+                      <Field label="Blueprint approver" hint={t.approver ? undefined : head ? `Subject head: ${personName(head)}` : "No subject head set: falls to the Controller"}>
+                        <PersonPicker value={t.approver} onChange={(p) => setTeams((x) => ({ ...x, [key]: { ...t, approver: p } }))} />
+                      </Field>
+                    )}
                   </div>
                   {same && <p className="text-xs text-red-600 mt-1">Setter and reviewer can&apos;t be the same person.</p>}
                 </div>
@@ -284,6 +296,7 @@ function StageTimeline({ exam, onFlash }: { exam: ExamDetail; onFlash: (m: strin
                     {first.action === "NOTIFY_STUDENTS" && <Chip className="bg-blue-50 text-blue-700">Emails students</Chip>}
                     {first.action === "RELEASE_RESULTS" && <Chip className="bg-emerald-50 text-emerald-700">Releases results</Chip>}
                     {first.canBypass && <Chip className="bg-gray-100 text-gray-500">Can bypass</Chip>}
+                    {first.approver && <Chip className="bg-violet-50 text-violet-700"><ShieldCheck className="h-3 w-3 mr-1" />{first.approver === "SUBJECT_HEAD" ? "Subject head approves" : "Controller approves"}</Chip>}
                   </div>
                   {first.description && <p className="text-xs text-gray-500 mt-0.5">{first.description}</p>}
                   <div className="mt-2 space-y-2">
@@ -301,17 +314,21 @@ function StageTimeline({ exam, onFlash }: { exam: ExamDetail; onFlash: (m: strin
 
 function StageRow({ stage: s, exam, onFlash }: { stage: Stage; exam: ExamDetail; onFlash: (m: string) => void }) {
   const invalidate = useInvalidateExams();
-  const [dialog, setDialog] = useState<"done" | "bypass" | "reassign" | null>(null);
+  const [dialog, setDialog] = useState<"done" | "bypass" | "reassign" | "blueprint" | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const { canManage, isController, userId } = exam.permissions;
+  const { canManage, isController, isSA, userId } = exam.permissions;
   const isOwner = s.owner?.id === userId;
   const canAct = isOwner || canManage;
   const closed = s.status === "DONE" || s.status === "BYPASSED";
   const blocked = s.blockedBy.length > 0;
   const releaseNeedsController = s.action === "RELEASE_RESULTS" && !isController;
+  const pending = s.status === "PENDING_APPROVAL";
+  const isBlueprint = s.form === "BLUEPRINT";
+  const bpMode = blueprintModeFor(s, userId, canManage, isSA);
+  const iApprove = pending && bpMode === "review";
 
   const patch = async (status: string, okMsg?: string) => {
     setBusy(true); setErr(null);
@@ -319,6 +336,15 @@ function StageRow({ stage: s, exam, onFlash }: { stage: Stage; exam: ExamDetail;
       const r = await api.patch(`/api/v1/exams/stages/${s.id}`, { status });
       invalidate();
       if (r.data.message || okMsg) onFlash(r.data.message ?? okMsg);
+    } catch (e) { setErr(apiError(e)); } finally { setBusy(false); }
+  };
+
+  const post = async (action: "submit" | "approve" | "send-back", body: object) => {
+    setBusy(true); setErr(null);
+    try {
+      const r = await api.post(`/api/v1/exams/stages/${s.id}/${action}`, body);
+      invalidate();
+      if (r.data.message) onFlash(r.data.message);
     } catch (e) { setErr(apiError(e)); } finally { setBusy(false); }
   };
 
@@ -338,6 +364,16 @@ function StageRow({ stage: s, exam, onFlash }: { stage: Stage; exam: ExamDetail;
               ? <>closed {s.completedAt ? fmtDay(s.completedAt) : ""}{s.daysLate > 0 ? <span className="text-red-600"> ({s.daysLate}d late)</span> : null}</>
               : <span className={s.overdue ? "text-red-600 font-semibold" : ""}>due {fmtDay(s.plannedDate)}{s.overdue ? ` · ${s.daysLate}d late` : ""}</span>}
           </p>
+          {pending && (
+            <p className="flex items-center gap-1 text-xs text-amber-800 mt-0.5">
+              <Hourglass className="h-3 w-3 shrink-0" /> Awaiting approval from <b>{personName(s.approverPerson)}</b>
+            </p>
+          )}
+          {s.lastFeedback && (
+            <p className="text-xs text-amber-700 mt-0.5">
+              {s.lastFeedback.action === "SENT_BACK" ? `Sent back by ${s.lastFeedback.actorName}` : "Reopened"}{s.lastFeedback.note ? `: ${s.lastFeedback.note}` : ""}
+            </p>
+          )}
           {s.bypassReason && <p className="text-xs text-amber-700 mt-0.5">Bypassed: {s.bypassReason}</p>}
           {s.remarks && <p className="text-xs text-gray-500 mt-0.5">“{s.remarks}”</p>}
           {s.evidenceUrl && (
@@ -357,7 +393,32 @@ function StageRow({ stage: s, exam, onFlash }: { stage: Stage; exam: ExamDetail;
           {!closed && canAct && s.status === "NOT_STARTED" && (
             <IconBtn icon={Play} label="Start" onClick={() => patch("IN_PROGRESS")} disabled={busy} />
           )}
-          {!closed && canAct && (
+          {isBlueprint && iApprove && <IconBtn icon={ShieldCheck} label="Review" primary onClick={() => setDialog("blueprint")} />}
+          {isBlueprint && !closed && !pending && canAct && (
+            <IconBtn icon={ClipboardList} label="Blueprint" primary onClick={() => setDialog("blueprint")}
+              disabled={busy} title={blocked ? "You can fill it in now; it can be submitted once earlier steps are done" : undefined} />
+          )}
+          {isBlueprint && (closed || (pending && !iApprove)) && (s.formData || closed) && (
+            <IconBtn icon={ClipboardList} label="View blueprint" onClick={() => setDialog("blueprint")} />
+          )}
+          {!isBlueprint && s.approver && !closed && !pending && canAct && (
+            <IconBtn icon={Send} label="Submit for approval" primary disabled={busy || blocked}
+              title={blocked ? "Earlier steps must be finished first" : undefined}
+              onClick={() => post("submit", {})} />
+          )}
+          {!isBlueprint && iApprove && <>
+            <IconBtn icon={CheckCircle2} label="Approve" primary disabled={busy} onClick={() => post("approve", {})} />
+            <IconBtn icon={Undo2} label="Send back" disabled={busy} onClick={() => {
+              const comment = prompt("What needs changing?");
+              if (comment && comment.trim().length >= 5) post("send-back", { comment });
+              else if (comment !== null) setErr("Say what needs changing (at least 5 characters).");
+            }} />
+          </>}
+          {pending && (isOwner || canManage) && (
+            <IconBtn icon={Undo2} label="Withdraw" disabled={busy}
+              onClick={() => { if (confirm("Withdraw this submission to make changes? You'll need to submit it again.")) patch("IN_PROGRESS", "Withdrawn. Make your changes and submit again."); }} />
+          )}
+          {!closed && !pending && canAct && !s.approver && (
             <IconBtn
               icon={CheckCircle2} label="Done" primary
               onClick={() => setDialog("done")}
@@ -365,7 +426,7 @@ function StageRow({ stage: s, exam, onFlash }: { stage: Stage; exam: ExamDetail;
               title={blocked ? "Earlier steps must be finished first" : releaseNeedsController ? "Only the Controller can release results" : undefined}
             />
           )}
-          {!closed && canManage && <IconBtn icon={UserCog} label="Reassign" onClick={() => setDialog("reassign")} />}
+          {!closed && !pending && canManage && <IconBtn icon={UserCog} label="Reassign" onClick={() => setDialog("reassign")} />}
           {!closed && isController && s.canBypass && !s.action && <IconBtn icon={SkipForward} label="Bypass" onClick={() => setDialog("bypass")} />}
           {closed && isController && (
             <IconBtn
@@ -394,6 +455,9 @@ function StageRow({ stage: s, exam, onFlash }: { stage: Stage; exam: ExamDetail;
       {dialog === "done" && (
         <MarkDoneDialog stage={s} onClose={() => setDialog(null)} onDone={(msg) => { setDialog(null); onFlash(msg ?? `"${s.name}" marked done.`); }} />
       )}
+      {dialog === "blueprint" && (
+        <BlueprintDialog stage={s} mode={bpMode} onClose={() => setDialog(null)} onDone={(msg) => { setDialog(null); onFlash(msg); }} />
+      )}
       {dialog === "bypass" && <BypassDialog stage={s} onClose={() => setDialog(null)} />}
       {dialog === "reassign" && <ReassignDialog stage={s} current={s.owner} onClose={() => setDialog(null)} />}
     </div>
@@ -403,6 +467,7 @@ function StageRow({ stage: s, exam, onFlash }: { stage: Stage; exam: ExamDetail;
 const EVENT_LABEL: Record<string, string> = {
   STARTED: "started", DONE: "marked done", BYPASSED: "bypassed", REOPENED: "reopened",
   OWNER_CHANGED: "changed owner", RESCHEDULED: "due date moved", UPDATED: "updated",
+  SUBMITTED: "submitted for approval", APPROVED: "approved", SENT_BACK: "sent back", WITHDRAWN: "withdrew the submission",
 };
 
 function IconBtn({ icon: Icon, label, onClick, disabled, primary, title, trailing }: {
