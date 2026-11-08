@@ -2227,6 +2227,7 @@ enum ExamMode {
 enum ExamTeamRole {
   CONTROLLER  // Controller of Examinations
   EXECUTIVE   // Examination Executive
+  VIEWER      // sees the Exam Board and every exam, read-only
 }
 
 enum ExamStageOwnerRole {

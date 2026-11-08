@@ -127,7 +127,7 @@ function Fact({ label, value, sub }: { label: string; value: string; sub?: strin
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
 type TypeOpt = { id: string; name: string; isActive: boolean; academicYear: string; stages: { scope: string; ownerRole: string; approver: string | null }[] };
-type TeamMember = { id: string; role: "CONTROLLER" | "EXECUTIVE"; employee: Person };
+type TeamMember = { id: string; role: "CONTROLLER" | "EXECUTIVE" | "VIEWER"; employee: Person };
 
 function SetupCard({ exam, subjectLabel, onSaved }: { exam: ExamDetail; subjectLabel: (p: number, s: number) => string; onSaved: (msg: string) => void }) {
   const invalidate = useInvalidateExams();

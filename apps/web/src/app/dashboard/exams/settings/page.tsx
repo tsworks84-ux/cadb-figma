@@ -6,11 +6,11 @@ import { Plus, Trash2, ChevronDown, Copy, Save, Users, Layers, Info, ShieldCheck
 import { api } from "@/lib/api";
 import {
   ExamsHeader, AccessDenied, Select, Field, PersonPicker, inputCls, btnPrimary, btnSecondary, btnDanger,
-  apiError, personName, useExamMe, Modal, Chip, OWNER_ROLE_LABEL, CollapsibleCard, type Person, type OwnerRole,
+  apiError, personName, useExamMe, Modal, Chip, OWNER_ROLE_LABEL, TEAM_ROLE_LABEL, CollapsibleCard, type Person, type OwnerRole, type TeamRole,
 } from "@/components/exams/shared";
 import { Notice } from "@/components/exams/StageDialogs";
 
-type TeamMember = { id: string; role: "CONTROLLER" | "EXECUTIVE"; employee: Person };
+type TeamMember = { id: string; role: TeamRole; employee: Person };
 type StageDef = {
   sequenceNo: number; name: string; description: string | null; offsetDays: number;
   ownerRole: OwnerRole; scope: "EXAM" | "SUBJECT"; mode: "PEN_PAPER" | "ONLINE" | null;
@@ -52,7 +52,7 @@ function TeamSection({ canEdit }: { canEdit: boolean }) {
     queryFn: () => api.get("/api/v1/exams/settings/team").then((r) => r.data.data),
   });
   const [person, setPerson] = useState<Person | null>(null);
-  const [role, setRole] = useState<"CONTROLLER" | "EXECUTIVE">("CONTROLLER");
+  const [role, setRole] = useState<TeamRole>("CONTROLLER");
   const [err, setErr] = useState<string | null>(null);
   const refresh = () => { qc.invalidateQueries({ queryKey: ["exam-team"] }); qc.invalidateQueries({ queryKey: ["exam-me"] }); };
 
@@ -71,10 +71,12 @@ function TeamSection({ canEdit }: { canEdit: boolean }) {
 
   return (
     <CollapsibleCard id="settings-team" icon={Users} title="Exam team"
-      summary={team.length === 0 ? "No one yet" : team.map((m) => `${personName(m.employee)} (${m.role === "CONTROLLER" ? "Controller" : "Executive"})`).join(" · ")}>
+      summary={team.length === 0 ? "No one yet" : team.map((m) => `${personName(m.employee)} (${m.role === "CONTROLLER" ? "Controller" : m.role === "EXECUTIVE" ? "Executive" : "Viewer"})`).join(" · ")}>
       <div className="space-y-4">
         <p className="text-xs text-gray-500">
-          Team members see the Exam Board and can set up exams. Faculty who set and review papers don&apos;t need to be here — they&apos;re picked per exam and see their work under My Tasks.
+          Controllers and Executives run exams: they see the Exam Board and set up exams. Viewers see the board and every exam but can&apos;t change anything.
+          Faculty who set and review papers don&apos;t need to be here — they&apos;re picked per exam and see their work under My Tasks.
+          To give a whole role read-only or setup access, use Administration → Roles &amp; Permissions → Examinations.
         </p>
         {team.length === 0 ? (
           <p className="text-sm text-gray-400">No one on the exam team yet.</p>
@@ -84,7 +86,7 @@ function TeamSection({ canEdit }: { canEdit: boolean }) {
               <li key={m.id} className="flex items-center justify-between gap-3 py-2">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-gray-900 truncate">{personName(m.employee)} <span className="text-gray-400 font-normal">· {m.employee.employeeCode}</span></p>
-                  <Chip className={m.role === "CONTROLLER" ? "bg-indigo-50 text-indigo-700" : "bg-sky-50 text-sky-700"}>{OWNER_ROLE_LABEL[m.role]}</Chip>
+                  <Chip className={m.role === "CONTROLLER" ? "bg-indigo-50 text-indigo-700" : m.role === "EXECUTIVE" ? "bg-sky-50 text-sky-700" : "bg-gray-100 text-gray-600"}>{TEAM_ROLE_LABEL[m.role]}</Chip>
                 </div>
                 {canEdit && <button className="text-gray-400 hover:text-red-600 p-1" onClick={() => remove(m)} aria-label="Remove"><Trash2 className="h-4 w-4" /></button>}
               </li>
@@ -96,8 +98,9 @@ function TeamSection({ canEdit }: { canEdit: boolean }) {
             <Field label="Add person"><PersonPicker value={person} onChange={setPerson} /></Field>
             <Field label="Role">
               <Select value={role} onChange={(e) => setRole(e.target.value as any)}>
-                <option value="CONTROLLER">{OWNER_ROLE_LABEL.CONTROLLER}</option>
-                <option value="EXECUTIVE">{OWNER_ROLE_LABEL.EXECUTIVE}</option>
+                <option value="CONTROLLER">{TEAM_ROLE_LABEL.CONTROLLER}</option>
+                <option value="EXECUTIVE">{TEAM_ROLE_LABEL.EXECUTIVE}</option>
+                <option value="VIEWER">{TEAM_ROLE_LABEL.VIEWER}</option>
               </Select>
             </Field>
             <button className={btnPrimary} onClick={add} disabled={!person}><Plus className="h-4 w-4" /> Add</button>

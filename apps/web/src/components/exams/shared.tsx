@@ -15,8 +15,11 @@ export type StageStatus = "NOT_STARTED" | "IN_PROGRESS" | "PENDING_APPROVAL" | "
 export type OwnerRole = "CONTROLLER" | "EXECUTIVE" | "PAPER_SETTER" | "REVIEWER";
 
 export type ExamMe = {
-  teamRole: "CONTROLLER" | "EXECUTIVE" | null;
+  teamRole: "CONTROLLER" | "EXECUTIVE" | "VIEWER" | null;
   canViewBoard: boolean;
+  /** Show My Exam Tasks: open work, a submission awaiting approval, or something finished lately. */
+  showTasks: boolean;
+  canManageAny: boolean;
   canManageSettings: boolean;
   openTasks: number;
   overdueTasks: number;
@@ -28,6 +31,13 @@ export const OWNER_ROLE_LABEL: Record<OwnerRole, string> = {
   EXECUTIVE: "Examination Executive",
   PAPER_SETTER: "Paper setter",
   REVIEWER: "Paper reviewer",
+};
+
+export type TeamRole = "CONTROLLER" | "EXECUTIVE" | "VIEWER";
+export const TEAM_ROLE_LABEL: Record<TeamRole, string> = {
+  CONTROLLER: "Controller of Examinations",
+  EXECUTIVE: "Examination Executive",
+  VIEWER: "Viewer (read-only)",
 };
 
 export const MODE_LABEL: Record<string, string> = { PEN_PAPER: "Pen & paper", ONLINE: "Online (Learnyst)" };
@@ -76,7 +86,7 @@ export function ExamsHeader({ title, subtitle, actions }: { title: string; subti
   const { data: me } = useExamMe();
   const tabs = [
     ...(me?.canViewBoard ? [{ href: "/dashboard/exams", label: "Exam Board", icon: LayoutDashboard }] : []),
-    { href: "/dashboard/exams/tasks", label: "My Tasks", icon: ListChecks, badge: me?.overdueTasks || 0 },
+    ...(me?.showTasks ? [{ href: "/dashboard/exams/tasks", label: "My Tasks", icon: ListChecks, badge: me?.overdueTasks || 0 }] : []),
     ...(me?.canViewBoard ? [{ href: "/dashboard/exams/settings", label: "Settings", icon: Settings2 }] : []),
   ];
   const active = (href: string) => href === "/dashboard/exams" ? pathname === href : pathname.startsWith(href);

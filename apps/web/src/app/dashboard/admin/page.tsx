@@ -48,6 +48,7 @@ const MODULE_ROWS: ModuleRow[] = [
   { key: "POLICIES",  label: "Policies" },
   { key: "TRAINING",  label: "Training" },
   { key: "RESOURCES", label: "Resources", hint: "Create = add own. Edit, Delete and Approve (= Hide) act on other people's shared resources." },
+  { key: "EXAMS",     label: "Examinations", hint: "View = all exams, read-only. Edit = set up exams, reassign stages." },
   { key: "_MIS_HEADER",        label: "MIS Reports",              isHeader: true },
   { key: "MIS_EMP_DIRECTORY",  label: "Employee Directory",       indent: true },
   { key: "MIS_SALARY_STRUCT",  label: "Salary Structures",        indent: true },

@@ -22,6 +22,9 @@ const MODULES = [
   // Resources library. Create = add your own; Edit / Delete / Approve (shown as
   // "Hide") act on OTHER people's shared resources — owners always manage their own.
   "RESOURCES",
+  // Examinations. View = Exam Board and every exam, read-only; Edit = set up exams and
+  // reassign stages. Running stages and editing exam settings are not granted here.
+  "EXAMS",
 ] as const;
 
 const DEFAULT_PERMISSIONS: Record<string, Record<string, Partial<Record<"canView"|"canCreate"|"canEdit"|"canDelete"|"canApprove"|"canAppraise", boolean>>>> = {
@@ -164,6 +167,14 @@ const RESOURCE_DEFAULTS: Record<string, Record<"canView"|"canCreate"|"canEdit"|"
 };
 for (const role of ROLES) {
   DEFAULT_PERMISSIONS[role].RESOURCES = { ...RESOURCE_DEFAULTS[role] };
+}
+
+// Examinations: only Super Admin by default, so nobody's access changes on deploy.
+// The exam team (Exam Settings) and per-exam faculty assignments still work as before;
+// this row adds role-wide viewing / managing on top.
+for (const role of ROLES) {
+  const sa = role === "SUPER_ADMIN";
+  DEFAULT_PERMISSIONS[role].EXAMS = { canView: sa, canCreate: false, canEdit: sa, canDelete: false, canApprove: false, canAppraise: false };
 }
 
 /**

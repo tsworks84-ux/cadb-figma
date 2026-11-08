@@ -3,6 +3,7 @@ import { prisma } from "@cadb/db";
 import { z } from "zod";
 import type { JwtPayload } from "@cadb/types";
 import { authenticate } from "../../middleware/authenticate.js";
+import { hasPermission } from "../../utils/permissions.js";
 import {
   DEFAULT_STAGES, OPEN_STATUSES, QUESTION_TYPES, actorFor, approverFor, blueprintProblems, daysBetween, isOverdue,
   openBlockers, syllabusOf, syncExamStages, todayIST, utcDay, type Blueprint, type SyncResult,
@@ -13,9 +14,13 @@ import { notifyExamStaff, notifyExamStudents } from "../../utils/notify/exam.js"
  * Exam operations: who does what for each exam, by when, and whether it's done.
  *
  * Access
- *   • Settings (exam team, exam types, stage timings): Super Admin only.
- *   • Exam board and per-exam setup: Super Admin and the exam team
- *     (Controller of Examinations, Examination Executive).
+ *   • Settings (exam team, exam types, stage timings): edited by Super Admin only;
+ *     anyone who can see the board can read them.
+ *   • Exam board (read-only): Super Admin, the exam team (Controller, Executive,
+ *     Viewer), and any role granted EXAMS.canView in the permission matrix.
+ *   • Per-exam setup and reassigning: Controller, Executive, and roles granted
+ *     EXAMS.canEdit. Controller-level powers (bypass, reopen, release results)
+ *     are never granted through the matrix.
  *   • My Tasks: everyone — it only ever shows the caller's own stages.
  *   • A stage can be updated by its owner, the exam's Controller/Executive,
  *     any Controller on the team, or a Super Admin. Bypass, reopen and the
@@ -28,26 +33,31 @@ import { notifyExamStaff, notifyExamStudents } from "../../utils/notify/exam.js"
 const dateFmt = new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
 const fmt = (d: Date) => dateFmt.format(d);
 
-type TeamRole = "CONTROLLER" | "EXECUTIVE" | null;
+type TeamRole = "CONTROLLER" | "EXECUTIVE" | "VIEWER" | null;
 
 async function teamRoleOf(employeeId: string): Promise<TeamRole> {
   const m = await prisma.examTeamMember.findUnique({ where: { employeeId }, select: { role: true } });
   return (m?.role as TeamRole) ?? null;
 }
 
-type Access = { user: JwtPayload; isSA: boolean; teamRole: TeamRole };
+type Access = { user: JwtPayload; isSA: boolean; teamRole: TeamRole; permView: boolean; permEdit: boolean };
 
 async function accessOf(user: JwtPayload): Promise<Access> {
-  return { user, isSA: user.role === "SUPER_ADMIN", teamRole: await teamRoleOf(user.sub) };
+  const [teamRole, permView, permEdit] = await Promise.all([
+    teamRoleOf(user.sub),
+    hasPermission(user, "EXAMS", "canView"),
+    hasPermission(user, "EXAMS", "canEdit"),
+  ]);
+  return { user, isSA: user.role === "SUPER_ADMIN", teamRole, permView, permEdit };
 }
 
-const canViewBoard = (a: Access) => a.isSA || a.teamRole !== null;
+const canViewBoard = (a: Access) => a.isSA || a.teamRole !== null || a.permView || a.permEdit;
 /** Controller-level powers on a given exam. */
 const isControllerFor = (a: Access, exam: { controllerId: string | null }) =>
   a.isSA || a.teamRole === "CONTROLLER" || exam.controllerId === a.user.sub;
 /** May change the exam's setup and reassign owners. */
 const canManageExam = (a: Access, exam: { controllerId: string | null; executiveId: string | null }) =>
-  isControllerFor(a, exam) || a.teamRole === "EXECUTIVE" || exam.executiveId === a.user.sub;
+  isControllerFor(a, exam) || a.teamRole === "EXECUTIVE" || exam.executiveId === a.user.sub || a.permEdit;
 
 const forbidden = (reply: FastifyReply, error = "You don't have access to this") =>
   reply.status(403).send({ success: false, error, statusCode: 403 });
@@ -313,10 +323,21 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
         select: { status: true, plannedDate: true },
       }),
     ]);
+    // My Exam Tasks stays in the menu while there's anything of yours to look at:
+    // open work, a submission waiting on someone, or something finished lately.
+    const operational = a.isSA || a.teamRole === "CONTROLLER" || a.teamRole === "EXECUTIVE";
+    const anyMine = operational || open.length + approvals.length > 0 || await prisma.examStage.count({
+      where: {
+        ownerId: a.user.sub, exam: live,
+        OR: [{ status: "PENDING_APPROVAL" }, { completedAt: { gte: new Date(Date.now() - 14 * 86400000) } }],
+      },
+    }) > 0;
     return reply.send({
       success: true,
       data: {
         teamRole: a.teamRole,
+        showTasks: anyMine,
+        canManageAny: a.isSA || a.teamRole === "CONTROLLER" || a.teamRole === "EXECUTIVE" || a.permEdit,
         canViewBoard: canViewBoard(a),
         canManageSettings: a.isSA,
         openTasks: open.length + approvals.length,
@@ -362,7 +383,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post("/settings/team", async (req, reply) => {
     const a = await accessOf(req.user as JwtPayload);
     if (!a.isSA) return forbidden(reply, "Only a Super Admin can change the exam team");
-    const body = z.object({ employeeId: z.string().min(1), role: z.enum(["CONTROLLER", "EXECUTIVE"]) }).safeParse(req.body);
+    const body = z.object({ employeeId: z.string().min(1), role: z.enum(["CONTROLLER", "EXECUTIVE", "VIEWER"]) }).safeParse(req.body);
     if (!body.success) return reply.status(400).send({ success: false, error: body.error.issues[0]?.message });
     const data = await prisma.examTeamMember.upsert({
       where: { employeeId: body.data.employeeId },

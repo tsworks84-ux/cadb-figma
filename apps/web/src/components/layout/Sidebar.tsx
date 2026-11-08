@@ -120,7 +120,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
   // Examinations: the board for the exam team, My Exam Tasks for anyone who
   // owns a stage. Hidden entirely for people with no part in exams.
   const { data: examMe } = useExamMe();
-  const showExamTasks = !!examMe && (examMe.canViewBoard || examMe.openTasks > 0);
+  const showExamTasks = !!examMe?.showTasks;
 
   // Home stays a plain link; everything else folds into groups so the panel
   // reads as a handful of rows. Items a role can't open are dropped first, and
