@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { ClipboardCheck, LayoutDashboard, ListChecks, Settings2, Search, X, Loader2 } from "lucide-react";
+import { ClipboardCheck, LayoutDashboard, ListChecks, Settings2, Search, X, Loader2, ChevronDown } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
 
@@ -292,3 +292,44 @@ export const btnSecondary =
   "inline-flex items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 active:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed";
 export const btnDanger =
   "inline-flex items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold text-red-700 bg-white border border-red-200 hover:bg-red-50 active:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed";
+
+// ─── Collapsible card ─────────────────────────────────────────────────────────
+
+const OPEN_KEY = "cadb_exam_open_sections";
+function readOpen(): Record<string, boolean> {
+  try { return JSON.parse(localStorage.getItem(OPEN_KEY) ?? "{}"); } catch { return {}; }
+}
+
+/**
+ * A section that folds down to its title and a one-line summary. The open/closed
+ * choice is remembered per browser so a page opens the way it was left.
+ */
+export function CollapsibleCard({ id, icon: Icon, title, summary, defaultOpen = false, children }: {
+  id: string; icon: React.ElementType; title: string; summary?: React.ReactNode; defaultOpen?: boolean; children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  useEffect(() => {
+    const saved = readOpen()[id];
+    if (saved !== undefined) setOpen(saved);
+  }, [id]);
+  const toggle = () => {
+    setOpen((o) => {
+      try { localStorage.setItem(OPEN_KEY, JSON.stringify({ ...readOpen(), [id]: !o })); } catch { /* storage blocked */ }
+      return !o;
+    });
+  };
+  return (
+    <section className="rounded-2xl border border-gray-100 bg-white">
+      <button type="button" onClick={toggle} aria-expanded={open}
+        className="w-full flex items-center gap-3 px-4 py-3.5 sm:px-6 text-left hover:bg-gray-50 active:bg-gray-100 rounded-2xl">
+        <Icon className="h-4 w-4 text-gray-400 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <h2 className="text-base font-semibold text-gray-900">{title}</h2>
+          {summary && !open && <p className="text-xs text-gray-500 truncate">{summary}</p>}
+        </div>
+        <ChevronDown className={`h-4 w-4 text-gray-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && <div className="px-4 pb-4 sm:px-6 sm:pb-5 pt-1 space-y-4 border-t border-gray-50">{children}</div>}
+    </section>
+  );
+}

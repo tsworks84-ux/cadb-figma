@@ -150,6 +150,7 @@ function SetupCard({ exam, subjectLabel, onSaved }: { exam: ExamDetail; subjectL
     })));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [slotOpen, setSlotOpen] = useState<Record<string, boolean>>({});
 
   // Prefill from the standing team when there's exactly one of each.
   useEffect(() => {
@@ -225,15 +226,35 @@ function SetupCard({ exam, subjectLabel, onSaved }: { exam: ExamDetail; subjectL
             The reviewer must be a different person from the setter.
             {needsHead ? " Leave the blueprint approver blank to use the subject head from Exam Settings." : ""}
           </p>
-          <div className="space-y-3">
+          <div className="space-y-2">
             {slots.map((s) => {
               const key = `${s.paperNum}_${s.subjectSlot}`;
               const t = teams[key] ?? { setter: null, reviewer: null, approver: null };
               const head = exam.subjects.find((x) => x.paperNum === s.paperNum && x.subjectSlot === s.subjectSlot)?.subject?.head ?? null;
               const same = t.setter && t.reviewer && t.setter.id === t.reviewer.id;
               return (
-                <div key={key} className="rounded-xl border border-gray-100 p-3">
-                  <p className="text-sm font-medium text-gray-800 mb-2">{subjectLabel(s.paperNum, s.subjectSlot)}</p>
+                <div key={key} className="rounded-xl border border-gray-100">
+                  {(() => {
+                    const missing = !t.setter || !t.reviewer;
+                    const expanded = slotOpen[key] ?? (missing || !!same);
+                    const approverText = t.approver ? personName(t.approver) : head ? `${personName(head)} (head)` : "Controller";
+                    return (
+                      <button type="button" aria-expanded={expanded} onClick={() => setSlotOpen((o) => ({ ...o, [key]: !expanded }))}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-gray-50 active:bg-gray-100 rounded-xl">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-800">{subjectLabel(s.paperNum, s.subjectSlot)}</p>
+                          {!expanded && (
+                            <p className={`text-xs truncate ${missing ? "text-amber-700" : "text-gray-500"}`}>
+                              Setter: {t.setter ? personName(t.setter) : "—"} · Reviewer: {t.reviewer ? personName(t.reviewer) : "—"}
+                              {needsHead ? ` · Approver: ${approverText}` : ""}
+                            </p>
+                          )}
+                        </div>
+                        <ChevronDown className={`h-4 w-4 text-gray-400 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} />
+                      </button>
+                    );
+                  })()}
+                  {(slotOpen[key] ?? (!t.setter || !t.reviewer || !!same)) && <div className="px-3 pb-3">
                   <div className={`grid grid-cols-1 sm:grid-cols-2 ${needsHead ? "lg:grid-cols-3" : ""} gap-3`}>
                     <Field label="Setter"><PersonPicker value={t.setter} onChange={(p) => setTeams((x) => ({ ...x, [key]: { ...t, setter: p } }))} /></Field>
                     <Field label="Reviewer"><PersonPicker value={t.reviewer} onChange={(p) => setTeams((x) => ({ ...x, [key]: { ...t, reviewer: p } }))} /></Field>
@@ -244,6 +265,7 @@ function SetupCard({ exam, subjectLabel, onSaved }: { exam: ExamDetail; subjectL
                     )}
                   </div>
                   {same && <p className="text-xs text-red-600 mt-1">Setter and reviewer can&apos;t be the same person.</p>}
+                  </div>}
                 </div>
               );
             })}
@@ -270,28 +292,62 @@ function StageTimeline({ exam, onFlash }: { exam: ExamDetail; onFlash: (m: strin
     for (const s of exam.stages) m.set(s.sequenceNo, [...(m.get(s.sequenceNo) ?? []), s]);
     return [...m.entries()].sort((a, b) => a[0] - b[0]);
   }, [exam.stages]);
+  // Only the step being worked on opens by default (plus any waiting for an approval);
+  // finished and later steps fold to one line. A click overrides either way.
+  const [toggled, setToggled] = useState<Record<number, boolean>>({});
+  const isClosed = (list: Stage[]) => list.every((s) => s.status === "DONE" || s.status === "BYPASSED");
+  const currentSeq = groups.find(([, list]) => !isClosed(list))?.[0];
+  const isOpen = (seq: number, list: Stage[]) =>
+    toggled[seq] ?? (seq === currentSeq || list.some((s) => s.status === "PENDING_APPROVAL"));
+  const allOpen = groups.every(([seq, list]) => isOpen(seq, list));
+  const closedCount = groups.filter(([, list]) => isClosed(list)).length;
 
   return (
     <div className="rounded-2xl border border-gray-100 bg-white">
-      <div className="px-4 py-3 sm:px-6 border-b border-gray-100">
-        <h2 className="text-base font-semibold text-gray-900">Stages</h2>
-        <p className="text-xs text-gray-500">Each step unlocks once the steps before it are done. Every change is recorded in the stage history.</p>
+      <div className="px-4 py-3 sm:px-6 border-b border-gray-100 flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <h2 className="text-base font-semibold text-gray-900">Stages</h2>
+          <p className="text-xs text-gray-500">{closedCount} of {groups.length} steps finished. Each step unlocks once the steps before it are done.</p>
+        </div>
+        <button className="text-xs font-semibold text-[#2C3E7C] hover:underline whitespace-nowrap mt-1"
+          onClick={() => setToggled(Object.fromEntries(groups.map(([seq]) => [seq, !allOpen])))}>
+          {allOpen ? "Collapse all" : "Expand all"}
+        </button>
       </div>
       <ol className="divide-y divide-gray-50">
         {groups.map(([seq, stages]) => {
           const first = stages[0];
           const allClosed = stages.every((s) => s.status === "DONE" || s.status === "BYPASSED");
           const anyLate = stages.some((s) => s.overdue);
+          const expanded = isOpen(seq, stages);
+          const counts = stages.length > 1 ? `${stages.filter((s) => s.status === "DONE" || s.status === "BYPASSED").length}/${stages.length} subjects done` : null;
+          const lastClosed = allClosed ? stages.map((s) => s.completedAt).filter(Boolean).sort().pop() : null;
+          const pendingCount = stages.filter((s) => s.status === "PENDING_APPROVAL").length;
           return (
-            <li key={seq} className="px-4 py-4 sm:px-6">
-              <div className="flex items-start gap-3">
+            <li key={seq} className="px-4 py-3 sm:px-6">
+              <button type="button" aria-expanded={expanded}
+                onClick={() => setToggled((t) => ({ ...t, [seq]: !expanded }))}
+                className="w-full flex items-center gap-3 text-left -mx-2 px-2 py-1 rounded-lg hover:bg-gray-50 active:bg-gray-100">
                 <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
                   allClosed ? "bg-emerald-100 text-emerald-700" : anyLate ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-600"}`}>
                   {allClosed ? <CheckCircle2 className="h-4 w-4" /> : seq}
                 </span>
                 <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-semibold ${allClosed ? "text-gray-600" : "text-gray-900"}`}>{first.name}</p>
+                  {!expanded && (
+                    <p className="text-xs text-gray-500 truncate">
+                      {allClosed
+                        ? `Done${lastClosed ? ` ${fmtDay(lastClosed)}` : ""}`
+                        : [counts, pendingCount ? `${pendingCount} awaiting approval` : null, anyLate ? "overdue" : `due ${fmtDay(first.plannedDate)}`].filter(Boolean).join(" · ").replace(/^./, (c) => c.toUpperCase())}
+                    </p>
+                  )}
+                </div>
+                <ChevronDown className={`h-4 w-4 text-gray-400 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} />
+              </button>
+              {expanded && <div className="flex items-start gap-3 mt-2">
+                <span className="w-7 shrink-0" aria-hidden />
+                <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-semibold text-gray-900">{first.name}</p>
                     <span className="text-xs text-gray-400">{OWNER_ROLE_LABEL[first.ownerRole]}</span>
                     {first.action === "NOTIFY_STUDENTS" && <Chip className="bg-blue-50 text-blue-700">Emails students</Chip>}
                     {first.action === "RELEASE_RESULTS" && <Chip className="bg-emerald-50 text-emerald-700">Releases results</Chip>}
@@ -303,7 +359,7 @@ function StageTimeline({ exam, onFlash }: { exam: ExamDetail; onFlash: (m: strin
                     {stages.map((s) => <StageRow key={s.id} stage={s} exam={exam} onFlash={onFlash} />)}
                   </div>
                 </div>
-              </div>
+              </div>}
             </li>
           );
         })}
