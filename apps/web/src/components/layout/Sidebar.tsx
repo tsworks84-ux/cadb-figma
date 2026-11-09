@@ -117,10 +117,12 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
   // Academics is only offered to roles that actually hold an academics grant
   const canViewAcademicsNav = canViewAcademics(role, permissions);
 
-  // Examinations: the board for the exam team, My Exam Tasks for anyone who
-  // owns a stage. Hidden entirely for people with no part in exams.
+  // Examinations: exam stages show up inside My To-Do for everyone who owns
+  // one (the overdue count rides on the My To-Do badge). The exam team also
+  // keeps a "My Exam Tasks" link next to the board.
   const { data: examMe } = useExamMe();
-  const showExamTasks = !!examMe?.showTasks;
+  const showExamTasks = !!examMe?.showTasks && !!examMe?.canViewBoard;
+  const examOverdue = examMe?.showTasks ? examMe.overdueTasks ?? 0 : 0;
 
   // Home stays a plain link; everything else folds into groups so the panel
   // reads as a handful of rows. Items a role can't open are dropped first, and
@@ -131,7 +133,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
     { key: "workspace", label: "Workspace", icon: Briefcase, items: [
       { name: "Notice Board", href: "/dashboard/announcements", icon: Megaphone },
       { name: "My Team",      href: "/dashboard/my-team",       icon: UsersRound },
-      { name: "My To-Do",     href: "/dashboard/todos",         icon: ListTodo },
+      { name: "My To-Do",     href: "/dashboard/todos",         icon: ListTodo, badge: examOverdue },
     ] },
     { key: "leave-claims", label: "Leave & Claims", icon: Wallet, items: [
       { name: "Leaves & Holidays", href: "/dashboard/leaves", icon: CalendarOff },

@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { ExamTasksInTodo } from "@/components/exams/ExamTaskList";
 import { toast } from "sonner";
 import { useSearchParams } from "next/navigation";
 import {
@@ -1261,6 +1262,9 @@ export default function TodosPage() {
       {/* ── My Tasks Tab ── */}
       {activeTab === "tasks" && (
         <div className="space-y-6">
+          {/* Exam stages assigned by the exam team — own workflow, shown here so there's one list */}
+          <ExamTasksInTodo />
+
           {/* Stats Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {STAT_CARDS.map(({ label, value, bg, icon }) => (
