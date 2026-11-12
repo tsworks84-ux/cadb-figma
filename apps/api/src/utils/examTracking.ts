@@ -12,6 +12,9 @@ import { prisma } from "@cadb/db";
  *   • Gate: a stage can't be completed while an earlier stage it depends on is
  *     still open. Subject stages only wait for earlier stages of the same slot
  *     and for earlier exam-wide stages.
+ *   • Mode HYBRID (pen & paper + online) gets the stages of both modes.
+ *   • A BATCH_TEACHERS stage (the syllabus sign-off) needs one approval from each
+ *     teacher of that subject in the exam's batches — see "Batch-teacher sign-off".
  */
 
 /** A transaction client or the root client — both expose the model delegates. */
@@ -29,7 +32,7 @@ export type StageDef = {
   action?: "NOTIFY_STUDENTS" | "RELEASE_RESULTS" | null;
   canBypass?: boolean;
   /** Who signs the stage off. Unset = the owner marks it done. */
-  approver?: "SUBJECT_HEAD" | "CONTROLLER" | null;
+  approver?: "SUBJECT_HEAD" | "CONTROLLER" | "BATCH_TEACHERS" | null;
   /** Structured input collected instead of a bare "done". */
   form?: "BLUEPRINT" | null;
 };
@@ -40,21 +43,22 @@ export type StageDef = {
  */
 export const DEFAULT_STAGES: StageDef[] = [
   { sequenceNo: 1,  name: "Exam scheduled on calendar",          offsetDays: -28, ownerRole: "CONTROLLER",   scope: "EXAM",    description: "Date, timing and batches confirmed; no clash with other exams or holidays." },
-  { sequenceNo: 2,  name: "Blueprint finalised",                 offsetDays: -21, ownerRole: "PAPER_SETTER", scope: "SUBJECT", form: "BLUEPRINT", approver: "SUBJECT_HEAD", description: "Marks, question count and question type for each syllabus chapter, plus the difficulty mix. Approved by the subject head." },
-  { sequenceNo: 3,  name: "Exam notice to students & parents",   offsetDays: -14, ownerRole: "EXECUTIVE",    scope: "EXAM",    action: "NOTIFY_STUDENTS", description: "Marking this done emails the date, timing and syllabus to students and parents." },
-  { sequenceNo: 4,  name: "Paper set (paper, key, solutions)",   offsetDays: -12, ownerRole: "PAPER_SETTER", scope: "SUBJECT", description: "Question paper, answer key and solutions uploaded. Link the Drive file or Learnyst test as evidence." },
-  { sequenceNo: 5,  name: "Paper reviewed",                      offsetDays: -9,  ownerRole: "REVIEWER",     scope: "SUBJECT", description: "Matches syllabus and blueprint, key verified, marks add up, no errors. Note the corrections needed in remarks." },
-  { sequenceNo: 6,  name: "Corrections made",                    offsetDays: -7,  ownerRole: "PAPER_SETTER", scope: "SUBJECT", description: "Every review comment addressed in a new version." },
-  { sequenceNo: 7,  name: "Final approval & freeze",             offsetDays: -5,  ownerRole: "CONTROLLER",   scope: "SUBJECT", description: "Paper locked. No changes after this without the Controller." },
-  { sequenceNo: 8,  name: "Printing & packing",                  offsetDays: -3,  ownerRole: "EXECUTIVE",    scope: "EXAM",    mode: "PEN_PAPER", description: "Copies = batch strength + buffer; packed and sealed per centre." },
-  { sequenceNo: 9,  name: "Uploaded to Learnyst & test-run",     offsetDays: -3,  ownerRole: "EXECUTIVE",    scope: "EXAM",    mode: "ONLINE", description: "Test configured on Learnyst, timings set, test-run by a second person." },
-  { sequenceNo: 10, name: "Papers delivered to centres",         offsetDays: -1,  ownerRole: "EXECUTIVE",    scope: "EXAM",    mode: "PEN_PAPER", description: "Receipt confirmed by each centre." },
-  { sequenceNo: 11, name: "Exam conducted",                      offsetDays: 0,   ownerRole: "EXECUTIVE",    scope: "EXAM",    description: "Attendance taken, incidents noted in remarks, answer sheets / OMRs counted." },
-  { sequenceNo: 12, name: "Evaluation & marks entered",          offsetDays: 2,   ownerRole: "EXECUTIVE",    scope: "EXAM",    description: "OMR / manual evaluation done and marks imported." },
-  { sequenceNo: 13, name: "Results verified",                    offsetDays: 3,   ownerRole: "CONTROLLER",   scope: "EXAM",    description: "Totals, missing students, absent vs zero and outliers checked." },
-  { sequenceNo: 14, name: "Results released to students",        offsetDays: 4,   ownerRole: "CONTROLLER",   scope: "EXAM",    action: "RELEASE_RESULTS", description: "Marking this done shows results on the student portal and emails scores to students and parents." },
-  { sequenceNo: 15, name: "Re-evaluation window closed",         offsetDays: 7,   ownerRole: "CONTROLLER",   scope: "EXAM",    canBypass: true, description: "All re-evaluation requests resolved. Can be bypassed with a reason." },
-  { sequenceNo: 16, name: "Post-exam review & closure",          offsetDays: 10,  ownerRole: "CONTROLLER",   scope: "EXAM",    description: "Errors and incidents reviewed, action items noted, exam closed." },
+  { sequenceNo: 2,  name: "Syllabus approved by batch teachers", offsetDays: -25, ownerRole: "EXECUTIVE",    scope: "SUBJECT", approver: "BATCH_TEACHERS", description: "The chapters on the exam for this subject go to the subject's teacher in every batch writing the exam. Every teacher approves before the blueprint can be submitted." },
+  { sequenceNo: 3,  name: "Blueprint finalised",                 offsetDays: -21, ownerRole: "PAPER_SETTER", scope: "SUBJECT", form: "BLUEPRINT", approver: "SUBJECT_HEAD", description: "Marks, question count and question type for each syllabus chapter, plus the difficulty mix. Approved by the subject head." },
+  { sequenceNo: 4,  name: "Exam notice to students & parents",   offsetDays: -14, ownerRole: "EXECUTIVE",    scope: "EXAM",    action: "NOTIFY_STUDENTS", description: "Marking this done emails the date, timing and syllabus to students and parents." },
+  { sequenceNo: 5,  name: "Paper set (paper, key, solutions)",   offsetDays: -12, ownerRole: "PAPER_SETTER", scope: "SUBJECT", description: "Question paper, answer key and solutions uploaded. Link the Drive file or Learnyst test as evidence." },
+  { sequenceNo: 6,  name: "Paper reviewed",                      offsetDays: -9,  ownerRole: "REVIEWER",     scope: "SUBJECT", description: "Matches syllabus and blueprint, key verified, marks add up, no errors. Note the corrections needed in remarks." },
+  { sequenceNo: 7,  name: "Corrections made",                    offsetDays: -7,  ownerRole: "PAPER_SETTER", scope: "SUBJECT", description: "Every review comment addressed in a new version." },
+  { sequenceNo: 8,  name: "Final approval & freeze",             offsetDays: -5,  ownerRole: "CONTROLLER",   scope: "SUBJECT", description: "Paper locked. No changes after this without the Controller." },
+  { sequenceNo: 9,  name: "Printing & packing",                  offsetDays: -3,  ownerRole: "EXECUTIVE",    scope: "EXAM",    mode: "PEN_PAPER", description: "Copies = batch strength + buffer; packed and sealed per centre." },
+  { sequenceNo: 10, name: "Uploaded to Learnyst & test-run",     offsetDays: -3,  ownerRole: "EXECUTIVE",    scope: "EXAM",    mode: "ONLINE", description: "Test configured on Learnyst, timings set, test-run by a second person." },
+  { sequenceNo: 11, name: "Papers delivered to centres",         offsetDays: -1,  ownerRole: "EXECUTIVE",    scope: "EXAM",    mode: "PEN_PAPER", description: "Receipt confirmed by each centre." },
+  { sequenceNo: 12, name: "Exam conducted",                      offsetDays: 0,   ownerRole: "EXECUTIVE",    scope: "EXAM",    description: "Attendance taken, incidents noted in remarks, answer sheets / OMRs counted." },
+  { sequenceNo: 13, name: "Evaluation & marks entered",          offsetDays: 2,   ownerRole: "EXECUTIVE",    scope: "EXAM",    description: "OMR / manual evaluation done and marks imported." },
+  { sequenceNo: 14, name: "Results verified",                    offsetDays: 3,   ownerRole: "CONTROLLER",   scope: "EXAM",    description: "Totals, missing students, absent vs zero and outliers checked." },
+  { sequenceNo: 15, name: "Results released to students",        offsetDays: 4,   ownerRole: "CONTROLLER",   scope: "EXAM",    action: "RELEASE_RESULTS", description: "Marking this done shows results on the student portal and emails scores to students and parents." },
+  { sequenceNo: 16, name: "Re-evaluation window closed",         offsetDays: 7,   ownerRole: "CONTROLLER",   scope: "EXAM",    canBypass: true, description: "All re-evaluation requests resolved. Can be bypassed with a reason." },
+  { sequenceNo: 17, name: "Post-exam review & closure",          offsetDays: 10,  ownerRole: "CONTROLLER",   scope: "EXAM",    description: "Errors and incidents reviewed, action items noted, exam closed." },
 ];
 
 /** Not closed yet. A stage awaiting approval is still open: it can be late. */
@@ -141,6 +145,10 @@ export type SyncResult = {
   reopened: { stageId: string; reason: string }[];
   /** Submitted stages whose approver changed (the new approver should hear about it). */
   newApprovals: string[];
+  /** Batch-teacher stages with people newly asked to sign. */
+  newSigners: { stageId: string; employeeIds: string[] }[];
+  /** Batch-teacher stages that closed because the last outstanding signer dropped out. */
+  completed: string[];
 };
 
 type Actor = { id: string | null; name: string };
@@ -155,15 +163,16 @@ type Actor = { id: string | null; name: string };
  *   • Owners follow the exam team, unless someone reassigned the stage by hand.
  */
 export async function syncExamStages(tx: Tx, examId: string, actor?: Actor): Promise<SyncResult> {
-  const result: SyncResult = { newAssignments: new Map(), rescheduled: 0, reopened: [], newApprovals: [] };
+  const result: SyncResult = { newAssignments: new Map(), rescheduled: 0, reopened: [], newApprovals: [], newSigners: [], completed: [] };
 
   const exam = await tx.exam.findUnique({
     where: { id: examId },
     select: {
       id: true, examDate: true, examTypeId: true, mode: true, numPapers: true,
       controllerId: true, executiveId: true,
+      batches: signContextSelect.batches,
       subjects: {
-        select: { paperNum: true, subjectSlot: true, topics: true, maxMarks: true, subject: { select: { name: true, headId: true } } },
+        select: signContextSelect.subjects.select,
         orderBy: [{ paperNum: "asc" }, { subjectSlot: "asc" }],
       },
       subjectTeams: { select: { paperNum: true, subjectSlot: true, setterId: true, reviewerId: true, approverId: true } },
@@ -173,7 +182,7 @@ export async function syncExamStages(tx: Tx, examId: string, actor?: Actor): Pro
   });
   if (!exam || !exam.examTypeId || !exam.examType) return result;
 
-  const templates = exam.examType.stages.filter((t) => !t.mode || !exam.mode || t.mode === exam.mode);
+  const templates = exam.examType.stages.filter((t) => modeIncludes(exam.mode, t.mode));
 
   const window = { from: new Date(exam.examDate.getTime() - 120 * DAY), to: new Date(exam.examDate.getTime() + 120 * DAY) };
   const holidays = await holidayDays(tx, window.from, window.to);
@@ -269,7 +278,7 @@ export async function syncExamStages(tx: Tx, examId: string, actor?: Actor): Pro
     }
 
     // A submitted stage follows changes to who should approve it.
-    if (cur.status === "PENDING_APPROVAL" && cur.approver) {
+    if (cur.status === "PENDING_APPROVAL" && cur.approver && cur.approver !== "BATCH_TEACHERS") {
       const approverId = approverFor(cur.approver, {
         exam, team: teamBySlot.get(`${cur.paperNum}_${cur.subjectSlot}`) ?? null,
         subject: exam.subjects.find((x) => x.paperNum === cur.paperNum && x.subjectSlot === cur.subjectSlot) ?? null,
@@ -290,6 +299,27 @@ export async function syncExamStages(tx: Tx, examId: string, actor?: Actor): Pro
         Object.assign(data, { status: "IN_PROGRESS", completedAt: null, completedById: null, submittedAt: null, approverId: null });
         result.reopened.push({ stageId: cur.id, reason: why });
       }
+    }
+
+    // A syllabus sign-off whose chapters changed after it was sent goes back to
+    // its owner; on resubmission everyone signs the new chapters.
+    let refreshSigners = false;
+    if (cur.approver === "BATCH_TEACHERS" && (cur.status === "PENDING_APPROVAL" || cur.status === "DONE")) {
+      const subj = exam.subjects.find((x) => x.paperNum === cur.paperNum && x.subjectSlot === cur.subjectSlot);
+      const sentKey = (cur.formData as any)?.topicsKey ?? null;
+      if (sentKey !== null && sentKey !== topicsKey(subj?.topics)) {
+        Object.assign(data, { status: "IN_PROGRESS", completedAt: null, completedById: null, submittedAt: null });
+        result.reopened.push({ stageId: cur.id, reason: "The exam's chapters for this subject changed; send them to the teachers again" });
+      } else if (cur.status === "PENDING_APPROVAL") {
+        // Batches or teachers may have changed: re-work who has to sign.
+        refreshSigners = true;
+      }
+    }
+
+    if (refreshSigners) {
+      const r = await refreshSignoffs(tx, { ...cur, ownerId: data.ownerId !== undefined ? data.ownerId : cur.ownerId }, exam, actor ?? null);
+      if (r.newlyPending.length) result.newSigners.push({ stageId: cur.id, employeeIds: r.newlyPending });
+      if (r.completed) result.completed.push(cur.id);
     }
 
     if (Object.keys(data).length === 0) continue;
@@ -350,6 +380,161 @@ export function approverFor(
   if (kind === "CONTROLLER") pick = controller;
   if (pick && pick === ctx.ownerId) pick = controller !== ctx.ownerId ? controller : null;
   return pick ?? null;
+}
+
+// ─── Mode ────────────────────────────────────────────────────────────────────
+
+/** Does an exam in `examMode` get a template row tagged `templateMode`? HYBRID gets both. */
+export function modeIncludes(examMode: string | null | undefined, templateMode: string | null | undefined): boolean {
+  if (!templateMode || !examMode || examMode === "HYBRID") return true;
+  return templateMode === examMode;
+}
+
+// ─── Batch-teacher sign-off ──────────────────────────────────────────────────
+//
+// A BATCH_TEACHERS stage is approved by one person per batch on the exam: the
+// subject's teacher in that batch (BatchSubject.employeeId). A teacher of
+// several of the exam's batches signs once. A batch with no teacher for the
+// subject — or whose teacher owns the stage — falls to the subject head, else
+// the exam's Controller. The stage closes when every sign-off is approved or
+// bypassed.
+//
+// Send-back returns the stage to its owner; the others' approvals stand. On
+// resubmission an approval carries over only if the chapters are the ones that
+// person approved, so changing the chapters means everyone signs again.
+
+/** Order-insensitive fingerprint of a subject's chapters. */
+export function topicsKey(topics: string | null | undefined): string {
+  return syllabusOf(topics).map(norm).sort().join("|");
+}
+
+export type Signer = { employeeId: string; batchNames: string[]; fallback: boolean };
+
+type SignContextExam = {
+  controllerId: string | null;
+  batches: { batch: { id: string; name: string } }[];
+  subjects: { paperNum: number; subjectSlot: number; subjectId: string | null; topics: string | null; subject: { name: string; headId: string | null } | null }[];
+};
+
+/** Exam fields the sign-off rules need. */
+export const signContextSelect = {
+  controllerId: true,
+  batches: { select: { batch: { select: { id: true, name: true } } } },
+  subjects: { select: { paperNum: true, subjectSlot: true, subjectId: true, topics: true, maxMarks: true, subject: { select: { name: true, headId: true } } } },
+} as const;
+
+/**
+ * Who must sign a slot's syllabus, or why nobody can yet. Ordered as the
+ * exam's batches are, so the list reads the same every time.
+ */
+export async function requiredSigners(
+  tx: Tx, exam: SignContextExam, paperNum: number, subjectSlot: number, ownerId: string | null,
+): Promise<{ signers: Signer[]; problem: string | null }> {
+  const slot = exam.subjects.find((x) => x.paperNum === paperNum && x.subjectSlot === subjectSlot);
+  const batches = exam.batches.map((b) => b.batch);
+  if (batches.length === 0) return { signers: [], problem: "Add batches to the exam first: the teachers of those batches approve the syllabus" };
+
+  const teacherOf = new Map<string, string>();
+  if (slot?.subjectId) {
+    const rows = await tx.batchSubject.findMany({
+      where: { subjectId: slot.subjectId, batchId: { in: batches.map((b) => b.id) }, employeeId: { not: null }, employee: { deletedAt: null } },
+      select: { batchId: true, employeeId: true },
+    });
+    for (const r of rows) teacherOf.set(r.batchId, r.employeeId!);
+  }
+
+  const controller = exam.controllerId;
+  const head = slot?.subject?.headId ?? null;
+  const fallbackPick = (head && head !== ownerId ? head : null) ?? (controller && controller !== ownerId ? controller : null);
+
+  const out = new Map<string, Signer>();
+  const nobody: string[] = [];
+  for (const b of batches) {
+    const teacher = teacherOf.get(b.id);
+    const pick = teacher && teacher !== ownerId ? teacher : fallbackPick;
+    if (!pick) { nobody.push(b.name); continue; }
+    const fallback = pick !== teacher;
+    const cur = out.get(pick) ?? { employeeId: pick, batchNames: [], fallback: false };
+    cur.batchNames.push(b.name);
+    // Someone who teaches one batch and stands in for another is still "a teacher".
+    cur.fallback = out.has(pick) ? cur.fallback && fallback : fallback;
+    out.set(pick, cur);
+  }
+  if (nobody.length) {
+    return {
+      signers: [...out.values()],
+      problem: `No one can sign for ${nobody.join(", ")}: assign a ${slot?.subject?.name ?? "subject"} teacher to the batch, set a subject head, or a Controller on the exam`,
+    };
+  }
+  return { signers: [...out.values()], problem: null };
+}
+
+export type SignoffRefresh = { newlyPending: string[]; completed: boolean };
+
+/**
+ * Bring a submitted stage's sign-off rows in line with who must sign now:
+ * add newcomers as pending, drop people no longer required, and keep an
+ * approval only if it was given for the current chapters. Closes the stage if
+ * that leaves nothing outstanding. A stage with nobody available keeps its
+ * rows as they are (submit refuses in that case; here it's left for a person).
+ */
+export async function refreshSignoffs(
+  tx: Tx, stage: { id: string; paperNum: number; subjectSlot: number; ownerId: string | null; status: string },
+  exam: SignContextExam, actor: Actor | null, opts: { resetAll?: boolean } = {},
+): Promise<SignoffRefresh & { problem: string | null }> {
+  const { signers, problem } = await requiredSigners(tx, exam, stage.paperNum, stage.subjectSlot, stage.ownerId);
+  if (problem && signers.length === 0) return { newlyPending: [], completed: false, problem };
+  const slot = exam.subjects.find((x) => x.paperNum === stage.paperNum && x.subjectSlot === stage.subjectSlot);
+  const key = topicsKey(slot?.topics);
+
+  const existing = await tx.examStageSignoff.findMany({ where: { stageId: stage.id } });
+  const byId = new Map(existing.map((r) => [r.employeeId, r]));
+  const want = new Set(signers.map((s) => s.employeeId));
+  const newlyPending: string[] = [];
+
+  for (const r of existing) {
+    if (!want.has(r.employeeId)) await tx.examStageSignoff.delete({ where: { id: r.id } });
+  }
+  for (const s of signers) {
+    const r = byId.get(s.employeeId);
+    const carries = !opts.resetAll && r && (r.status === "APPROVED" || r.status === "BYPASSED") && r.approvedTopics === key;
+    if (!r) {
+      await tx.examStageSignoff.create({ data: { stageId: stage.id, employeeId: s.employeeId, batchNames: s.batchNames, fallback: s.fallback } });
+      newlyPending.push(s.employeeId);
+    } else if (carries) {
+      await tx.examStageSignoff.update({ where: { id: r.id }, data: { batchNames: s.batchNames, fallback: s.fallback } });
+    } else {
+      if (r.status !== "PENDING") newlyPending.push(s.employeeId);
+      await tx.examStageSignoff.update({
+        where: { id: r.id },
+        data: {
+          batchNames: s.batchNames, fallback: s.fallback,
+          ...(r.status !== "PENDING" ? { status: "PENDING", approvedTopics: null, decidedAt: null, decidedById: null, comment: null } : {}),
+        },
+      });
+    }
+  }
+
+  const completed = stage.status === "PENDING_APPROVAL" && !problem ? await completeIfAllSigned(tx, stage.id, actor) : false;
+  return { newlyPending: completed ? [] : newlyPending, completed, problem };
+}
+
+/** Close a submitted stage once every sign-off is approved or bypassed. */
+export async function completeIfAllSigned(tx: Tx, stageId: string, actor: Actor | null): Promise<boolean> {
+  const rows = await tx.examStageSignoff.findMany({ where: { stageId }, select: { status: true } });
+  if (rows.length === 0 || rows.some((r) => r.status !== "APPROVED" && r.status !== "BYPASSED")) return false;
+  const res = await tx.examStage.updateMany({
+    where: { id: stageId, status: "PENDING_APPROVAL" },
+    data: { status: "DONE", completedAt: new Date(), completedById: actor?.id ?? null },
+  });
+  if (res.count === 0) return false;
+  await tx.examStageEvent.create({
+    data: {
+      stageId, actorId: actor?.id ?? null, actorName: actor?.name ?? "System",
+      action: "APPROVED", fromStatus: "PENDING_APPROVAL", toStatus: "DONE", note: `All ${rows.length} sign-off(s) in`,
+    },
+  });
+  return true;
 }
 
 // ─── Blueprint ───────────────────────────────────────────────────────────────

@@ -17,6 +17,7 @@ import {
 import { MarkDoneDialog, BypassDialog, ReassignDialog, Notice, useInvalidateExams } from "@/components/exams/StageDialogs";
 import { BlueprintDialog, blueprintModeFor, type BlueprintStage } from "@/components/exams/Blueprint";
 import { StepProgress, stepPercent, type Step } from "@/components/exams/StepProgress";
+import { SignoffList, SignoffWaitingLine, SyllabusReviewDialog, type Signoff, type SyllabusInfo } from "@/components/exams/SyllabusSignoff";
 
 type Stage = BlueprintStage & {
   id: string; sequenceNo: number; name: string; description: string | null;
@@ -27,7 +28,8 @@ type Stage = BlueprintStage & {
   owner: Person | null; overdue: boolean; daysLate: number;
   blockedBy: { id: string; name: string; subjectLabel: string | null }[];
   events: { id: string; actorName: string; action: string; note: string | null; createdAt: string }[];
-  approver: "SUBJECT_HEAD" | "CONTROLLER" | null; form: "BLUEPRINT" | null;
+  approver: "SUBJECT_HEAD" | "CONTROLLER" | "BATCH_TEACHERS" | null; form: "BLUEPRINT" | null;
+  syllabus: SyllabusInfo | null; signoffs: Signoff[] | null;
 };
 
 type ExamDetail = {
@@ -211,10 +213,11 @@ function SetupCard({ exam, subjectLabel, onSaved }: { exam: ExamDetail; subjectL
             {activeTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </Select>
         </Field>
-        <Field label="Mode" hint={mode === "ONLINE" ? "Paper is built and hosted on Learnyst." : "Paper is stored on the Drive, printed and dispatched."}>
+        <Field label="Mode" hint={MODE_HINT[mode] ?? MODE_HINT.PEN_PAPER}>
           <Select value={mode} onChange={(e) => setMode(e.target.value)}>
             <option value="PEN_PAPER">{MODE_LABEL.PEN_PAPER}</option>
             <option value="ONLINE">{MODE_LABEL.ONLINE}</option>
+            <option value="HYBRID">{MODE_LABEL.HYBRID}</option>
           </Select>
         </Field>
         <Field label={OWNER_ROLE_LABEL.CONTROLLER}><PersonPicker value={controller} onChange={setController} /></Field>
@@ -367,7 +370,7 @@ function StageTimeline({ exam, onFlash }: { exam: ExamDetail; onFlash: (m: strin
                     {first.action === "NOTIFY_STUDENTS" && <Chip className="bg-blue-50 text-blue-700">Emails students</Chip>}
                     {first.action === "RELEASE_RESULTS" && <Chip className="bg-emerald-50 text-emerald-700">Releases results</Chip>}
                     {first.canBypass && <Chip className="bg-gray-100 text-gray-500">Can bypass</Chip>}
-                    {first.approver && <Chip className="bg-violet-50 text-violet-700"><ShieldCheck className="h-3 w-3 mr-1" />{first.approver === "SUBJECT_HEAD" ? "Subject head approves" : "Controller approves"}</Chip>}
+                    {first.approver && <Chip className="bg-violet-50 text-violet-700"><ShieldCheck className="h-3 w-3 mr-1" />{APPROVER_CHIP[first.approver]}</Chip>}
                   </div>
                   {first.description && <p className="text-xs text-gray-500 mt-0.5">{first.description}</p>}
                   <div className="mt-2 space-y-2">
@@ -385,7 +388,7 @@ function StageTimeline({ exam, onFlash }: { exam: ExamDetail; onFlash: (m: strin
 
 function StageRow({ stage: s, exam, onFlash }: { stage: Stage; exam: ExamDetail; onFlash: (m: string) => void }) {
   const invalidate = useInvalidateExams();
-  const [dialog, setDialog] = useState<"done" | "bypass" | "reassign" | "blueprint" | null>(null);
+  const [dialog, setDialog] = useState<"done" | "bypass" | "reassign" | "blueprint" | "syllabus" | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -398,8 +401,10 @@ function StageRow({ stage: s, exam, onFlash }: { stage: Stage; exam: ExamDetail;
   const releaseNeedsController = s.action === "RELEASE_RESULTS" && !isController;
   const pending = s.status === "PENDING_APPROVAL";
   const isBlueprint = s.form === "BLUEPRINT";
+  const isSignoff = s.approver === "BATCH_TEACHERS";
+  const mySignoff = s.signoffs?.find((r) => r.employee.id === userId) ?? null;
   const bpMode = blueprintModeFor(s, userId, canManage, isSA);
-  const iApprove = pending && bpMode === "review";
+  const iApprove = pending && (isSignoff ? mySignoff?.status === "PENDING" : bpMode === "review");
 
   const patch = async (status: string, okMsg?: string) => {
     setBusy(true); setErr(null);
@@ -435,10 +440,17 @@ function StageRow({ stage: s, exam, onFlash }: { stage: Stage; exam: ExamDetail;
               ? <>closed {s.completedAt ? fmtDay(s.completedAt) : ""}{s.daysLate > 0 ? <span className="text-red-600"> ({s.daysLate}d late)</span> : null}</>
               : <span className={s.overdue ? "text-red-600 font-semibold" : ""}>due {fmtDay(s.plannedDate)}{s.overdue ? ` · ${s.daysLate}d late` : ""}</span>}
           </p>
-          {pending && (
+          {pending && !isSignoff && (
             <p className="flex items-center gap-1 text-xs text-amber-800 mt-0.5">
               <Hourglass className="h-3 w-3 shrink-0" /> Awaiting approval from <b>{personName(s.approverPerson)}</b>
             </p>
+          )}
+          {pending && isSignoff && <SignoffWaitingLine signoffs={s.signoffs} />}
+          {isSignoff && !closed && s.syllabus?.changedSinceSent && (
+            <p className="text-xs text-amber-700 mt-0.5">The chapters changed since they were sent: every teacher signs again.</p>
+          )}
+          {isSignoff && !closed && !pending && (s.syllabus?.chapters.length ?? 0) === 0 && (
+            <p className="text-xs text-amber-700 mt-0.5">No chapters on the exam for this subject yet. Add them on the assessment first.</p>
           )}
           {s.lastFeedback && (
             <p className="text-xs text-amber-700 mt-0.5">
@@ -457,6 +469,7 @@ function StageRow({ stage: s, exam, onFlash }: { stage: Stage; exam: ExamDetail;
               <Lock className="h-3 w-3 shrink-0 mt-px" /> Waiting on {s.blockedBy.length} earlier step{s.blockedBy.length === 1 ? "" : "s"}
             </p>
           )}
+          {isSignoff && <SignoffList stage={s} canBypass={isController} defaultOpen={pending} />}
           {err && <p className="text-xs text-red-600 mt-1">{err}</p>}
         </div>
 
@@ -472,12 +485,13 @@ function StageRow({ stage: s, exam, onFlash }: { stage: Stage; exam: ExamDetail;
           {isBlueprint && (closed || (pending && !iApprove)) && (s.formData || closed) && (
             <IconBtn icon={ClipboardList} label="View blueprint" onClick={() => setDialog("blueprint")} />
           )}
+          {isSignoff && iApprove && <IconBtn icon={ShieldCheck} label="Review syllabus" primary onClick={() => setDialog("syllabus")} />}
           {!isBlueprint && s.approver && !closed && !pending && canAct && (
-            <IconBtn icon={Send} label="Submit for approval" primary disabled={busy || blocked}
+            <IconBtn icon={Send} label={isSignoff ? "Send to teachers" : "Submit for approval"} primary disabled={busy || blocked}
               title={blocked ? "Earlier steps must be finished first" : undefined}
               onClick={() => post("submit", {})} />
           )}
-          {!isBlueprint && iApprove && <>
+          {!isBlueprint && !isSignoff && iApprove && <>
             <IconBtn icon={CheckCircle2} label="Approve" primary disabled={busy} onClick={() => post("approve", {})} />
             <IconBtn icon={Undo2} label="Send back" disabled={busy} onClick={() => {
               const comment = prompt("What needs changing?");
@@ -529,6 +543,9 @@ function StageRow({ stage: s, exam, onFlash }: { stage: Stage; exam: ExamDetail;
       {dialog === "blueprint" && (
         <BlueprintDialog stage={s} mode={bpMode} onClose={() => setDialog(null)} onDone={(msg) => { setDialog(null); onFlash(msg); }} />
       )}
+      {dialog === "syllabus" && (
+        <SyllabusReviewDialog stage={s} batchNames={mySignoff?.batchNames} onClose={() => setDialog(null)} onDone={(msg) => { setDialog(null); onFlash(msg); }} />
+      )}
       {dialog === "bypass" && <BypassDialog stage={s} onClose={() => setDialog(null)} />}
       {dialog === "reassign" && <ReassignDialog stage={s} current={s.owner} onClose={() => setDialog(null)} />}
     </div>
@@ -539,6 +556,17 @@ const EVENT_LABEL: Record<string, string> = {
   STARTED: "started", DONE: "marked done", BYPASSED: "bypassed", REOPENED: "reopened",
   OWNER_CHANGED: "changed owner", RESCHEDULED: "due date moved", UPDATED: "updated",
   SUBMITTED: "submitted for approval", APPROVED: "approved", SENT_BACK: "sent back", WITHDRAWN: "withdrew the submission",
+  SIGNED_OFF: "signed off", SIGNOFF_BYPASSED: "bypassed a teacher's sign-off",
+};
+
+const APPROVER_CHIP: Record<string, string> = {
+  SUBJECT_HEAD: "Subject head approves", CONTROLLER: "Controller approves", BATCH_TEACHERS: "Every batch teacher approves",
+};
+
+const MODE_HINT: Record<string, string> = {
+  PEN_PAPER: "Paper is stored on the Drive, printed and dispatched.",
+  ONLINE: "Paper is built and hosted on Learnyst.",
+  HYBRID: "Both: printed for some, on Learnyst for others. Printing and Learnyst steps are both tracked.",
 };
 
 function IconBtn({ icon: Icon, label, onClick, disabled, primary, title, trailing }: {

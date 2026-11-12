@@ -40,7 +40,7 @@ export const TEAM_ROLE_LABEL: Record<TeamRole, string> = {
   VIEWER: "Viewer (read-only)",
 };
 
-export const MODE_LABEL: Record<string, string> = { PEN_PAPER: "Pen & paper", ONLINE: "Online (Learnyst)" };
+export const MODE_LABEL: Record<string, string> = { PEN_PAPER: "Pen & paper", ONLINE: "Online (Learnyst)", HYBRID: "Hybrid (pen & paper + online)" };
 
 export const personName = (p?: Person | null) => (p ? `${p.firstName} ${p.lastName}`.trim() : "Unassigned");
 

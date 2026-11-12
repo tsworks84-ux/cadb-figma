@@ -10,6 +10,7 @@ import {
 } from "@/components/exams/shared";
 import { MarkDoneDialog, Notice, useInvalidateExams } from "@/components/exams/StageDialogs";
 import { BlueprintDialog, type BlueprintStage, type BlueprintMode } from "@/components/exams/Blueprint";
+import { SignoffWaitingLine, SyllabusReviewDialog, type Signoff, type SyllabusInfo } from "@/components/exams/SyllabusSignoff";
 
 // Exam stages assigned to (or awaiting approval from) the signed-in user.
 // Rendered on the Examinations "My Tasks" page and inside My To-Do; both use
@@ -30,10 +31,13 @@ export type ExamTask = BlueprintStage & {
   daysLeft: number;
   blockedBy: { id: string; name: string; subjectLabel: string | null }[];
   exam: { id: string; name: string; examDate: string; mode: string | null };
-  approver: "SUBJECT_HEAD" | "CONTROLLER" | null;
+  approver: "SUBJECT_HEAD" | "CONTROLLER" | "BATCH_TEACHERS" | null;
   form: "BLUEPRINT" | null;
   isOwner: boolean;
   awaitingMyApproval: boolean;
+  mySignoff: { status: string; batchNames: string[]; fallback: boolean } | null;
+  syllabus: SyllabusInfo | null;
+  signoffs: Signoff[] | null;
 };
 
 export function useMyExamTasks(enabled = true) {
@@ -65,6 +69,7 @@ export function groupExamTasks(tasks: ExamTask[]) {
 export function ExamTaskGroups({ tasks, include }: { tasks: ExamTask[]; include?: ExamTaskGroupKey[] }) {
   const [doneFor, setDoneFor] = useState<ExamTask | null>(null);
   const [bpFor, setBpFor] = useState<{ task: ExamTask; mode: BlueprintMode } | null>(null);
+  const [sylFor, setSylFor] = useState<ExamTask | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const groups = groupExamTasks(tasks).filter((g) => g.tasks.length > 0 && (!include || include.includes(g.key)));
 
@@ -76,7 +81,7 @@ export function ExamTaskGroups({ tasks, include }: { tasks: ExamTask[]; include?
           <h2 className={`text-xs font-semibold uppercase tracking-wide ${g.tone}`}>{g.label} · {g.tasks.length}</h2>
           <div className="space-y-2">
             {g.tasks.map((t) => (
-              <TaskCard key={t.id} task={t} onDone={() => setDoneFor(t)} onBlueprint={(mode) => setBpFor({ task: t, mode })} onFlash={setFlash} />
+              <TaskCard key={t.id} task={t} onDone={() => setDoneFor(t)} onBlueprint={(mode) => setBpFor({ task: t, mode })} onSyllabus={() => setSylFor(t)} onFlash={setFlash} />
             ))}
           </div>
         </section>
@@ -88,6 +93,14 @@ export function ExamTaskGroups({ tasks, include }: { tasks: ExamTask[]; include?
           mode={bpFor.mode}
           onClose={() => setBpFor(null)}
           onDone={(msg) => { setBpFor(null); setFlash(msg); }}
+        />
+      )}
+      {sylFor && (
+        <SyllabusReviewDialog
+          stage={sylFor}
+          batchNames={sylFor.mySignoff?.batchNames}
+          onClose={() => setSylFor(null)}
+          onDone={(msg) => { setSylFor(null); setFlash(msg); }}
         />
       )}
       {doneFor && (
@@ -159,8 +172,8 @@ export function ExamTasksInTodo() {
   );
 }
 
-function TaskCard({ task: t, onDone, onBlueprint, onFlash }: {
-  task: ExamTask; onDone: () => void; onBlueprint: (mode: BlueprintMode) => void; onFlash: (m: string) => void;
+function TaskCard({ task: t, onDone, onBlueprint, onSyllabus, onFlash }: {
+  task: ExamTask; onDone: () => void; onBlueprint: (mode: BlueprintMode) => void; onSyllabus: () => void; onFlash: (m: string) => void;
 }) {
   const invalidate = useInvalidateExams();
   const [busy, setBusy] = useState(false);
@@ -170,6 +183,7 @@ function TaskCard({ task: t, onDone, onBlueprint, onFlash }: {
 
   const pending = t.status === "PENDING_APPROVAL";
   const isBlueprint = t.form === "BLUEPRINT";
+  const isSignoff = t.approver === "BATCH_TEACHERS";
   const post = async (action: string, body: object) => {
     setBusy(true); setErr(null);
     try {
@@ -211,8 +225,11 @@ function TaskCard({ task: t, onDone, onBlueprint, onFlash }: {
             <CalendarClock className="h-3.5 w-3.5" />
             {closed ? `Completed ${t.completedAt ? fmtDay(t.completedAt) : ""}` : `Due ${fmtDay(t.plannedDate)} (${relDays(t.daysLeft)})`}
           </p>
-          {t.awaitingMyApproval && <p className="text-xs text-violet-700 mt-1">Submitted by <b>{personName(t.owner)}</b> for your approval</p>}
-          {pending && !t.awaitingMyApproval && (
+          {t.awaitingMyApproval && (isSignoff
+            ? <p className="text-xs text-violet-700 mt-1">Chapters sent by <b>{personName(t.owner)}</b> for your sign-off{t.mySignoff?.batchNames.length ? ` (${t.mySignoff.batchNames.join(", ")})` : ""}</p>
+            : <p className="text-xs text-violet-700 mt-1">Submitted by <b>{personName(t.owner)}</b> for your approval</p>)}
+          {pending && !t.awaitingMyApproval && isSignoff && <SignoffWaitingLine signoffs={t.signoffs} />}
+          {pending && !t.awaitingMyApproval && !isSignoff && (
             <p className="flex items-center gap-1 text-xs text-amber-800 mt-1"><Hourglass className="h-3.5 w-3.5" /> Waiting for {personName(t.approverPerson)}</p>
           )}
           {t.lastFeedback && (
@@ -237,7 +254,9 @@ function TaskCard({ task: t, onDone, onBlueprint, onFlash }: {
         </div>
         {t.awaitingMyApproval && (
           <div className="flex flex-wrap gap-2 shrink-0">
-            {isBlueprint ? (
+            {isSignoff ? (
+              <button className={btnPrimary} onClick={onSyllabus}><ShieldCheck className="h-4 w-4" /> Review syllabus</button>
+            ) : isBlueprint ? (
               <button className={btnPrimary} onClick={() => onBlueprint("review")}><ShieldCheck className="h-4 w-4" /> Review blueprint</button>
             ) : (<>
               <button className={btnSecondary} disabled={busy} onClick={() => {
@@ -273,7 +292,7 @@ function TaskCard({ task: t, onDone, onBlueprint, onFlash }: {
             ) : t.approver ? (
               <button className={btnPrimary} onClick={() => post("submit", {})} disabled={blocked || busy}
                 title={blocked ? "Earlier steps must be finished first" : undefined}>
-                <Send className="h-4 w-4" /> Submit for approval
+                <Send className="h-4 w-4" /> {isSignoff ? "Send to teachers" : "Submit for approval"}
               </button>
             ) : (
               <button

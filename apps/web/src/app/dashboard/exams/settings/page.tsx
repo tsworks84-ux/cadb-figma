@@ -15,7 +15,7 @@ type StageDef = {
   sequenceNo: number; name: string; description: string | null; offsetDays: number;
   ownerRole: OwnerRole; scope: "EXAM" | "SUBJECT"; mode: "PEN_PAPER" | "ONLINE" | null;
   action: "NOTIFY_STUDENTS" | "RELEASE_RESULTS" | null; canBypass: boolean;
-  approver: "SUBJECT_HEAD" | "CONTROLLER" | null; form: "BLUEPRINT" | null;
+  approver: "SUBJECT_HEAD" | "CONTROLLER" | "BATCH_TEACHERS" | null; form: "BLUEPRINT" | null;
 };
 type ExamType = {
   id: string; academicYear: string; name: string; description: string | null; isActive: boolean;
@@ -389,7 +389,7 @@ function StageEditorRow({ stage: s, open, canEdit, onToggle, onChange, onRemove 
   stage: Draft; open: boolean; canEdit: boolean; onToggle: () => void; onChange: (p: Partial<StageDef>) => void; onRemove: () => void;
 }) {
   const chips: [string, string][] = [];
-  if (s.approver) chips.push([s.approver === "SUBJECT_HEAD" ? "HoD approves" : "Controller approves", "bg-violet-50 text-violet-700"]);
+  if (s.approver) chips.push([s.approver === "SUBJECT_HEAD" ? "HoD approves" : s.approver === "BATCH_TEACHERS" ? "Batch teachers approve" : "Controller approves", "bg-violet-50 text-violet-700"]);
   if (s.form === "BLUEPRINT") chips.push(["Blueprint form", "bg-indigo-50 text-indigo-700"]);
   if (s.action === "NOTIFY_STUDENTS") chips.push(["Emails students", "bg-blue-50 text-blue-700"]);
   if (s.action === "RELEASE_RESULTS") chips.push(["Releases results", "bg-emerald-50 text-emerald-700"]);
@@ -439,27 +439,33 @@ function StageEditorRow({ stage: s, open, canEdit, onToggle, onChange, onRemove 
             </Field>
             <Field label="Applies to">
               <Select disabled={!canEdit} value={s.scope} onChange={(e) => onChange({ scope: e.target.value as StageDef["scope"] })}>
-                <option value="EXAM" disabled={paperRole || s.form === "BLUEPRINT" || s.approver === "SUBJECT_HEAD"}>Whole exam</option>
+                <option value="EXAM" disabled={paperRole || s.form === "BLUEPRINT" || s.approver === "SUBJECT_HEAD" || s.approver === "BATCH_TEACHERS"}>Whole exam</option>
                 <option value="SUBJECT">Each paper/subject</option>
               </Select>
             </Field>
           </FieldGroup>
 
           <FieldGroup title="Sign-off">
-            <Field label="Approved by" hint={s.approver ? "Owner submits; approval closes it" : "Owner marks it done"}>
+            <Field label="Approved by" hint={s.approver === "BATCH_TEACHERS" ? "Owner sends the chapters; closes when every batch's subject teacher approves" : s.approver ? "Owner submits; approval closes it" : "Owner marks it done"}>
               <Select disabled={!canEdit} value={s.approver ?? ""} onChange={(e) => {
                 const approver = (e.target.value || null) as StageDef["approver"];
-                onChange({ approver, ...(approver === "SUBJECT_HEAD" ? { scope: "SUBJECT" as const } : {}), ...(!approver ? { form: null } : {}) });
+                onChange({
+                  approver,
+                  ...(approver === "SUBJECT_HEAD" || approver === "BATCH_TEACHERS" ? { scope: "SUBJECT" as const } : {}),
+                  ...(!approver || approver === "BATCH_TEACHERS" ? { form: null } : {}),
+                  ...(approver === "BATCH_TEACHERS" ? { action: null } : {}),
+                });
               }}>
                 <option value="">No approval</option>
                 <option value="SUBJECT_HEAD">Subject head (HoD)</option>
                 <option value="CONTROLLER">Controller of Examinations</option>
+                <option value="BATCH_TEACHERS">Every batch&apos;s subject teacher</option>
               </Select>
             </Field>
             <Field label="Form to fill">
               <Select disabled={!canEdit} value={s.form ?? ""} onChange={(e) => {
                 const form = (e.target.value || null) as StageDef["form"];
-                onChange({ form, ...(form === "BLUEPRINT" ? { scope: "SUBJECT" as const, approver: s.approver ?? "SUBJECT_HEAD" } : {}) });
+                onChange({ form, ...(form === "BLUEPRINT" ? { scope: "SUBJECT" as const, approver: s.approver && s.approver !== "BATCH_TEACHERS" ? s.approver : "SUBJECT_HEAD" } : {}) });
               }}>
                 <option value="">None</option>
                 <option value="BLUEPRINT">Blueprint</option>

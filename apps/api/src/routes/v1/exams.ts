@@ -5,8 +5,8 @@ import type { JwtPayload } from "@cadb/types";
 import { authenticate } from "../../middleware/authenticate.js";
 import { hasPermission } from "../../utils/permissions.js";
 import {
-  DEFAULT_STAGES, OPEN_STATUSES, QUESTION_TYPES, actorFor, approverFor, blueprintProblems, daysBetween, isOverdue,
-  openBlockers, syllabusOf, syncExamStages, todayIST, utcDay, type Blueprint, type SyncResult,
+  DEFAULT_STAGES, OPEN_STATUSES, QUESTION_TYPES, actorFor, approverFor, blueprintProblems, completeIfAllSigned, daysBetween, isOverdue,
+  openBlockers, refreshSignoffs, signContextSelect, syllabusOf, syncExamStages, todayIST, topicsKey, utcDay, type Blueprint, type SyncResult,
 } from "../../utils/examTracking.js";
 import { notifyExamStaff, notifyExamStudents } from "../../utils/notify/exam.js";
 
@@ -28,6 +28,9 @@ import { notifyExamStaff, notifyExamStudents } from "../../utils/notify/exam.js"
  *   • A stage with an approver (e.g. the blueprint) can't be marked done
  *     directly: the owner submits it, and only the named approver (or a Super
  *     Admin) approves it, which closes it, or sends it back with a comment.
+ *   • A BATCH_TEACHERS stage (syllabus sign-off) has one sign-off per teacher;
+ *     each approves or sends back their own, and the stage closes when all are
+ *     in. The Controller can bypass a teacher who can't respond, with a reason.
  */
 
 const dateFmt = new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
@@ -74,7 +77,7 @@ const stageDefSchema = z.object({
   mode:        z.enum(["PEN_PAPER", "ONLINE"]).nullable().optional(),
   action:      z.enum(["NOTIFY_STUDENTS", "RELEASE_RESULTS"]).nullable().optional(),
   canBypass:   z.boolean().optional(),
-  approver:    z.enum(["SUBJECT_HEAD", "CONTROLLER"]).nullable().optional(),
+  approver:    z.enum(["SUBJECT_HEAD", "CONTROLLER", "BATCH_TEACHERS"]).nullable().optional(),
   form:        z.enum(["BLUEPRINT"]).nullable().optional(),
 });
 
@@ -95,18 +98,42 @@ function validateStageList(stages: z.infer<typeof stageDefSchema>[]): string | n
     return "Blueprint and subject-head approval stages must be per subject";
   }
   if (stages.some((s) => s.form === "BLUEPRINT" && !s.approver)) return "A blueprint stage needs an approver";
+  if (stages.some((s) => s.approver === "BATCH_TEACHERS" && s.scope !== "SUBJECT")) return "Batch-teacher approval stages must be per subject";
+  if (stages.some((s) => s.approver === "BATCH_TEACHERS" && s.form)) return "A batch-teacher approval stage can't have a form";
+  if (stages.some((s) => s.approver === "BATCH_TEACHERS" && s.action)) return "A batch-teacher approval stage can't email students or release results";
   return null;
 }
 
 // ─── Stage view model ────────────────────────────────────────────────────────
 
 type SubjectRow = { paperNum: number; subjectSlot: number; topics: string | null; maxMarks: number | null };
+const signoffInclude = { include: { employee: nameSel }, orderBy: { createdAt: "asc" as const } } as const;
 
 /** What a blueprint form needs: the exam's chapters and max marks for that slot. */
 function blueprintContext(s: any, subjects: SubjectRow[]) {
   if (s.form !== "BLUEPRINT") return null;
   const row = subjects.find((x) => x.paperNum === s.paperNum && x.subjectSlot === s.subjectSlot);
   return { chapters: syllabusOf(row?.topics), maxMarks: row?.maxMarks ?? null, questionTypes: QUESTION_TYPES };
+}
+
+/** What a syllabus sign-off shows: the exam's current chapters for that slot. */
+function syllabusContext(s: any, subjects: SubjectRow[]) {
+  if (s.approver !== "BATCH_TEACHERS") return null;
+  const row = subjects.find((x) => x.paperNum === s.paperNum && x.subjectSlot === s.subjectSlot);
+  const key = topicsKey(row?.topics);
+  const sentKey = (s.formData as any)?.topicsKey ?? null;
+  return { chapters: syllabusOf(row?.topics), changedSinceSent: sentKey !== null && sentKey !== key, currentKey: key };
+}
+
+/** Sign-off rows for display, newest decision state, with whether an approval is for older chapters. */
+function signoffView(s: any, subjects: SubjectRow[]) {
+  if (s.approver !== "BATCH_TEACHERS" || !s.signoffs) return null;
+  const key = syllabusContext(s, subjects)?.currentKey ?? "";
+  return (s.signoffs as any[]).map((r) => ({
+    employee: r.employee, status: r.status, batchNames: r.batchNames, fallback: r.fallback,
+    comment: r.comment, decidedAt: r.decidedAt,
+    stale: (r.status === "APPROVED" || r.status === "BYPASSED") && r.approvedTopics !== key,
+  }));
 }
 
 function stageView(s: any, all: any[], today: Date, subjects: SubjectRow[] = []) {
@@ -122,6 +149,8 @@ function stageView(s: any, all: any[], today: Date, subjects: SubjectRow[] = [])
     approver: s.approver, form: s.form, formData: s.formData ?? null,
     approverPerson: s.approverPerson ?? null, submittedAt: s.submittedAt,
     blueprint: blueprintContext(s, subjects),
+    syllabus: syllabusContext(s, subjects),
+    signoffs: signoffView(s, subjects),
     lastFeedback: (() => {
       if (s.status !== "IN_PROGRESS") return null;
       const e = (s.events ?? []).find((x: any) => x.action === "SENT_BACK" || x.action === "REOPENED");
@@ -179,6 +208,8 @@ function stepStrip(stages: any[], today: Date) {
 export async function notifyAssignments(examId: string, sync: SyncResult) {
   for (const r of sync.reopened) await notifyDecision(r.stageId, "REOPENED", r.reason);
   for (const id of sync.newApprovals) await notifyApprovalRequested(id);
+  for (const n of sync.newSigners) await notifyApprovalRequested(n.stageId, n.employeeIds);
+  for (const id of sync.completed) await notifyDecision(id, "APPROVED", "Every teacher has signed off");
   if (sync.newAssignments.size === 0) return;
   const exam = await prisma.exam.findUnique({ where: { id: examId }, select: { name: true, examDate: true } });
   if (!exam) return;
@@ -206,13 +237,14 @@ const stageNoticeInclude = {
   owner: { select: { firstName: true, lastName: true } },
 } as const;
 
-/** Tell the approver a stage is waiting for them. */
-async function notifyApprovalRequested(stageId: string) {
+/** Tell the approver (or, for a sign-off stage, the named signers) a stage is waiting for them. */
+export async function notifyApprovalRequested(stageId: string, employeeIds?: string[]) {
   const s = await prisma.examStage.findUnique({ where: { id: stageId }, include: stageNoticeInclude });
-  if (!s?.approverId) return;
+  const to = employeeIds ?? (s?.approverId ? [s.approverId] : []);
+  if (!s || to.length === 0) return;
   await notifyExamStaff("EXAM_APPROVAL_REQUESTED", {
     examId: s.exam.id,
-    employeeIds: [s.approverId],
+    employeeIds: to,
     path: "/dashboard/exams/tasks",
     fields: {
       examName: s.exam.name, examDate: fmt(s.exam.examDate), stageName: s.name,
@@ -312,7 +344,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
     const a = await accessOf(req.user as JwtPayload);
     const today = todayIST();
     const live = { status: { notIn: ["CANCELLED" as const, "ARCHIVED" as const] } };
-    const [open, approvals] = await Promise.all([
+    const [open, stageApprovals, signoffs] = await Promise.all([
       // Submitted stages are in the approver's court, not the owner's.
       prisma.examStage.findMany({
         where: { ownerId: a.user.sub, status: { in: ["NOT_STARTED", "IN_PROGRESS"] }, exam: live },
@@ -322,7 +354,13 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
         where: { approverId: a.user.sub, status: "PENDING_APPROVAL", exam: live },
         select: { status: true, plannedDate: true },
       }),
+      // Syllabus sign-offs waiting on this teacher.
+      prisma.examStageSignoff.findMany({
+        where: { employeeId: a.user.sub, status: "PENDING", stage: { status: "PENDING_APPROVAL", exam: live } },
+        select: { stage: { select: { status: true, plannedDate: true } } },
+      }),
     ]);
+    const approvals = [...stageApprovals, ...signoffs.map((x) => x.stage)];
     // My Exam Tasks stays in the menu while there's anything of yours to look at:
     // open work, a submission waiting on someone, or something finished lately.
     const operational = a.isSA || a.teamRole === "CONTROLLER" || a.teamRole === "EXECUTIVE";
@@ -649,11 +687,13 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
           { ownerId: user.sub, status: { in: [...OPEN_STATUSES] } },
           { ownerId: user.sub, completedAt: { gte: recentCutoff } },
           { approverId: user.sub, status: "PENDING_APPROVAL" },
+          { status: "PENDING_APPROVAL", signoffs: { some: { employeeId: user.sub, status: "PENDING" } } },
         ],
       },
       include: {
         owner: nameSel,
         approverPerson: nameSel,
+        signoffs: signoffInclude,
         events: { where: { action: { in: ["SENT_BACK", "REOPENED"] } }, orderBy: { createdAt: "desc" }, take: 1 },
         exam: {
           select: {
@@ -665,21 +705,27 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
       },
       orderBy: [{ plannedDate: "asc" }, { sequenceNo: "asc" }],
     });
-    const data = stages.map((s) => ({
+    const data = stages.map((s) => {
+      const mySignoff = s.signoffs.find((r) => r.employeeId === user.sub) ?? null;
+      return {
       id: s.id, name: s.name, description: s.description, subjectLabel: s.subjectLabel,
       plannedDate: s.plannedDate, status: s.status, action: s.action, remarks: s.remarks,
       evidenceUrl: s.evidenceUrl, completedAt: s.completedAt,
       approver: s.approver, form: s.form, formData: s.formData ?? null, submittedAt: s.submittedAt,
       owner: s.owner, approverPerson: s.approverPerson,
       isOwner: s.ownerId === user.sub,
-      awaitingMyApproval: s.status === "PENDING_APPROVAL" && s.approverId === user.sub,
+      awaitingMyApproval: s.status === "PENDING_APPROVAL" && (s.approverId === user.sub || mySignoff?.status === "PENDING"),
+      mySignoff: mySignoff ? { status: mySignoff.status, batchNames: mySignoff.batchNames, fallback: mySignoff.fallback } : null,
+      syllabus: syllabusContext(s, s.exam.subjects),
+      signoffs: signoffView(s, s.exam.subjects),
       lastFeedback: s.status === "IN_PROGRESS" && s.events[0] ? { actorName: s.events[0].actorName, action: s.events[0].action, note: s.events[0].note, createdAt: s.events[0].createdAt } : null,
       blueprint: blueprintContext(s, s.exam.subjects),
       overdue: isOverdue(s, today),
       daysLeft: daysBetween(today, s.plannedDate),
       blockedBy: openBlockers(s, s.exam.stages).map((b) => ({ id: b.id, name: b.name, subjectLabel: b.subjectLabel })),
       exam: { id: s.exam.id, name: s.exam.name, examDate: s.exam.examDate, mode: s.exam.mode },
-    }));
+      };
+    });
     return reply.send({ success: true, data });
   });
 
@@ -698,7 +744,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
         subjects: { include: { subject: { select: { id: true, name: true, head: nameSel } } }, orderBy: [{ paperNum: "asc" }, { subjectSlot: "asc" }] },
         subjectTeams: { include: { setter: nameSel, reviewer: nameSel, approver: nameSel } },
         stages: {
-          include: { owner: nameSel, approverPerson: nameSel, events: { orderBy: { createdAt: "desc" }, take: 20 } },
+          include: { owner: nameSel, approverPerson: nameSel, signoffs: signoffInclude, events: { orderBy: { createdAt: "desc" }, take: 20 } },
           orderBy: [{ sequenceNo: "asc" }, { paperNum: "asc" }, { subjectSlot: "asc" }],
         },
       },
@@ -706,7 +752,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
     if (!exam) return reply.status(404).send({ success: false, error: "Exam not found" });
 
     // Board viewers see everything; anyone else only an exam they own a stage in.
-    const ownsStage = exam.stages.some((s) => s.ownerId === a.user.sub || s.approverId === a.user.sub);
+    const ownsStage = exam.stages.some((s) => s.ownerId === a.user.sub || s.approverId === a.user.sub || s.signoffs.some((r) => r.employeeId === a.user.sub));
     if (!canViewBoard(a) && !ownsStage && exam.controllerId !== a.user.sub && exam.executiveId !== a.user.sub) {
       return forbidden(reply);
     }
@@ -737,7 +783,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
     const examId = (req.params as any).examId as string;
     const body = z.object({
       examTypeId: z.string().min(1),
-      mode: z.enum(["PEN_PAPER", "ONLINE"]),
+      mode: z.enum(["PEN_PAPER", "ONLINE", "HYBRID"]),
       controllerId: z.string().min(1, "Pick the Controller for this exam"),
       executiveId: z.string().min(1, "Pick the Examination Executive for this exam"),
       subjectTeams: z.array(z.object({
@@ -809,7 +855,8 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
         exam: {
           select: {
             id: true, name: true, status: true, controllerId: true, executiveId: true,
-            subjects: { select: { paperNum: true, subjectSlot: true, topics: true, maxMarks: true, subject: { select: { headId: true } } } },
+            batches: signContextSelect.batches,
+            subjects: signContextSelect.subjects,
             subjectTeams: { select: { paperNum: true, subjectSlot: true, approverId: true } },
             stages: { select: { id: true, sequenceNo: true, scope: true, paperNum: true, subjectSlot: true, status: true, name: true, subjectLabel: true } },
           },
@@ -898,6 +945,13 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
           note: [remarks ? `Remarks: ${remarks}` : null, evidenceUrl ? `Evidence: ${evidenceUrl}` : null].filter(Boolean).join(" · ") || null,
         },
       });
+      // Reopening a syllabus sign-off means every teacher signs again.
+      if (eventAction === "REOPENED" && stage.approver === "BATCH_TEACHERS") {
+        await tx.examStageSignoff.updateMany({
+          where: { stageId: stage.id },
+          data: { status: "PENDING", approvedTopics: null, decidedAt: null, decidedById: null, comment: null },
+        });
+      }
       // Pulling a release back hides the marks again.
       if (eventAction === "REOPENED" && stage.action === "RELEASE_RESULTS") {
         await tx.exam.update({ where: { id: stage.exam.id }, data: { resultsReleasedAt: null, resultsReleasedById: null } });
@@ -982,6 +1036,8 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(409).send({ success: false, error: `Finish the earlier step(s) first: ${blockers.slice(0, 3).map((b) => b.name + (b.subjectLabel ? ` (${b.subjectLabel})` : "")).join(", ")}` });
     }
 
+    if (stage.approver === "BATCH_TEACHERS") return submitForSignoff(stage, a, reply);
+
     const { subj, team, chapters, maxMarks } = slotOf(stage);
     let formData: Blueprint | null = null;
     if (stage.form === "BLUEPRINT") {
@@ -1030,6 +1086,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
     const stage = await loadStage((req.params as any).stageId);
     if (!stage) return reply.status(404).send({ success: false, error: "Stage not found" });
     if (stage.status !== "PENDING_APPROVAL") return reply.status(409).send({ success: false, error: "This stage isn't waiting for approval" });
+    if (stage.approver === "BATCH_TEACHERS") return decideSignoff(stage, a, reply, "APPROVED", body.data.comment || null);
     if (stage.approverId !== a.user.sub && !a.isSA) return forbidden(reply, "Only the named approver can approve this");
     if (stage.ownerId === a.user.sub && !a.isSA) return forbidden(reply, "You can't approve your own submission");
     const blockers = openBlockers(stage, stage.exam.stages);
@@ -1063,6 +1120,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
     const stage = await loadStage((req.params as any).stageId);
     if (!stage) return reply.status(404).send({ success: false, error: "Stage not found" });
     if (stage.status !== "PENDING_APPROVAL") return reply.status(409).send({ success: false, error: "This stage isn't waiting for approval" });
+    if (stage.approver === "BATCH_TEACHERS") return decideSignoff(stage, a, reply, "SENT_BACK", body.data.comment);
     if (stage.approverId !== a.user.sub && !a.isSA) return forbidden(reply, "Only the named approver can send this back");
 
     const actor = await actorFor(a.user.sub);
@@ -1078,6 +1136,141 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
     });
     await notifyDecision(stage.id, "SENT_BACK", body.data.comment, actor.name);
     return reply.send({ success: true, data: updated, message: "Sent back to the owner with your comment." });
+  });
+
+
+  // ── Batch-teacher sign-off ────────────────────────────────────────────────
+
+  type LoadedStage = NonNullable<Awaited<ReturnType<typeof loadStage>>>;
+  class Refused extends Error {}
+  const names = (people: { firstName: string; lastName: string }[]) =>
+    people.map((p) => `${p.firstName} ${p.lastName}`.trim()).join(", ");
+
+  /** Send the slot's chapters to every teacher who must sign them. */
+  async function submitForSignoff(stage: LoadedStage, a: Access, reply: FastifyReply) {
+    const { subj, chapters } = slotOf(stage);
+    if (chapters.length === 0) {
+      return reply.status(400).send({ success: false, error: "This subject has no chapters on the exam yet. Add them to the exam (Academics → Assessments) first." });
+    }
+    const key = topicsKey(subj?.topics);
+    const actor = await actorFor(a.user.sub);
+    try {
+      const out = await prisma.$transaction(async (tx) => {
+        await tx.examStage.update({
+          where: { id: stage.id },
+          data: {
+            status: "PENDING_APPROVAL", submittedAt: new Date(), startedAt: stage.startedAt ?? new Date(),
+            formData: { chapters, topicsKey: key }, approverId: null, reminderSentAt: null,
+          },
+        });
+        const r = await refreshSignoffs(tx, { ...stage, status: "PENDING_APPROVAL" }, stage.exam, actor);
+        if (r.problem) throw new Refused(r.problem);
+        const rows = await tx.examStageSignoff.findMany({ where: { stageId: stage.id }, include: { employee: nameSel } });
+        const waiting = rows.filter((x) => x.status === "PENDING");
+        const kept = rows.length - waiting.length;
+        await tx.examStageEvent.create({
+          data: {
+            stageId: stage.id, actorId: actor.id, actorName: actor.name, action: "SUBMITTED",
+            fromStatus: stage.status, toStatus: r.completed ? "DONE" : "PENDING_APPROVAL",
+            note: r.completed
+              ? "Every teacher had already approved these chapters"
+              : `Sent to ${names(waiting.map((x) => x.employee))} for sign-off${kept ? ` · ${kept} earlier approval(s) still stand` : ""}`,
+          },
+        });
+        return { completed: r.completed, waiting, kept };
+      });
+      if (out.waiting.length) await notifyApprovalRequested(stage.id, out.waiting.map((x) => x.employeeId));
+      const message = out.completed
+        ? "Every teacher had already approved these chapters, so the step is done."
+        : `Sent to ${out.waiting.length} teacher(s) for sign-off: ${names(out.waiting.map((x) => x.employee))}.${out.kept ? ` ${out.kept} earlier approval(s) still stand.` : ""}`;
+      const updated = await prisma.examStage.findUnique({ where: { id: stage.id } });
+      return reply.send({ success: true, data: updated, message });
+    } catch (e) {
+      if (e instanceof Refused) return reply.status(409).send({ success: false, error: e.message });
+      throw e;
+    }
+  }
+
+  /** One teacher approves, or sends the chapters back to the owner. */
+  async function decideSignoff(stage: LoadedStage, a: Access, reply: FastifyReply, decision: "APPROVED" | "SENT_BACK", comment: string | null) {
+    const mine = await prisma.examStageSignoff.findUnique({ where: { stageId_employeeId: { stageId: stage.id, employeeId: a.user.sub } } });
+    if (!mine) return forbidden(reply, "You're not one of the teachers asked to sign this. The Controller can bypass a teacher who can't respond.");
+    if (mine.status !== "PENDING") return reply.status(409).send({ success: false, error: "You've already responded to this" });
+    const { subj } = slotOf(stage);
+    const key = topicsKey(subj?.topics);
+    if (((stage.formData as any)?.topicsKey ?? null) !== key) {
+      return reply.status(409).send({ success: false, error: "The chapters changed after they were sent. Wait for them to be sent again." });
+    }
+    if (decision === "APPROVED") {
+      const blockers = openBlockers(stage, stage.exam.stages);
+      if (blockers.length) {
+        return reply.status(409).send({ success: false, error: `An earlier step was reopened and must be finished first: ${blockers.slice(0, 3).map((b) => b.name + (b.subjectLabel ? ` (${b.subjectLabel})` : "")).join(", ")}` });
+      }
+    }
+
+    const actor = await actorFor(a.user.sub);
+    const batches = mine.batchNames.join(", ");
+    const out = await prisma.$transaction(async (tx) => {
+      await tx.examStageSignoff.update({
+        where: { id: mine.id },
+        data: { status: decision, approvedTopics: decision === "APPROVED" ? key : null, comment, decidedAt: new Date(), decidedById: a.user.sub },
+      });
+      if (decision === "SENT_BACK") {
+        await tx.examStage.update({ where: { id: stage.id }, data: { status: "IN_PROGRESS", submittedAt: null } });
+        await tx.examStageEvent.create({
+          data: { stageId: stage.id, actorId: actor.id, actorName: actor.name, action: "SENT_BACK", fromStatus: "PENDING_APPROVAL", toStatus: "IN_PROGRESS", note: comment },
+        });
+        return { completed: false, remaining: 0 };
+      }
+      await tx.examStageEvent.create({
+        data: { stageId: stage.id, actorId: actor.id, actorName: actor.name, action: "SIGNED_OFF", note: `${batches ? `For ${batches}` : "Approved"}${comment ? ` — ${comment}` : ""}` },
+      });
+      const completed = await completeIfAllSigned(tx, stage.id, actor);
+      const remaining = completed ? 0 : await tx.examStageSignoff.count({ where: { stageId: stage.id, status: "PENDING" } });
+      return { completed, remaining };
+    });
+
+    if (decision === "SENT_BACK") {
+      await notifyDecision(stage.id, "SENT_BACK", comment, actor.name);
+      return reply.send({ success: true, message: "Sent back with your comment. You'll be asked again once it's resubmitted." });
+    }
+    if (out.completed) await notifyDecision(stage.id, "APPROVED", "Every teacher has signed off", actor.name);
+    return reply.send({
+      success: true,
+      message: out.completed ? `Approved. Every teacher has signed off, so "${stage.name}" is done.` : `Approved. Waiting for ${out.remaining} more teacher(s).`,
+    });
+  }
+
+  /** Controller: waive one teacher's sign-off (on leave, left, unreachable) with a reason. */
+  fastify.post("/stages/:stageId/signoffs/:employeeId/bypass", async (req, reply) => {
+    const a = await accessOf(req.user as JwtPayload);
+    const body = z.object({ reason: z.string().trim().min(5, "Give a reason (at least 5 characters)").max(1000) }).safeParse(req.body);
+    if (!body.success) return reply.status(400).send({ success: false, error: body.error.issues[0]?.message });
+    const { stageId, employeeId } = req.params as { stageId: string; employeeId: string };
+    const stage = await loadStage(stageId);
+    if (!stage) return reply.status(404).send({ success: false, error: "Stage not found" });
+    if (!isControllerFor(a, stage.exam)) return forbidden(reply, "Only the Controller can bypass a teacher's sign-off");
+    if (stage.approver !== "BATCH_TEACHERS") return reply.status(400).send({ success: false, error: "This stage has no teacher sign-offs" });
+    if (stage.status !== "PENDING_APPROVAL") return reply.status(409).send({ success: false, error: "Sign-offs can only be bypassed while the stage is waiting for them" });
+    const row = await prisma.examStageSignoff.findUnique({ where: { stageId_employeeId: { stageId, employeeId } }, include: { employee: nameSel } });
+    if (!row) return reply.status(404).send({ success: false, error: "That person isn't asked to sign this" });
+    if (row.status !== "PENDING") return reply.status(409).send({ success: false, error: "That teacher has already responded" });
+
+    const key = topicsKey(slotOf(stage).subj?.topics);
+    const actor = await actorFor(a.user.sub);
+    const who = `${row.employee.firstName} ${row.employee.lastName}`.trim();
+    const completed = await prisma.$transaction(async (tx) => {
+      await tx.examStageSignoff.update({
+        where: { id: row.id },
+        data: { status: "BYPASSED", approvedTopics: key, comment: body.data.reason, decidedAt: new Date(), decidedById: a.user.sub },
+      });
+      await tx.examStageEvent.create({
+        data: { stageId, actorId: actor.id, actorName: actor.name, action: "SIGNOFF_BYPASSED", note: `${who}: ${body.data.reason}` },
+      });
+      return completeIfAllSigned(tx, stageId, actor);
+    });
+    if (completed) await notifyDecision(stageId, "APPROVED", "Every teacher has signed off", actor.name);
+    return reply.send({ success: true, message: completed ? `${who} bypassed. Every sign-off is in, so the step is done.` : `${who} bypassed.` });
   });
 
   /** Skip a stage with a reason. Controller-level, and only where the type allows it. */
@@ -1129,7 +1322,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
       });
       return u;
     });
-    await notifyAssignments(stage.exam.id, { newAssignments: new Map([[body.data.ownerId, [stage.id]]]), rescheduled: 0, reopened: [], newApprovals: [] });
+    await notifyAssignments(stage.exam.id, { newAssignments: new Map([[body.data.ownerId, [stage.id]]]), rescheduled: 0, reopened: [], newApprovals: [], newSigners: [], completed: [] });
     return reply.send({ success: true, data: updated });
   });
 };

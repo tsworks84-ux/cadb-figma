@@ -160,9 +160,22 @@ computes the preview. Deleting can target one class or the series.
 - Optional layer on an assessment: exam type (Super Admin parameter per academic year), mode, Controller of
   Examinations, Examination Executive, and per-subject setter / reviewer / approver (`ExamSubjectTeam`, keyed by
   paper × subject slot). Rules live in `utils/examTracking.ts`.
-- Setting up an exam snapshots the type's stage templates (16 by default) into `ExamStage` rows. Planned date =
+- **Mode:** Pen & paper, Online (Learnyst), or **Hybrid** (both: a printed paper and a Learnyst test). A stage
+  template tagged with a mode applies only to that mode; Hybrid gets the printing *and* Learnyst stages.
+- Setting up an exam snapshots the type's stage templates (17 by default) into `ExamStage` rows. Planned date =
   exam date + offset, moved back to the previous working day if it lands on a Sunday/holiday; exam day never moves.
   Overdue is derived on read. A stage is blocked until earlier exam-wide stages and same-slot subject stages are done.
+- **Syllabus sign-off** (step 2, `approver = BATCH_TEACHERS`, owned by the Executive, one per subject): the
+  Executive sends the exam's chapters for that subject; **every teacher of that subject in the exam's batches**
+  (`BatchSubject.employeeId`) must approve. A teacher of several of the exam's batches signs once. A batch with no
+  teacher for the subject (or whose teacher is the owner) falls to the subject head, else the Controller. One row
+  per signer in `ExamStageSignoff`; the step closes when all are approved/bypassed, and it gates that subject's
+  blueprint and every later exam-wide step. A teacher **sending back** returns it to the Executive; the others'
+  approvals stand, and on resubmission only the objector is asked again — **unless the chapters changed**, in which
+  case everyone signs again (an approval only carries over for the chapters it was given for). Changing the chapters
+  after sending/closing reopens the step. The Controller can **bypass one teacher** with a reason, and a Controller
+  reopen resets every sign-off. The hourly sweep re-works signers (a batch's teacher can change in Academics) and
+  reminds/chases teachers who haven't responded.
 - **Blueprint** stage: chapters come from `ExamSubject.topics`; marks must sum to the paper's max marks and
   easy/medium/hard to 100%. Submitting sends it to the approver (per-exam override → subject head → Controller,
   never the owner); approval completes it, send-back needs a comment. Changing chapters or max marks reopens it.

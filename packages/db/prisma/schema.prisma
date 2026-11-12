@@ -98,7 +98,6 @@ enum LeaveStatus {
   CANCELLATION_PENDING
 }
 
-
 enum CompOffStatus {
   PENDING
   APPROVED
@@ -280,12 +279,12 @@ model Department {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  employees       Employee[]
-  head            Employee?              @relation("DeptHead", fields: [headId], references: [id])
-  hrPartner       Employee?              @relation("DeptHrPartner", fields: [hrPartnerId], references: [id])
-  memberships     EmployeeDepartment[]
-  roleAccess      RoleDepartmentAccess[]
-  resourceShares  ResourceDepartment[]
+  employees      Employee[]
+  head           Employee?              @relation("DeptHead", fields: [headId], references: [id])
+  hrPartner      Employee?              @relation("DeptHrPartner", fields: [hrPartnerId], references: [id])
+  memberships    EmployeeDepartment[]
+  roleAccess     RoleDepartmentAccess[]
+  resourceShares ResourceDepartment[]
 
   @@index([code])
   @@index([hrPartnerId])
@@ -306,8 +305,8 @@ model RoleDepartmentAccess {
   roleName     String
   departmentId String
 
-  role       CustomRole @relation(fields: [roleName],     references: [name],       onDelete: Cascade)
-  department Department @relation(fields: [departmentId], references: [id],         onDelete: Cascade)
+  role       CustomRole @relation(fields: [roleName], references: [name], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
 
   @@unique([roleName, departmentId])
   @@index([roleName])
@@ -327,41 +326,41 @@ model Designation {
 // ─── EMPLOYEE CORE ───────────────────────────────────────────────────────────
 
 model Employee {
-  id              String           @id @default(cuid())
-  employeeCode    String           @unique
-  email           String           @unique
-  passwordHash    String
+  id           String @id @default(cuid())
+  employeeCode String @unique
+  email        String @unique
+  passwordHash String
 
   // Personal Details
-  firstName       String
-  lastName        String
-  middleName      String?
-  gender          Gender?
-  dateOfBirth     DateTime?
-  maritalStatus   MaritalStatus?
-  bloodGroup      BloodGroup?
-  nationality     String           @default("Indian")
-  religion        String?
-  photoUrl        String?
+  firstName     String
+  lastName      String
+  middleName    String?
+  gender        Gender?
+  dateOfBirth   DateTime?
+  maritalStatus MaritalStatus?
+  bloodGroup    BloodGroup?
+  nationality   String         @default("Indian")
+  religion      String?
+  photoUrl      String?
 
   // Contact
-  personalPhone   String?
-  officialPhone   String?
-  personalEmail   String?
+  personalPhone        String?
+  officialPhone        String?
+  personalEmail        String?
   // WhatsApp delivery. `whatsappNumber` is an explicit E.164 override; when null
   // the dispatcher normalises officialPhone, then personalPhone. `whatsappOptIn`
   // is the kill switch a person controls — false means never message this number.
-  whatsappNumber  String?
-  whatsappOptIn   Boolean          @default(true)
+  whatsappNumber       String?
+  whatsappOptIn        Boolean @default(true)
   // Self-service mute for the approval-chain EMAILS this person receives about
   // other people's requests (a reporting manager hearing a report applied for
   // leave). Leaves covers comp-off too. The bell is unaffected, and so are
   // notices about the person's own requests.
-  emailTeamLeaveAlerts Boolean     @default(true)
-  emailTeamClaimAlerts Boolean     @default(true)
+  emailTeamLeaveAlerts Boolean @default(true)
+  emailTeamClaimAlerts Boolean @default(true)
 
   // Address
-  currentAddress  Json?
+  currentAddress   Json?
   permanentAddress Json?
 
   // Emergency Contact
@@ -370,100 +369,101 @@ model Employee {
   emergencyRelation     String?
 
   // Identity Documents
-  aadhaarEncrypted  String?
-  panEncrypted      String?
-  uanNumber         String?
-  passportNumber    String?
-  passportExpiry    DateTime?
+  aadhaarEncrypted String?
+  panEncrypted     String?
+  uanNumber        String?
+  passportNumber   String?
+  passportExpiry   DateTime?
 
   // Employment
-  departmentId    String
-  designationId   String
-  reportingToId   String?
-  employmentType  EmploymentType   @default(FULL_TIME)
-  status          EmploymentStatus @default(PROBATION)
-  joiningDate     DateTime
-  confirmationDate DateTime?
-  terminationDate DateTime?
+  departmentId      String
+  designationId     String
+  reportingToId     String?
+  employmentType    EmploymentType   @default(FULL_TIME)
+  status            EmploymentStatus @default(PROBATION)
+  joiningDate       DateTime
+  confirmationDate  DateTime?
+  terminationDate   DateTime?
   terminationReason String?
 
   // Work location
-  workLocation    String?
+  workLocation String?
 
   // Role (stored in DB; no longer derived from employee code prefix)
-  role            String   @default("EMPLOYEE")
+  role String @default("EMPLOYEE")
 
   // Auth flags
-  mustChangePassword Boolean  @default(true)
+  mustChangePassword Boolean @default(true)
 
   // Soft delete
-  deletedAt       DateTime?
+  deletedAt DateTime?
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  department        Department          @relation(fields: [departmentId], references: [id])
-  designation       Designation         @relation(fields: [designationId], references: [id])
-  reportingTo       Employee?           @relation("ReportingTo", fields: [reportingToId], references: [id])
-  directReports     Employee[]          @relation("ReportingTo")
-  headOfDept        Department[]        @relation("DeptHead")
+  department    Department   @relation(fields: [departmentId], references: [id])
+  designation   Designation  @relation(fields: [designationId], references: [id])
+  reportingTo   Employee?    @relation("ReportingTo", fields: [reportingToId], references: [id])
+  directReports Employee[]   @relation("ReportingTo")
+  headOfDept    Department[] @relation("DeptHead")
 
-  qualifications    Qualification[]
-  certifications    Certification[]
-  documents         EmployeeDocument[]
-  salaryStructure   SalaryStructure?
-  salaryConfig      EmployeeSalaryConfig?
-  salarySlips       SalarySlip[]
-  bankDetails       BankDetail[]
-  leaveBalances     LeaveBalance[]
-  leaveApplications LeaveApplication[]
-  partTimeEntries   PartTimeEntry[]
-  claimsSubmitted   ReimbursementClaim[]
-  claimsApproved    ReimbursementClaim[] @relation("ClaimApprover")
-  policyAcks        PolicyAcknowledgement[]
-  trainingEnrollments TrainingEnrollment[]
-  compOffRequests   CompOffRequest[]     @relation("CompOffEmployee")
-  compOffsApproved  CompOffRequest[]     @relation("CompOffApprover")
-  leavesApproved    LeaveApplication[]   @relation("LeaveApprover")
-  leaveCancelsDecided LeaveApplication[] @relation("LeaveCancelApprover")
-  claimCancelsDecided ReimbursementClaim[] @relation("ClaimCancelApprover")
-  auditLogs         AuditLog[]
-  bonusPlansReceived BonusPlan[]         @relation("BonusReceiver")
-  bonusPlansGiven   BonusPlan[]         @relation("BonusAppraiser")
-  bonusPayouts      BonusPayout[]
-  teamOwned         TeamMembership[]    @relation("TeamOwner")
-  teamOf            TeamMembership[]    @relation("TeamMember")
-  tasksAssigned     Task[]              @relation("TaskAssigner")
-  tasksReceived     Task[]              @relation("TaskAssignee")
-  taskComments      TaskComment[]       @relation("TaskCommentAuthor")
-  personalTodos     PersonalTodo[]
-  googleCalendar    GoogleCalendarConnection?
-  announcements        Announcement[]           @relation("AnnouncementAuthor")
-  announcementViews    AnnouncementView[]       @relation("AnnouncementViewer")
-  announcementAcks     AnnouncementAck[]        @relation("AnnouncementAcker")
-  deptMemberships   EmployeeDepartment[]     @relation("EmpDeptMemberships")
-  deptMembershipsAdded EmployeeDepartment[]  @relation("DeptMembershipAddedBy")
+  qualifications       Qualification[]
+  certifications       Certification[]
+  documents            EmployeeDocument[]
+  salaryStructure      SalaryStructure?
+  salaryConfig         EmployeeSalaryConfig?
+  salarySlips          SalarySlip[]
+  bankDetails          BankDetail[]
+  leaveBalances        LeaveBalance[]
+  leaveApplications    LeaveApplication[]
+  partTimeEntries      PartTimeEntry[]
+  claimsSubmitted      ReimbursementClaim[]
+  claimsApproved       ReimbursementClaim[]      @relation("ClaimApprover")
+  policyAcks           PolicyAcknowledgement[]
+  trainingEnrollments  TrainingEnrollment[]
+  compOffRequests      CompOffRequest[]          @relation("CompOffEmployee")
+  compOffsApproved     CompOffRequest[]          @relation("CompOffApprover")
+  leavesApproved       LeaveApplication[]        @relation("LeaveApprover")
+  leaveCancelsDecided  LeaveApplication[]        @relation("LeaveCancelApprover")
+  claimCancelsDecided  ReimbursementClaim[]      @relation("ClaimCancelApprover")
+  auditLogs            AuditLog[]
+  bonusPlansReceived   BonusPlan[]               @relation("BonusReceiver")
+  bonusPlansGiven      BonusPlan[]               @relation("BonusAppraiser")
+  bonusPayouts         BonusPayout[]
+  teamOwned            TeamMembership[]          @relation("TeamOwner")
+  teamOf               TeamMembership[]          @relation("TeamMember")
+  tasksAssigned        Task[]                    @relation("TaskAssigner")
+  tasksReceived        Task[]                    @relation("TaskAssignee")
+  taskComments         TaskComment[]             @relation("TaskCommentAuthor")
+  personalTodos        PersonalTodo[]
+  googleCalendar       GoogleCalendarConnection?
+  announcements        Announcement[]            @relation("AnnouncementAuthor")
+  announcementViews    AnnouncementView[]        @relation("AnnouncementViewer")
+  announcementAcks     AnnouncementAck[]         @relation("AnnouncementAcker")
+  deptMemberships      EmployeeDepartment[]      @relation("EmpDeptMemberships")
+  deptMembershipsAdded EmployeeDepartment[]      @relation("DeptMembershipAddedBy")
   directoryEntry       DirectoryEntry?
-  facultySubjects      BatchSubject[]      @relation("FacultySubjects")
-  schedulesTaught      Schedule[]          @relation("FacultySchedules")
-  assignmentsTaught    Assignment[]        @relation("FacultyAssignments")
-  mentorBatches        Batch[]             @relation("BatchFacultyMentor")
-  ptmsCreated          PTM[]               @relation("PTMCreatedBy")
+  facultySubjects      BatchSubject[]            @relation("FacultySubjects")
+  schedulesTaught      Schedule[]                @relation("FacultySchedules")
+  assignmentsTaught    Assignment[]              @relation("FacultyAssignments")
+  mentorBatches        Batch[]                   @relation("BatchFacultyMentor")
+  ptmsCreated          PTM[]                     @relation("PTMCreatedBy")
   ptmAttendances       PTMAttendee[]
-  hrPartnerOf          Department[]        @relation("DeptHrPartner")
-  notifications        Notification[]      @relation("NotificationRecipient")
-  resourcesOwned       Resource[]          @relation("ResourceOwner")
-  resourceItemsAdded   ResourceItem[]      @relation("ResourceItemCreator")
-  examTeamMembership   ExamTeamMember?     @relation("ExamTeamMember")
-  examsControlled      Exam[]              @relation("ExamController")
-  examsExecuted        Exam[]              @relation("ExamExecutive")
-  examPapersSet        ExamSubjectTeam[]   @relation("ExamPaperSetter")
-  examPapersReviewed   ExamSubjectTeam[]   @relation("ExamPaperReviewer")
-  examStagesOwned      ExamStage[]         @relation("ExamStageOwner")
-  examStagesToApprove  ExamStage[]         @relation("ExamStageApprover")
-  examPapersApproved   ExamSubjectTeam[]   @relation("ExamPaperApprover")
-  subjectsHeaded       Subject[]           @relation("SubjectHead")
+  hrPartnerOf          Department[]              @relation("DeptHrPartner")
+  notifications        Notification[]            @relation("NotificationRecipient")
+  resourcesOwned       Resource[]                @relation("ResourceOwner")
+  resourceItemsAdded   ResourceItem[]            @relation("ResourceItemCreator")
+  examTeamMembership   ExamTeamMember?           @relation("ExamTeamMember")
+  examsControlled      Exam[]                    @relation("ExamController")
+  examsExecuted        Exam[]                    @relation("ExamExecutive")
+  examPapersSet        ExamSubjectTeam[]         @relation("ExamPaperSetter")
+  examPapersReviewed   ExamSubjectTeam[]         @relation("ExamPaperReviewer")
+  examStagesOwned      ExamStage[]               @relation("ExamStageOwner")
+  examStagesToApprove  ExamStage[]               @relation("ExamStageApprover")
+  examStageSignoffs    ExamStageSignoff[]        @relation("ExamStageSignoffs")
+  examPapersApproved   ExamSubjectTeam[]         @relation("ExamPaperApprover")
+  subjectsHeaded       Subject[]                 @relation("SubjectHead")
 
   @@index([departmentId])
   @@index([designationId])
@@ -477,16 +477,16 @@ model Employee {
 // ─── EMPLOYEE ↔ DEPARTMENT (many-to-many) ────────────────────────────────────
 
 model EmployeeDepartment {
-  id           String     @id @default(cuid())
+  id           String   @id @default(cuid())
   employeeId   String
   departmentId String
-  isHead       Boolean    @default(false)
+  isHead       Boolean  @default(false)
   addedById    String
-  addedAt      DateTime   @default(now())
+  addedAt      DateTime @default(now())
 
-  employee   Employee   @relation("EmpDeptMemberships",    fields: [employeeId],   references: [id], onDelete: Cascade)
-  department Department @relation(                         fields: [departmentId], references: [id], onDelete: Cascade)
-  addedBy    Employee   @relation("DeptMembershipAddedBy", fields: [addedById],    references: [id])
+  employee   Employee   @relation("EmpDeptMemberships", fields: [employeeId], references: [id], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  addedBy    Employee   @relation("DeptMembershipAddedBy", fields: [addedById], references: [id])
 
   @@unique([employeeId, departmentId])
   @@index([employeeId])
@@ -505,21 +505,21 @@ model WorkLocation {
 // ─── PROFESSIONAL DETAILS ────────────────────────────────────────────────────
 
 model Qualification {
-  id           String      @id @default(cuid())
-  employeeId   String
-  level        DegreeLevel
-  degreeName   String
-  specialization String?
-  institution  String
+  id              String      @id @default(cuid())
+  employeeId      String
+  level           DegreeLevel
+  degreeName      String
+  specialization  String?
+  institution     String
   boardUniversity String
-  yearOfPassing Int
-  percentage   Float?
-  cgpa         Float?
-  documentUrl  String?
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  yearOfPassing   Int
+  percentage      Float?
+  cgpa            Float?
+  documentUrl     String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
 
-  employee     Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([employeeId])
   @@index([level])
@@ -528,19 +528,19 @@ model Qualification {
 // ─── CERTIFICATIONS ──────────────────────────────────────────────────────────
 
 model Certification {
-  id            String    @id @default(cuid())
-  employeeId    String
-  name          String
-  issuingBody   String
-  credentialId  String?
-  issueDate     DateTime
-  expiryDate    DateTime?
-  documentUrl   String?
-  isVerified    Boolean   @default(false)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id           String    @id @default(cuid())
+  employeeId   String
+  name         String
+  issuingBody  String
+  credentialId String?
+  issueDate    DateTime
+  expiryDate   DateTime?
+  documentUrl  String?
+  isVerified   Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
-  employee      Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([employeeId])
   @@index([expiryDate])
@@ -549,31 +549,31 @@ model Certification {
 // ─── SALARY & BENEFITS ───────────────────────────────────────────────────────
 
 model SalaryStructure {
-  id            String   @id @default(cuid())
-  employeeId    String   @unique
+  id            String            @id @default(cuid())
+  employeeId    String            @unique
   ctc           Float
   effectiveFrom DateTime
   effectiveTo   DateTime?
   components    SalaryComponent[]
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
 
-  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  items         SalaryStructureItem[]
+  employee Employee              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  items    SalaryStructureItem[]
 
   @@index([employeeId])
   @@index([effectiveFrom])
 }
 
 model SalaryStructureItem {
-  id                String          @id @default(cuid())
+  id                String           @id @default(cuid())
   salaryStructureId String
   component         SalaryComponent
   amount            Float
-  isPercentage      Boolean         @default(false)
+  isPercentage      Boolean          @default(false)
   percentageOf      SalaryComponent?
 
-  salaryStructure   SalaryStructure @relation(fields: [salaryStructureId], references: [id], onDelete: Cascade)
+  salaryStructure SalaryStructure @relation(fields: [salaryStructureId], references: [id], onDelete: Cascade)
 
   @@index([salaryStructureId])
 }
@@ -590,24 +590,24 @@ model BankDetail {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([employeeId])
 }
 
 model SalarySlip {
-  id          String   @id @default(cuid())
-  employeeId  String
-  month       Int
-  year        Int
-  grossPay    Float
+  id              String    @id @default(cuid())
+  employeeId      String
+  month           Int
+  year            Int
+  grossPay        Float
   totalDeductions Float
-  netPay      Float
-  pdfUrl      String?
-  generatedAt DateTime @default(now())
-  paidAt      DateTime?
+  netPay          Float
+  pdfUrl          String?
+  generatedAt     DateTime  @default(now())
+  paidAt          DateTime?
 
-  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@unique([employeeId, month, year])
   @@index([employeeId])
@@ -617,21 +617,21 @@ model SalarySlip {
 // ─── LEAVES ──────────────────────────────────────────────────────────────────
 
 model LeaveBalance {
-  id          String    @id @default(cuid())
-  employeeId  String
-  leaveType   LeaveType
-  year        Int
-  allocated   Float
-  used        Float     @default(0)
-  pending     Float     @default(0)
-  carried     Float     @default(0)
+  id         String    @id @default(cuid())
+  employeeId String
+  leaveType  LeaveType
+  year       Int
+  allocated  Float
+  used       Float     @default(0)
+  pending    Float     @default(0)
+  carried    Float     @default(0)
   // Days credited outside the monthly accrual — today that means approved
   // compensatory offs. Kept apart from `allocated` because accrual pro-rates
   // an annual entitlement across twelve months, and a comp-off is not an
   // entitlement: it is earned in full on the day it is approved.
-  earned      Float     @default(0)
+  earned     Float     @default(0)
 
-  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@unique([employeeId, leaveType, year])
   @@index([employeeId])
@@ -639,20 +639,20 @@ model LeaveBalance {
 }
 
 model LeaveApplication {
-  id           String      @id @default(cuid())
-  employeeId   String
-  leaveType    LeaveType
-  fromDate     DateTime
-  toDate       DateTime
-  totalDays    Float
-  reason       String
-  status       LeaveStatus @default(PENDING)
-  approverId   String?
-  approvedAt   DateTime?
-  rejectedAt   DateTime?
-  rejectionNote String?
-  documentUrl  String?
-  lopDays      Float       @default(0)
+  id                  String      @id @default(cuid())
+  employeeId          String
+  leaveType           LeaveType
+  fromDate            DateTime
+  toDate              DateTime
+  totalDays           Float
+  reason              String
+  status              LeaveStatus @default(PENDING)
+  approverId          String?
+  approvedAt          DateTime?
+  rejectedAt          DateTime?
+  rejectionNote       String?
+  documentUrl         String?
+  lopDays             Float       @default(0)
   // Withdrawal trail. A PENDING leave cancels outright; an APPROVED one parks in
   // CANCELLATION_PENDING until the approver decides.
   cancelReason        String?
@@ -660,11 +660,11 @@ model LeaveApplication {
   cancelledAt         DateTime?
   cancelApproverId    String?
   cancelRejectionNote String?
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
 
-  employee     Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  approver     Employee?   @relation("LeaveApprover", fields: [approverId], references: [id])
+  employee       Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  approver       Employee? @relation("LeaveApprover", fields: [approverId], references: [id])
   cancelApprover Employee? @relation("LeaveCancelApprover", fields: [cancelApproverId], references: [id])
 
   @@index([employeeId])
@@ -676,12 +676,10 @@ model LeaveApplication {
 /**
  * A claim that the employee worked on a day they were not due to work, and the
  * supervisor's decision on it.
- *
  * Approval is the only thing that mints comp-off days: it increments the
  * COMPENSATORY `earned` bucket of the employee's leave balance for the FY the
  * work fell in, and the employee spends those days through the ordinary leave
  * flow. The row stays as the audit trail of where each credited day came from.
- *
  * `workDate` is deliberately unconstrained — the office works Mon–Sat, but shift
  * staff, exam duty and declared holidays all make "was this really an off day?"
  * a judgement the approver is better placed to make than a date check. The API
@@ -690,8 +688,8 @@ model LeaveApplication {
 model CompOffRequest {
   id            String        @id @default(cuid())
   employeeId    String
-  workDate      DateTime      // the day worked, stored at UTC midnight like leave dates
-  days          Float         @default(1)  // 1 for a full day, 0.5 for a half
+  workDate      DateTime // the day worked, stored at UTC midnight like leave dates
+  days          Float         @default(1) // 1 for a full day, 0.5 for a half
   reason        String
   status        CompOffStatus @default(PENDING)
   approverId    String?
@@ -702,8 +700,8 @@ model CompOffRequest {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  employee      Employee      @relation("CompOffEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
-  approver      Employee?     @relation("CompOffApprover", fields: [approverId], references: [id])
+  employee Employee  @relation("CompOffEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  approver Employee? @relation("CompOffApprover", fields: [approverId], references: [id])
 
   @@index([employeeId])
   @@index([status])
@@ -725,7 +723,7 @@ model PartTimeEntry {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@unique([employeeId, date])
   @@index([employeeId])
@@ -746,25 +744,25 @@ model ClaimTypeConfig {
 }
 
 model ReimbursementClaim {
-  id           String      @id @default(cuid())
-  claimNumber  String      @unique
-  employeeId   String
-  claimType    String
-  title        String
-  description  String?
-  claimedAmount Float
-  approvedAmount Float?
+  id                  String         @id @default(cuid())
+  claimNumber         String         @unique
+  employeeId          String
+  claimType           String
+  title               String
+  description         String?
+  claimedAmount       Float
+  approvedAmount      Float?
   // The day the money was actually spent (e.g. the cab ride), not the day the
   // claim was filed. Nullable only because claims raised before this field
   // existed never captured it — the API requires it on every new claim.
-  expenseDate  DateTime?   @db.Date
-  status       ClaimStatus @default(DRAFT)
-  approverId   String?
-  approvedAt   DateTime?
-  rejectedAt   DateTime?
-  rejectionNote String?
-  paidAt       DateTime?
-  receipts     ClaimReceipt[]
+  expenseDate         DateTime?      @db.Date
+  status              ClaimStatus    @default(DRAFT)
+  approverId          String?
+  approvedAt          DateTime?
+  rejectedAt          DateTime?
+  rejectionNote       String?
+  paidAt              DateTime?
+  receipts            ClaimReceipt[]
   // Withdrawal trail — mirrors LeaveApplication. A SUBMITTED claim cancels outright;
   // an APPROVED one parks in CANCELLATION_PENDING until the approver decides.
   cancelReason        String?
@@ -772,11 +770,11 @@ model ReimbursementClaim {
   cancelledAt         DateTime?
   cancelApproverId    String?
   cancelRejectionNote String?
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
 
-  employee     Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  approver     Employee?   @relation("ClaimApprover", fields: [approverId], references: [id])
+  employee       Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  approver       Employee? @relation("ClaimApprover", fields: [approverId], references: [id])
   cancelApprover Employee? @relation("ClaimCancelApprover", fields: [cancelApproverId], references: [id])
 
   @@index([employeeId])
@@ -786,15 +784,15 @@ model ReimbursementClaim {
 }
 
 model ClaimReceipt {
-  id        String             @id @default(cuid())
-  claimId   String
-  fileName  String
-  fileUrl   String
-  mimeType  String?
-  amount    Float              @default(0)
-  uploadedAt DateTime          @default(now())
+  id         String   @id @default(cuid())
+  claimId    String
+  fileName   String
+  fileUrl    String
+  mimeType   String?
+  amount     Float    @default(0)
+  uploadedAt DateTime @default(now())
 
-  claim     ReimbursementClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  claim ReimbursementClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
 
   @@index([claimId])
 }
@@ -810,18 +808,18 @@ model AppSetting {
 // ─── POLICY DOCUMENTS ────────────────────────────────────────────────────────
 
 model PolicyDocument {
-  id            String         @id @default(cuid())
-  title         String
-  category      PolicyCategory
-  version       String
-  description   String?
-  fileUrl       String
-  isActive      Boolean        @default(true)
-  requiresAck   Boolean        @default(false)
-  publishedAt   DateTime       @default(now())
-  expiresAt     DateTime?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  id          String         @id @default(cuid())
+  title       String
+  category    PolicyCategory
+  version     String
+  description String?
+  fileUrl     String
+  isActive    Boolean        @default(true)
+  requiresAck Boolean        @default(false)
+  publishedAt DateTime       @default(now())
+  expiresAt   DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
 
   acknowledgements PolicyAcknowledgement[]
 
@@ -830,13 +828,13 @@ model PolicyDocument {
 }
 
 model PolicyAcknowledgement {
-  id          String         @id @default(cuid())
-  employeeId  String
-  policyId    String
-  acknowledgedAt DateTime    @default(now())
+  id             String   @id @default(cuid())
+  employeeId     String
+  policyId       String
+  acknowledgedAt DateTime @default(now())
 
-  employee    Employee       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  policy      PolicyDocument @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  employee Employee       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  policy   PolicyDocument @relation(fields: [policyId], references: [id], onDelete: Cascade)
 
   @@unique([employeeId, policyId])
   @@index([employeeId])
@@ -846,39 +844,39 @@ model PolicyAcknowledgement {
 // ─── TRAINING ────────────────────────────────────────────────────────────────
 
 model TrainingProgram {
-  id           String          @id @default(cuid())
-  title        String
-  description  String?
-  provider     String?
-  mode         String          @default("ONLINE")
-  durationHours Float?
-  startDate    DateTime?
-  endDate      DateTime?
-  seats        Int?
-  isMandatory  Boolean         @default(false)
+  id                     String    @id @default(cuid())
+  title                  String
+  description            String?
+  provider               String?
+  mode                   String    @default("ONLINE")
+  durationHours          Float?
+  startDate              DateTime?
+  endDate                DateTime?
+  seats                  Int?
+  isMandatory            Boolean   @default(false)
   certificateTemplateUrl String?
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
-  enrollments  TrainingEnrollment[]
+  enrollments TrainingEnrollment[]
 
   @@index([startDate])
   @@index([isMandatory])
 }
 
 model TrainingEnrollment {
-  id            String          @id @default(cuid())
-  employeeId    String
-  programId     String
-  status        TrainingStatus  @default(ENROLLED)
-  enrolledAt    DateTime        @default(now())
-  completedAt   DateTime?
-  score         Float?
+  id             String         @id @default(cuid())
+  employeeId     String
+  programId      String
+  status         TrainingStatus @default(ENROLLED)
+  enrolledAt     DateTime       @default(now())
+  completedAt    DateTime?
+  score          Float?
   certificateUrl String?
-  feedback      String?
+  feedback       String?
 
-  employee      Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  program       TrainingProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
+  employee Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  program  TrainingProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
 
   @@unique([employeeId, programId])
   @@index([employeeId])
@@ -889,18 +887,18 @@ model TrainingEnrollment {
 // ─── EMPLOYEE DOCUMENTS ──────────────────────────────────────────────────────
 
 model EmployeeDocument {
-  id          String       @id @default(cuid())
-  employeeId  String
-  type        DocumentType
-  label       String?
-  fileName    String
-  fileUrl     String
-  fileSize    Int?
-  mimeType    String?
-  uploadedAt  DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id         String       @id @default(cuid())
+  employeeId String
+  type       DocumentType
+  label      String?
+  fileName   String
+  fileUrl    String
+  fileSize   Int?
+  mimeType   String?
+  uploadedAt DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
 
-  employee    Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([employeeId])
   @@index([type])
@@ -910,8 +908,8 @@ model EmployeeDocument {
 
 model RolePermission {
   id          String   @id @default(cuid())
-  role        String   // "SUPER_ADMIN" | "HR_ADMIN" | "DEPT_HEAD" | "EMPLOYEE"
-  module      String   // "EMPLOYEES" | "LEAVES" | "CLAIMS" | "POLICIES" | "TRAINING" | "REPORTS" | "ADMIN"
+  role        String // "SUPER_ADMIN" | "HR_ADMIN" | "DEPT_HEAD" | "EMPLOYEE"
+  module      String // "EMPLOYEES" | "LEAVES" | "CLAIMS" | "POLICIES" | "TRAINING" | "REPORTS" | "ADMIN"
   canView     Boolean  @default(false)
   canCreate   Boolean  @default(false)
   canEdit     Boolean  @default(false)
@@ -943,37 +941,37 @@ model Holiday {
 // ─── LEAVE POLICIES ──────────────────────────────────────────────────────────
 
 model LeavePolicy {
-  id          String            @id @default(cuid())
-  name        String
-  description String?
-  isActive    Boolean           @default(true)
-  carryForward Boolean          @default(false)
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  id           String   @id @default(cuid())
+  name         String
+  description  String?
+  isActive     Boolean  @default(true)
+  carryForward Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  rules       LeavePolicyRule[]
-  grades      LeavePolicyGrade[]
+  rules  LeavePolicyRule[]
+  grades LeavePolicyGrade[]
 }
 
 model LeavePolicyRule {
-  id              String      @id @default(cuid())
+  id              String    @id @default(cuid())
   policyId        String
   leaveType       LeaveType
   daysPerYear     Float
-  maxCarryForward Float       @default(0)
+  maxCarryForward Float     @default(0)
 
-  policy          LeavePolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  policy LeavePolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
 
   @@unique([policyId, leaveType])
   @@index([policyId])
 }
 
 model LeavePolicyGrade {
-  id       String      @id @default(cuid())
+  id       String @id @default(cuid())
   policyId String
   grade    String
 
-  policy   LeavePolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  policy LeavePolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
 
   @@unique([policyId, grade])
   @@index([policyId])
@@ -995,9 +993,9 @@ model BonusPlan {
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
 
-  employee      Employee           @relation("BonusReceiver",  fields: [employeeId],  references: [id], onDelete: Cascade)
-  appraiser     Employee           @relation("BonusAppraiser", fields: [appraiserId], references: [id])
-  payouts       BonusPayout[]
+  employee  Employee      @relation("BonusReceiver", fields: [employeeId], references: [id], onDelete: Cascade)
+  appraiser Employee      @relation("BonusAppraiser", fields: [appraiserId], references: [id])
+  payouts   BonusPayout[]
 
   @@index([employeeId])
   @@index([appraiserId])
@@ -1016,8 +1014,8 @@ model BonusPayout {
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
 
-  plan          BonusPlan         @relation(fields: [planId],     references: [id], onDelete: Cascade)
-  employee      Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  plan     BonusPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  employee Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([planId])
   @@index([employeeId])
@@ -1040,12 +1038,12 @@ model Task {
   attachmentUrl  String?
   attachmentName String?
 
-  assignedBy     Employee      @relation("TaskAssigner", fields: [assignedById], references: [id])
-  assignedTo     Employee      @relation("TaskAssignee", fields: [assignedToId], references: [id])
-  comments       TaskComment[]
+  assignedBy Employee      @relation("TaskAssigner", fields: [assignedById], references: [id])
+  assignedTo Employee      @relation("TaskAssignee", fields: [assignedToId], references: [id])
+  comments   TaskComment[]
 
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([assignedToId])
   @@index([assignedById])
@@ -1054,18 +1052,18 @@ model Task {
 }
 
 model TaskComment {
-  id        String       @id @default(cuid())
-  taskId    String
-  authorId  String
-  body      String
-  parentId  String?
+  id       String  @id @default(cuid())
+  taskId   String
+  authorId String
+  body     String
+  parentId String?
 
-  task      Task         @relation(fields: [taskId],   references: [id], onDelete: Cascade)
-  author    Employee     @relation("TaskCommentAuthor", fields: [authorId], references: [id])
-  parent    TaskComment? @relation("CommentReplies",   fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  replies   TaskComment[] @relation("CommentReplies")
+  task    Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author  Employee      @relation("TaskCommentAuthor", fields: [authorId], references: [id])
+  parent  TaskComment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  replies TaskComment[] @relation("CommentReplies")
 
-  createdAt DateTime     @default(now())
+  createdAt DateTime @default(now())
 
   @@index([taskId])
   @@index([authorId])
@@ -1089,7 +1087,7 @@ model AuditLog {
   userAgent  String?
   createdAt  DateTime @default(now())
 
-  actor      Employee? @relation(fields: [employeeId], references: [id])
+  actor Employee? @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId])
   @@index([entity, entityId])
@@ -1115,24 +1113,24 @@ model Session {
 // ─── ANNOUNCEMENTS ──────────────────────────────────────────────────────────
 
 model Announcement {
-  id             String               @id @default(cuid())
-  title          String
-  body           String
-  type           AnnouncementType     @default(GENERAL)
-  status         AnnouncementStatus   @default(DRAFT)
-  audience       AnnouncementAudience @default(ALL_EMPLOYEES)
-  pinned         Boolean              @default(false)
-  attachments    Json                 @default("[]")
-  expiresAt      DateTime?
-  publishedAt    DateTime?
-  notifiedCount  Int                  @default(0)
-  postedById     String
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
+  id            String               @id @default(cuid())
+  title         String
+  body          String
+  type          AnnouncementType     @default(GENERAL)
+  status        AnnouncementStatus   @default(DRAFT)
+  audience      AnnouncementAudience @default(ALL_EMPLOYEES)
+  pinned        Boolean              @default(false)
+  attachments   Json                 @default("[]")
+  expiresAt     DateTime?
+  publishedAt   DateTime?
+  notifiedCount Int                  @default(0)
+  postedById    String
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
 
-  postedBy       Employee             @relation("AnnouncementAuthor", fields: [postedById], references: [id])
-  views          AnnouncementView[]
-  acks           AnnouncementAck[]
+  postedBy Employee           @relation("AnnouncementAuthor", fields: [postedById], references: [id])
+  views    AnnouncementView[]
+  acks     AnnouncementAck[]
 
   @@index([status])
   @@index([pinned])
@@ -1141,13 +1139,13 @@ model Announcement {
 }
 
 model AnnouncementView {
-  id             String       @id @default(cuid())
+  id             String   @id @default(cuid())
   announcementId String
   employeeId     String
-  viewedAt       DateTime     @default(now())
+  viewedAt       DateTime @default(now())
 
-  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
-  employee       Employee     @relation("AnnouncementViewer", fields: [employeeId], references: [id], onDelete: Cascade)
+  announcement Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation("AnnouncementViewer", fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@unique([announcementId, employeeId])
   @@index([announcementId])
@@ -1155,13 +1153,13 @@ model AnnouncementView {
 }
 
 model AnnouncementAck {
-  id             String       @id @default(cuid())
+  id             String   @id @default(cuid())
   announcementId String
   employeeId     String
-  ackedAt        DateTime     @default(now())
+  ackedAt        DateTime @default(now())
 
-  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
-  employee       Employee     @relation("AnnouncementAcker", fields: [employeeId], references: [id], onDelete: Cascade)
+  announcement Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation("AnnouncementAcker", fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@unique([announcementId, employeeId])
   @@index([announcementId])
@@ -1171,22 +1169,22 @@ model AnnouncementAck {
 // ─── PERSONAL TODOS ─────────────────────────────────────────────────────────
 
 model PersonalTodo {
-  id              String        @id @default(cuid())
-  employeeId      String
-  title           String
-  description     String?
-  category        String        @default("General")
-  dueDate         DateTime?
-  priority        TodoPriority  @default(MEDIUM)
-  completed       Boolean       @default(false)
-  completedAt     DateTime?
-  reminderType    ReminderType  @default(NONE)
-  reminderAt      DateTime?
-  googleEventId   String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id            String       @id @default(cuid())
+  employeeId    String
+  title         String
+  description   String?
+  category      String       @default("General")
+  dueDate       DateTime?
+  priority      TodoPriority @default(MEDIUM)
+  completed     Boolean      @default(false)
+  completedAt   DateTime?
+  reminderType  ReminderType @default(NONE)
+  reminderAt    DateTime?
+  googleEventId String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
-  employee        Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([employeeId])
   @@index([dueDate])
@@ -1194,16 +1192,16 @@ model PersonalTodo {
 }
 
 model GoogleCalendarConnection {
-  id            String   @id @default(cuid())
-  employeeId    String   @unique
-  accessToken   String
-  refreshToken  String
-  expiresAt     DateTime
-  calendarId    String   @default("primary")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String   @id @default(cuid())
+  employeeId   String   @unique
+  accessToken  String
+  refreshToken String
+  expiresAt    DateTime
+  calendarId   String   @default("primary")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([employeeId])
 }
@@ -1216,8 +1214,8 @@ model TeamMembership {
   memberId    String
   addedAt     DateTime @default(now())
 
-  teamOwner   Employee @relation("TeamOwner", fields: [teamOwnerId], references: [id], onDelete: Cascade)
-  member      Employee @relation("TeamMember", fields: [memberId], references: [id], onDelete: Cascade)
+  teamOwner Employee @relation("TeamOwner", fields: [teamOwnerId], references: [id], onDelete: Cascade)
+  member    Employee @relation("TeamMember", fields: [memberId], references: [id], onDelete: Cascade)
 
   @@unique([teamOwnerId, memberId])
   @@index([teamOwnerId])
@@ -1235,7 +1233,7 @@ model EmployeeSalaryConfig {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
-  employee       Employee       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([employeeId])
 }
@@ -1243,76 +1241,76 @@ model EmployeeSalaryConfig {
 // ─── STUDENTS ────────────────────────────────────────────────────────────────
 
 model Student {
-  id                 String        @id @default(cuid())
-  studentCode        String        @unique
-  email              String        @unique
+  id                 String  @id @default(cuid())
+  studentCode        String  @unique
+  email              String  @unique
   passwordHash       String
-  mustChangePassword Boolean       @default(true)
+  mustChangePassword Boolean @default(true)
 
-  firstName          String
-  lastName           String
-  middleName         String?
-  gender             Gender?
-  dateOfBirth        DateTime?
-  photoUrl           String?
-  phone              String?
-  address            Json?
+  firstName   String
+  lastName    String
+  middleName  String?
+  gender      Gender?
+  dateOfBirth DateTime?
+  photoUrl    String?
+  phone       String?
+  address     Json?
 
-  rollNumber         String?
+  rollNumber String?
 
-  parentName         String?
-  parentPhone        String?
-  parentEmail        String?
-  parentRelation     String?
-  parentOccupation   String?
-  parentAddress      Json?
+  parentName       String?
+  parentPhone      String?
+  parentEmail      String?
+  parentRelation   String?
+  parentOccupation String?
+  parentAddress    Json?
 
-  motherName         String?
-  motherPhone        String?
-  motherEmail        String?
-  motherOccupation   String?
+  motherName       String?
+  motherPhone      String?
+  motherEmail      String?
+  motherOccupation String?
 
-  communicationContact     String?   // FATHER | MOTHER | BOTH | OTHER
+  communicationContact      String? // FATHER | MOTHER | BOTH | OTHER
   communicationContactName  String?
   communicationContactPhone String?
 
-  admissionNumber    String?       @unique
-  admissionDate      DateTime?
-  academicYear       String?
-  schoolId           String?
-  school             School?       @relation(fields: [schoolId], references: [id], onDelete: SetNull)
-  nationality        String?       @default("Indian")
+  admissionNumber String?   @unique
+  admissionDate   DateTime?
+  academicYear    String?
+  schoolId        String?
+  school          School?   @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+  nationality     String?   @default("Indian")
 
-  totalFee           Float?
-  paidFee            Float?
-  refundAmount       Float?    // total refunded back to the student, sum of StudentRefund rows
-  discountType       String?   // "PERCENTAGE" | "AMOUNT"
-  discountAmount     Float?
-  paymentDate        DateTime?
-  paymentMode        String?
-  receiptNumber      String?
-  paymentNote        String?
+  totalFee       Float?
+  paidFee        Float?
+  refundAmount   Float? // total refunded back to the student, sum of StudentRefund rows
+  discountType   String? // "PERCENTAGE" | "AMOUNT"
+  discountAmount Float?
+  paymentDate    DateTime?
+  paymentMode    String?
+  receiptNumber  String?
+  paymentNote    String?
 
-  gradeId            String?
-  grade              Grade?        @relation(fields: [gradeId], references: [id], onDelete: SetNull)
+  gradeId String?
+  grade   Grade?  @relation(fields: [gradeId], references: [id], onDelete: SetNull)
 
-  courseId           String?
-  course             Course?       @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  courseId String?
+  course   Course? @relation(fields: [courseId], references: [id], onDelete: SetNull)
 
-  studentBatches     StudentBatch[]
-  batchHistory       StudentBatchHistory[]
+  studentBatches StudentBatch[]
+  batchHistory   StudentBatchHistory[]
 
   initialPasswordHash String?
 
-  instalments        StudentInstalment[]
-  paymentLogs        StudentPaymentLog[]
-  refunds            StudentRefund[]
+  instalments StudentInstalment[]
+  paymentLogs StudentPaymentLog[]
+  refunds     StudentRefund[]
 
-  status             StudentStatus @default(ACTIVE)
-  isArchived         Boolean       @default(false)
+  status     StudentStatus @default(ACTIVE)
+  isArchived Boolean       @default(false)
 
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   sessions            StudentSession[]
   submissions         AssignmentSubmission[]
@@ -1334,7 +1332,7 @@ model StudentSession {
   expiresAt    DateTime
   createdAt    DateTime @default(now())
 
-  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@index([studentId])
   @@index([expiresAt])
@@ -1357,47 +1355,47 @@ model Location {
 }
 
 model Centre {
-  id        String    @id @default(cuid())
-  name      String    @unique
+  id        String   @id @default(cuid())
+  name      String   @unique
   cityId    String?
-  isActive  Boolean   @default(true)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  city      Location? @relation(fields: [cityId], references: [id], onDelete: SetNull)
+  city Location? @relation(fields: [cityId], references: [id], onDelete: SetNull)
 
   @@index([cityId])
   @@index([isActive])
 }
 
 model Batch {
-  id               String    @id @default(cuid())
-  name             String
-  description      String?
-  locationId       String?
-  academicYear     String
-  startDate        DateTime?
-  schoolId         String?
-  gradeId          String?
-  facultyMentorId  String?
-  schoolIds        String[]  @default([])
-  courseIds        String[]  @default([])
-  targetStrength   Int?
-  isActive         Boolean   @default(true)
-  isArchived       Boolean   @default(false)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id              String    @id @default(cuid())
+  name            String
+  description     String?
+  locationId      String?
+  academicYear    String
+  startDate       DateTime?
+  schoolId        String?
+  gradeId         String?
+  facultyMentorId String?
+  schoolIds       String[]  @default([])
+  courseIds       String[]  @default([])
+  targetStrength  Int?
+  isActive        Boolean   @default(true)
+  isArchived      Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  location        Location? @relation(fields: [locationId],    references: [id], onDelete: SetNull)
-  school          School?   @relation(fields: [schoolId],      references: [id], onDelete: SetNull)
-  grade           Grade?    @relation(fields: [gradeId],       references: [id], onDelete: SetNull)
-  facultyMentor   Employee? @relation("BatchFacultyMentor",    fields: [facultyMentorId], references: [id], onDelete: SetNull)
-  studentBatches  StudentBatch[]
-  batchSubjects   BatchSubject[]
-  batchHistories  StudentBatchHistory[]
-  schedules       ScheduleBatch[]
-  assignments     AssignmentBatch[]
-  examBatches     ExamBatch[]
+  location       Location?             @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  school         School?               @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+  grade          Grade?                @relation(fields: [gradeId], references: [id], onDelete: SetNull)
+  facultyMentor  Employee?             @relation("BatchFacultyMentor", fields: [facultyMentorId], references: [id], onDelete: SetNull)
+  studentBatches StudentBatch[]
+  batchSubjects  BatchSubject[]
+  batchHistories StudentBatchHistory[]
+  schedules      ScheduleBatch[]
+  assignments    AssignmentBatch[]
+  examBatches    ExamBatch[]
 
   @@index([academicYear])
   @@index([isActive])
@@ -1407,16 +1405,16 @@ model Batch {
 }
 
 model StudentBatchHistory {
-  id           String    @id @default(cuid())
+  id           String   @id @default(cuid())
   studentId    String
   batchId      String?
   batchName    String
   academicYear String?
   assignedAt   DateTime
-  removedAt    DateTime  @default(now())
+  removedAt    DateTime @default(now())
 
-  student      Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  batch        Batch?    @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  batch   Batch?  @relation(fields: [batchId], references: [id], onDelete: SetNull)
 
   @@index([studentId])
 }
@@ -1427,8 +1425,8 @@ model StudentBatch {
   batchId   String
   joinedAt  DateTime @default(now())
 
-  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  batch     Batch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  batch   Batch   @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
   @@unique([studentId, batchId])
   @@index([studentId])
@@ -1447,27 +1445,27 @@ model Subject {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  head          Employee?      @relation("SubjectHead", fields: [headId], references: [id], onDelete: SetNull)
-  batchSubjects BatchSubject[]
-  schedules     Schedule[]
-  assignments   Assignment[]
-  examSubjects  ExamSubject[]
+  head                 Employee?             @relation("SubjectHead", fields: [headId], references: [id], onDelete: SetNull)
+  batchSubjects        BatchSubject[]
+  schedules            Schedule[]
+  assignments          Assignment[]
+  examSubjects         ExamSubject[]
   examTemplateSubjects ExamTemplateSubject[]
 
   @@index([isActive])
 }
 
 model BatchSubject {
-  id         String    @id @default(cuid())
+  id         String  @id @default(cuid())
   batchId    String
   subjectId  String
   employeeId String?
 
-  batch      Batch     @relation(fields: [batchId],    references: [id], onDelete: Cascade)
-  subject    Subject   @relation(fields: [subjectId],  references: [id], onDelete: Cascade)
-  employee   Employee? @relation("FacultySubjects",    fields: [employeeId], references: [id], onDelete: SetNull)
+  batch    Batch     @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  subject  Subject   @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  employee Employee? @relation("FacultySubjects", fields: [employeeId], references: [id], onDelete: SetNull)
 
-  createdAt  DateTime  @default(now())
+  createdAt DateTime @default(now())
 
   @@unique([batchId, subjectId])
   @@index([batchId])
@@ -1507,8 +1505,8 @@ model Grade {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  students  Student[]
-  batches   Batch[]
+  students Student[]
+  batches  Batch[]
 }
 
 model Course {
@@ -1522,40 +1520,40 @@ model Course {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  students         Student[]
-  instalmentPlans  InstalmentPlan[]
+  students        Student[]
+  instalmentPlans InstalmentPlan[]
 
   @@index([isActive])
 }
 
 model InstalmentPlan {
-  id          String               @id @default(cuid())
+  id          String   @id @default(cuid())
   name        String
   courseId    String?
   description String?
-  isActive    Boolean              @default(true)
-  createdAt   DateTime             @default(now())
-  updatedAt   DateTime             @updatedAt
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  course      Course?              @relation(fields: [courseId], references: [id], onDelete: SetNull)
-  items       InstalmentPlanItem[]
+  course Course?              @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  items  InstalmentPlanItem[]
 
   @@index([courseId])
   @@index([isActive])
 }
 
 model InstalmentPlanItem {
-  id                String         @id @default(cuid())
+  id                String    @id @default(cuid())
   planId            String
   instalmentNo      Int
   label             String?
   amount            Float
   daysFromAdmission Int?
   dueDate           DateTime?
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  plan              InstalmentPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  plan InstalmentPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
 
   @@index([planId])
 }
@@ -1575,8 +1573,8 @@ model StudentInstalment {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  student      Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  paymentLogs  StudentPaymentLog[]
+  student     Student             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  paymentLogs StudentPaymentLog[]
 
   @@index([studentId])
 }
@@ -1592,8 +1590,8 @@ model StudentPaymentLog {
   note          String?
   createdAt     DateTime  @default(now())
 
-  student       Student            @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  instalment    StudentInstalment? @relation(fields: [instalmentId], references: [id], onDelete: SetNull)
+  student    Student            @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  instalment StudentInstalment? @relation(fields: [instalmentId], references: [id], onDelete: SetNull)
 
   @@index([studentId])
 }
@@ -1602,16 +1600,16 @@ model StudentPaymentLog {
 // is one refund; their sum is mirrored on Student.refundAmount the way payment
 // logs are mirrored on Student.paidFee.
 model StudentRefund {
-  id            String    @id @default(cuid())
-  studentId     String
-  amount        Float
-  refundMode    String?
-  refundDate    DateTime?
+  id              String    @id @default(cuid())
+  studentId       String
+  amount          Float
+  refundMode      String?
+  refundDate      DateTime?
   referenceNumber String?
-  reason        String?
-  createdAt     DateTime  @default(now())
+  reason          String?
+  createdAt       DateTime  @default(now())
 
-  student       Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@index([studentId])
 }
@@ -1625,8 +1623,8 @@ model School {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  students  Student[]
-  batches   Batch[]
+  students Student[]
+  batches  Batch[]
 
   @@index([isActive])
 }
@@ -1641,7 +1639,7 @@ model DirectoryEntry {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  employee     Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([displayOrder])
 }
@@ -1667,12 +1665,12 @@ model Schedule {
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 
-  subject      Subject?       @relation(fields: [subjectId],  references: [id], onDelete: SetNull)
-  employee     Employee?      @relation("FacultySchedules", fields: [employeeId], references: [id], onDelete: SetNull)
-  location     Location?      @relation(fields: [locationId], references: [id], onDelete: SetNull)
-  batches      ScheduleBatch[]
-  attendances  ScheduleAttendance[]
-  assignments  Assignment[]
+  subject     Subject?             @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  employee    Employee?            @relation("FacultySchedules", fields: [employeeId], references: [id], onDelete: SetNull)
+  location    Location?            @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  batches     ScheduleBatch[]
+  attendances ScheduleAttendance[]
+  assignments Assignment[]
 
   @@index([date])
   @@index([status])
@@ -1691,8 +1689,8 @@ model ScheduleAttendance {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  schedule   Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
-  student    Student  @relation(fields: [studentId],  references: [id], onDelete: Cascade)
+  schedule Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  student  Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@unique([scheduleId, studentId])
   @@index([scheduleId])
@@ -1700,12 +1698,12 @@ model ScheduleAttendance {
 }
 
 model ScheduleBatch {
-  id         String   @id @default(cuid())
+  id         String @id @default(cuid())
   scheduleId String
   batchId    String
 
-  schedule   Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
-  batch      Batch    @relation(fields: [batchId],    references: [id], onDelete: Cascade)
+  schedule Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  batch    Batch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
   @@unique([scheduleId, batchId])
   @@index([scheduleId])
@@ -1731,7 +1729,7 @@ model Assignment {
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
-  subject     Subject?               @relation(fields: [subjectId],  references: [id], onDelete: SetNull)
+  subject     Subject?               @relation(fields: [subjectId], references: [id], onDelete: SetNull)
   employee    Employee?              @relation("FacultyAssignments", fields: [employeeId], references: [id], onDelete: SetNull)
   schedule    Schedule?              @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
   batches     AssignmentBatch[]
@@ -1746,12 +1744,12 @@ model Assignment {
 }
 
 model AssignmentBatch {
-  id           String     @id @default(cuid())
+  id           String @id @default(cuid())
   assignmentId String
   batchId      String
 
   assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
-  batch      Batch      @relation(fields: [batchId],      references: [id], onDelete: Cascade)
+  batch      Batch      @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
   @@unique([assignmentId, batchId])
   @@index([assignmentId])
@@ -1771,7 +1769,7 @@ model AssignmentSubmission {
   updatedAt      DateTime         @updatedAt
 
   assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
-  student    Student    @relation(fields: [studentId],    references: [id], onDelete: Cascade)
+  student    Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@unique([assignmentId, studentId])
   @@index([assignmentId])
@@ -1808,12 +1806,12 @@ model Exam {
   resultsReleasedById String?
   studentsNotifiedAt  DateTime?
 
-  batches  ExamBatch[]
-  subjects ExamSubject[]
-  results  ExamResult[]
-  examType     ExamType?         @relation(fields: [examTypeId],   references: [id], onDelete: Restrict)
+  batches      ExamBatch[]
+  subjects     ExamSubject[]
+  results      ExamResult[]
+  examType     ExamType?         @relation(fields: [examTypeId], references: [id], onDelete: Restrict)
   controller   Employee?         @relation("ExamController", fields: [controllerId], references: [id], onDelete: SetNull)
-  executive    Employee?         @relation("ExamExecutive",  fields: [executiveId],  references: [id], onDelete: SetNull)
+  executive    Employee?         @relation("ExamExecutive", fields: [executiveId], references: [id], onDelete: SetNull)
   subjectTeams ExamSubjectTeam[]
   stages       ExamStage[]
 
@@ -1832,7 +1830,7 @@ model ExamSubject {
   topics      String?
   maxMarks    Float?
 
-  exam    Exam     @relation(fields: [examId],    references: [id], onDelete: Cascade)
+  exam    Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
   subject Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
 
   @@unique([examId, paperNum, subjectSlot])
@@ -1845,7 +1843,7 @@ model ExamBatch {
   examId  String
   batchId String
 
-  exam  Exam  @relation(fields: [examId],  references: [id], onDelete: Cascade)
+  exam  Exam  @relation(fields: [examId], references: [id], onDelete: Cascade)
   batch Batch @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
   @@unique([examId, batchId])
@@ -1877,7 +1875,7 @@ model ExamTemplateSubject {
   maxMarks    Float?
 
   template ExamTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  subject  Subject?     @relation(fields: [subjectId],  references: [id], onDelete: SetNull)
+  subject  Subject?     @relation(fields: [subjectId], references: [id], onDelete: SetNull)
 
   @@unique([templateId, paperNum, subjectSlot])
   @@index([templateId])
@@ -1893,8 +1891,8 @@ model ExamResult {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  exam    Exam    @relation(fields: [examId],    references: [id], onDelete: Cascade)
-  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  exam    Exam       @relation(fields: [examId], references: [id], onDelete: Cascade)
+  student Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
   marks   ExamMark[]
 
   @@unique([examId, studentId])
@@ -1918,20 +1916,20 @@ model ExamMark {
 // ─── PTM (Parent–Teacher Meeting) ────────────────────────────────────────────
 
 model PTM {
-  id          String        @id @default(cuid())
+  id          String    @id @default(cuid())
   studentId   String
-  date        DateTime      @db.Date
-  startTime   String        // "HH:MM" 24-hr
-  endTime     String?       // optional
+  date        DateTime  @db.Date
+  startTime   String // "HH:MM" 24-hr
+  endTime     String? // optional
   venue       String?
   agenda      String?
-  status      PTMStatus     @default(SCHEDULED)
-  notes       String?       // post-meeting general discussion notes
+  status      PTMStatus @default(SCHEDULED)
+  notes       String? // post-meeting general discussion notes
   createdById String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  student     Student         @relation(fields: [studentId],   references: [id], onDelete: Cascade)
+  student     Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
   createdBy   Employee?       @relation("PTMCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   attendees   PTMAttendee[]
   actionItems PTMActionItem[]
@@ -1946,7 +1944,7 @@ model PTMAttendee {
   employeeId String
   createdAt  DateTime @default(now())
 
-  ptm      PTM      @relation(fields: [ptmId],      references: [id], onDelete: Cascade)
+  ptm      PTM      @relation(fields: [ptmId], references: [id], onDelete: Cascade)
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@unique([ptmId, employeeId])
@@ -1986,47 +1984,47 @@ enum FeedbackType {
 }
 
 enum FeedbackStatus {
-  OPEN              // submitted, awaiting admin
-  RESPONDED         // admin replied, awaiting student
-  CLOSED            // closed by admin
+  OPEN // submitted, awaiting admin
+  RESPONDED // admin replied, awaiting student
+  CLOSED // closed by admin
   CLOSED_BY_STUDENT // student closed it ("Closed by sender" from admin POV)
 }
 
 model StudentFeedback {
-  id           String         @id @default(cuid())
-  studentId    String
-  student      Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
-  type         FeedbackType
-  message      String         @db.Text   // the original submission message
-  status       FeedbackStatus @default(OPEN)
+  type    FeedbackType
+  message String         @db.Text // the original submission message
+  status  FeedbackStatus @default(OPEN)
 
-  retractedAt  DateTime?      // soft-delete: student permanently removed it
-  adminNote    String?        // kept for migration compat (use messages instead)
+  retractedAt DateTime? // soft-delete: student permanently removed it
+  adminNote   String? // kept for migration compat (use messages instead)
 
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  messages     FeedbackMessage[]
+  messages FeedbackMessage[]
 
   @@index([studentId])
   @@index([status])
 }
 
 model FeedbackMessage {
-  id             String          @id @default(cuid())
-  feedbackId     String
-  feedback       StudentFeedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  id         String          @id @default(cuid())
+  feedbackId String
+  feedback   StudentFeedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
 
-  senderType     String          // "STUDENT" | "ADMIN"
-  senderId       String          // studentId or employeeId
-  senderName     String          // denormalized full name
+  senderType String // "STUDENT" | "ADMIN"
+  senderId   String // studentId or employeeId
+  senderName String // denormalized full name
 
-  message        String          @db.Text
+  message        String  @db.Text
   attachmentUrl  String?
   attachmentName String?
 
-  createdAt      DateTime        @default(now())
+  createdAt DateTime @default(now())
 
   @@index([feedbackId])
 }
@@ -2036,31 +2034,29 @@ model FeedbackMessage {
 enum NotificationChannel {
   EMAIL
   WHATSAPP
-  IN_APP    // the bell in the app — "delivered" the moment the row is written
+  IN_APP // the bell in the app — "delivered" the moment the row is written
 }
 
 enum NotificationStatus {
-  PENDING   // queued, waiting for the dispatcher
-  SENDING   // claimed by a dispatcher run — guards against double delivery
+  PENDING // queued, waiting for the dispatcher
+  SENDING // claimed by a dispatcher run — guards against double delivery
   SENT
-  FAILED    // gave up: permanent rejection, or attempts exhausted
-  SKIPPED   // channel not configured, or the recipient opted out
+  FAILED // gave up: permanent rejection, or attempts exhausted
+  SKIPPED // channel not configured, or the recipient opted out
 }
 
 /**
  * Super-Admin kill switches for the outbox, one row per event plus a reserved
  * `GLOBAL` row that gates everything.
- *
  * Checked at ENQUEUE time, not at dispatch: a disabled channel writes no row at
  * all. That keeps the outbox a record of what was genuinely attempted, and means
  * re-enabling a channel starts the next event rather than flushing a backlog of
  * stale notices nobody wants any more.
- *
  * A missing row means enabled — new events light up by default rather than
  * silently going nowhere until someone notices the table is short a row.
  */
 model NotificationSetting {
-  event           String   @id   // "GLOBAL" | "LEAVE_APPLIED" | "CLAIM_SUBMITTED" | ...
+  event           String   @id // "GLOBAL" | "LEAVE_APPLIED" | "CLAIM_SUBMITTED" | ...
   emailEnabled    Boolean  @default(true)
   whatsappEnabled Boolean  @default(true)
   inAppEnabled    Boolean  @default(true)
@@ -2073,14 +2069,13 @@ model NotificationSetting {
  * that causes it, then delivered out-of-band by the dispatcher. Persisting
  * first is the point: it survives a crash mid-send, gives retries somewhere to
  * live, and leaves a queryable record of who was told what and when.
- *
  * `destination` is frozen at enqueue time on purpose — the address the message
  * actually went to, not whatever the employee record says today.
  */
 model Notification {
   id            String              @id @default(cuid())
   channel       NotificationChannel
-  event         String              // LEAVE_APPLIED | LEAVE_CANCEL_REQUESTED | LEAVE_APPROVED | LEAVE_REJECTED
+  event         String // LEAVE_APPLIED | LEAVE_CANCEL_REQUESTED | LEAVE_APPROVED | LEAVE_REJECTED
   recipientId   String?
   destination   String
   payload       Json
@@ -2089,7 +2084,7 @@ model Notification {
   lastError     String?
   nextAttemptAt DateTime            @default(now())
   sentAt        DateTime?
-  entityType    String?             // "LeaveApplication"
+  entityType    String? // "LeaveApplication"
   entityId      String?
   // IN_APP only: when the recipient opened it, and when they cleared it from
   // their bell. Clearing is a soft dismiss — the delivery record is the same
@@ -2099,7 +2094,7 @@ model Notification {
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
 
-  recipient     Employee?           @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: SetNull)
+  recipient Employee? @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: SetNull)
 
   @@index([status, nextAttemptAt])
   @@index([recipientId])
@@ -2116,9 +2111,9 @@ model Notification {
 // actually private — Drive itself is never shared with viewers.
 
 enum ResourceVisibility {
-  PRIVATE      // owner only — not even Super Admins
-  ALL_STAFF    // everyone holding RESOURCES.canView
-  DEPARTMENTS  // members of the departments in ResourceDepartment
+  PRIVATE // owner only — not even Super Admins
+  ALL_STAFF // everyone holding RESOURCES.canView
+  DEPARTMENTS // members of the departments in ResourceDepartment
 }
 
 enum ResourceItemKind {
@@ -2128,21 +2123,21 @@ enum ResourceItemKind {
 }
 
 enum ResourceItemStatus {
-  UPLOADING  // Drive upload session handed to the browser, not yet confirmed
+  UPLOADING // Drive upload session handed to the browser, not yet confirmed
   READY
 }
 
 model ResourceCategory {
-  id          String   @id @default(cuid())
-  name        String   @unique
+  id            String   @id @default(cuid())
+  name          String   @unique
   /// The six seeded categories. They can be renamed but not deleted.
-  isDefault   Boolean  @default(false)
-  sortOrder   Int      @default(100)
+  isDefault     Boolean  @default(false)
+  sortOrder     Int      @default(100)
   /// Drive folder grouping this category's resource folders. Created lazily.
   driveFolderId String?
-  createdById String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   resources Resource[]
 }
@@ -2185,24 +2180,24 @@ model ResourceDepartment {
 }
 
 model ResourceItem {
-  id            String             @id @default(cuid())
-  resourceId    String
+  id          String             @id @default(cuid())
+  resourceId  String
   /// Containing folder; null = top level of the resource.
-  parentId      String?
-  kind          ResourceItemKind
-  status        ResourceItemStatus @default(READY)
-  name          String
+  parentId    String?
+  kind        ResourceItemKind
+  status      ResourceItemStatus @default(READY)
+  name        String
   /// LINK only.
-  url           String?
+  url         String?
   /// FILE: the Drive file. FOLDER: the mirrored Drive folder (lazy).
-  driveFileId   String?
-  mimeType      String?
-  sizeBytes     BigInt?
-  isHidden      Boolean            @default(false)
-  createdById   String
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
-  deletedAt     DateTime?
+  driveFileId String?
+  mimeType    String?
+  sizeBytes   BigInt?
+  isHidden    Boolean            @default(false)
+  createdById String
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  deletedAt   DateTime?
 
   resource  Resource       @relation(fields: [resourceId], references: [id], onDelete: Cascade)
   parent    ResourceItem?  @relation("ResourceItemTree", fields: [parentId], references: [id], onDelete: Cascade)
@@ -2220,14 +2215,15 @@ model ResourceItem {
 // never touch exams already created: stages are snapshots.
 
 enum ExamMode {
-  PEN_PAPER   // paper stored on the Drive, printed and dispatched
-  ONLINE      // computer-based test hosted on Learnyst
+  PEN_PAPER // paper stored on the Drive, printed and dispatched
+  ONLINE // computer-based test hosted on Learnyst
+  HYBRID // both: a printed paper and a Learnyst test (PPT + CBT)
 }
 
 enum ExamTeamRole {
-  CONTROLLER  // Controller of Examinations
-  EXECUTIVE   // Examination Executive
-  VIEWER      // sees the Exam Board and every exam, read-only
+  CONTROLLER // Controller of Examinations
+  EXECUTIVE // Examination Executive
+  VIEWER // sees the Exam Board and every exam, read-only
 }
 
 enum ExamStageOwnerRole {
@@ -2238,8 +2234,8 @@ enum ExamStageOwnerRole {
 }
 
 enum ExamStageScope {
-  EXAM     // one stage for the whole exam
-  SUBJECT  // one stage per paper/subject slot (setting, review, freeze...)
+  EXAM // one stage for the whole exam
+  SUBJECT // one stage per paper/subject slot (setting, review, freeze...)
 }
 
 enum ExamStageStatus {
@@ -2247,24 +2243,33 @@ enum ExamStageStatus {
   IN_PROGRESS
   PENDING_APPROVAL // submitted by the owner; waiting for the approver
   DONE
-  BYPASSED    // skipped by the Controller with a recorded reason
+  BYPASSED // skipped by the Controller with a recorded reason
 }
 
 // Who must sign a stage off before it counts as done. null = the owner closes it.
 enum ExamStageApprover {
-  SUBJECT_HEAD  // the paper's approver on the exam, else the subject's head, else the Controller
-  CONTROLLER    // the exam's Controller
+  SUBJECT_HEAD // the paper's approver on the exam, else the subject's head, else the Controller
+  CONTROLLER // the exam's Controller
+  BATCH_TEACHERS // every teacher of the subject in the exam's batches (one sign-off each)
+}
+
+// One teacher's sign-off on a BATCH_TEACHERS stage.
+enum ExamSignoffStatus {
+  PENDING
+  APPROVED
+  SENT_BACK
+  BYPASSED // waived by the Controller with a reason
 }
 
 // Structured input a stage collects instead of a bare "done".
 enum ExamStageForm {
-  BLUEPRINT  // marks, question count and type per syllabus chapter + difficulty mix
+  BLUEPRINT // marks, question count and type per syllabus chapter + difficulty mix
 }
 
 // What the system does when a stage is marked done.
 enum ExamStageAction {
-  NOTIFY_STUDENTS   // email the exam notice + syllabus to students and parents
-  RELEASE_RESULTS   // make marks visible on the student portal + email scores
+  NOTIFY_STUDENTS // email the exam notice + syllabus to students and parents
+  RELEASE_RESULTS // make marks visible on the student portal + email scores
 }
 
 // The standing exam team, set by Super Admin. Faculty who set and review papers
@@ -2301,10 +2306,10 @@ model ExamStageTemplate {
   sequenceNo  Int
   name        String
   description String?
-  offsetDays  Int                // negative = before the exam, positive = after
+  offsetDays  Int // negative = before the exam, positive = after
   ownerRole   ExamStageOwnerRole
   scope       ExamStageScope     @default(EXAM)
-  mode        ExamMode?          // null = applies to both modes
+  mode        ExamMode? // null = applies to both modes
   action      ExamStageAction?
   canBypass   Boolean            @default(false)
   approver    ExamStageApprover?
@@ -2328,8 +2333,8 @@ model ExamSubjectTeam {
   // Approves this paper's blueprint. Blank = the subject's head.
   approverId  String?
 
-  exam     Exam      @relation(fields: [examId],     references: [id], onDelete: Cascade)
-  setter   Employee? @relation("ExamPaperSetter",   fields: [setterId],   references: [id], onDelete: SetNull)
+  exam     Exam      @relation(fields: [examId], references: [id], onDelete: Cascade)
+  setter   Employee? @relation("ExamPaperSetter", fields: [setterId], references: [id], onDelete: SetNull)
   reviewer Employee? @relation("ExamPaperReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
   approver Employee? @relation("ExamPaperApprover", fields: [approverId], references: [id], onDelete: SetNull)
 
@@ -2341,48 +2346,49 @@ model ExamSubjectTeam {
 }
 
 model ExamStage {
-  id              String             @id @default(cuid())
-  examId          String
-  templateId      String?
-  sequenceNo      Int
-  name            String
-  description     String?
-  ownerRole       ExamStageOwnerRole
-  scope           ExamStageScope
-  action          ExamStageAction?
-  canBypass       Boolean            @default(false)
-  approver        ExamStageApprover?
-  form            ExamStageForm?
+  id                 String             @id @default(cuid())
+  examId             String
+  templateId         String?
+  sequenceNo         Int
+  name               String
+  description        String?
+  ownerRole          ExamStageOwnerRole
+  scope              ExamStageScope
+  action             ExamStageAction?
+  canBypass          Boolean            @default(false)
+  approver           ExamStageApprover?
+  form               ExamStageForm?
   // The form's answers (for BLUEPRINT: { maxMarks, chapters[], difficulty }).
-  formData        Json?
+  formData           Json?
   // Who must approve it — resolved when the owner submits, refreshed by sync.
-  approverId      String?
-  submittedAt     DateTime?
-  offsetDays      Int
+  approverId         String?
+  submittedAt        DateTime?
+  offsetDays         Int
   // 0/0 for exam-wide stages, so the unique key below works for both scopes.
-  paperNum        Int                @default(0)
-  subjectSlot     Int                @default(0)
-  subjectLabel    String?
-  plannedDate     DateTime           @db.Date
-  ownerId         String?
+  paperNum           Int                @default(0)
+  subjectSlot        Int                @default(0)
+  subjectLabel       String?
+  plannedDate        DateTime           @db.Date
+  ownerId            String?
   // Set when someone reassigns the owner by hand, so later team changes don't undo it.
-  ownerOverridden Boolean            @default(false)
-  status          ExamStageStatus    @default(NOT_STARTED)
-  startedAt       DateTime?
-  completedAt     DateTime?
-  completedById   String?
-  remarks         String?
-  evidenceUrl     String?
-  bypassReason    String?
+  ownerOverridden    Boolean            @default(false)
+  status             ExamStageStatus    @default(NOT_STARTED)
+  startedAt          DateTime?
+  completedAt        DateTime?
+  completedById      String?
+  remarks            String?
+  evidenceUrl        String?
+  bypassReason       String?
   reminderSentAt     DateTime?
   overdueAlertSentAt DateTime?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 
-  exam   Exam             @relation(fields: [examId],  references: [id], onDelete: Cascade)
-  owner    Employee?      @relation("ExamStageOwner", fields: [ownerId], references: [id], onDelete: SetNull)
-  approverPerson Employee? @relation("ExamStageApprover", fields: [approverId], references: [id], onDelete: SetNull)
-  events ExamStageEvent[]
+  exam           Exam               @relation(fields: [examId], references: [id], onDelete: Cascade)
+  owner          Employee?          @relation("ExamStageOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  approverPerson Employee?          @relation("ExamStageApprover", fields: [approverId], references: [id], onDelete: SetNull)
+  events         ExamStageEvent[]
+  signoffs       ExamStageSignoff[]
 
   @@unique([examId, sequenceNo, paperNum, subjectSlot])
   @@index([examId])
@@ -2391,13 +2397,42 @@ model ExamStage {
   @@index([plannedDate])
 }
 
+// Per-teacher approval on a stage approved by BATCH_TEACHERS (the syllabus
+// sign-off). One row per person who must sign: the subject's teacher in each of
+// the exam's batches, or the fallback (subject head, else Controller) for a
+// batch with no teacher. The stage closes when every row is APPROVED/BYPASSED.
+model ExamStageSignoff {
+  id             String            @id @default(cuid())
+  stageId        String
+  employeeId     String
+  status         ExamSignoffStatus @default(PENDING)
+  // Batches this person signs for (names, for display).
+  batchNames     String[]          @default([])
+  // Signing because a batch has no teacher for the subject.
+  fallback       Boolean           @default(false)
+  // The chapters this sign-off applies to (normalised key). An approval only
+  // carries over to a resubmission if the chapters are unchanged.
+  approvedTopics String?
+  comment        String?
+  decidedAt      DateTime?
+  decidedById    String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  stage    ExamStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  employee Employee  @relation("ExamStageSignoffs", fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([stageId, employeeId])
+  @@index([employeeId, status])
+}
+
 // Append-only history of every change to a stage: who, what, when, why.
 model ExamStageEvent {
   id         String   @id @default(cuid())
   stageId    String
   actorId    String?
   actorName  String
-  action     String   // STARTED | DONE | BYPASSED | REOPENED | OWNER_CHANGED | RESCHEDULED | UPDATED | SUBMITTED | APPROVED | SENT_BACK | WITHDRAWN
+  action     String // STARTED | DONE | BYPASSED | REOPENED | OWNER_CHANGED | RESCHEDULED | UPDATED | SUBMITTED | APPROVED | SENT_BACK | WITHDRAWN
   fromStatus String?
   toStatus   String?
   note       String?
