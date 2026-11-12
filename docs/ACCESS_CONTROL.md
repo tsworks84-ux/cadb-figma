@@ -44,6 +44,7 @@ permissions are read — so a new module needs its defaults written there.
 | MIS reports | `MIS_EMP_DIRECTORY`, `MIS_SALARY_STRUCT`, `MIS_SALARY_DISB`, `MIS_LEAVE_RECORDS`, `MIS_HOLIDAYS`, `MIS_CLAIMS` | One card each; the matrix is the **only** control (no role bypass) |
 | Academics | `ACA_OVERVIEW`, `ACA_BATCH`, `ACA_SUBJECT`, `ACA_SETTINGS`, `STU_PROFILE`, `STU_ADMISSION`, `STU_ATTENDANCE`, `STU_ASSIGNMENT`, `STU_ASSESSMENT`, `STU_TIMETABLE` | Every role except Super Admin — **HR included** — goes through the matrix |
 | Administration | `ADM_DEPARTMENTS`, `ADM_DESIGNATIONS`, `ADM_LEAVE_POLICIES`, `ADM_WORK_LOCATIONS`, `ADM_CLAIM_TYPES` | One per tab, so a single tab can be delegated |
+| Exams | `EXAMS` | View = exam board, all exams, settings read-only; Edit = set up exams and reassign (Executive level). Controller powers and editing exam settings are never granted by the matrix. Per-person read-only access = Exam team role `VIEWER` |
 | Resources | `RESOURCES` | View = open library; Create = add own; Edit/Delete/Approve(Hide) = moderate others' |
 
 **Helpers** (`apps/api/src/utils/permissions.ts`): `hasPermission(user, module, action)`,

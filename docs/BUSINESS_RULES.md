@@ -156,6 +156,23 @@ computes the preview. Deleting can target one class or the series.
   student marked absent on screen who has marks in the file is reported as an error, not silently flipped.
   Import Marks saves unsaved grid edits first.
 
+### 6.4 Exam operations (tracking)
+- Optional layer on an assessment: exam type (Super Admin parameter per academic year), mode, Controller of
+  Examinations, Examination Executive, and per-subject setter / reviewer / approver (`ExamSubjectTeam`, keyed by
+  paper × subject slot). Rules live in `utils/examTracking.ts`.
+- Setting up an exam snapshots the type's stage templates (16 by default) into `ExamStage` rows. Planned date =
+  exam date + offset, moved back to the previous working day if it lands on a Sunday/holiday; exam day never moves.
+  Overdue is derived on read. A stage is blocked until earlier exam-wide stages and same-slot subject stages are done.
+- **Blueprint** stage: chapters come from `ExamSubject.topics`; marks must sum to the paper's max marks and
+  easy/medium/hard to 100%. Submitting sends it to the approver (per-exam override → subject head → Controller,
+  never the owner); approval completes it, send-back needs a comment. Changing chapters or max marks reopens it.
+- **Results release gate:** students see marks only once `resultsReleasedAt` is set (Controller-only stage;
+  reopening hides them again). Untracked exams get it at creation, so their behaviour is unchanged.
+- Hourly sweep (`utils/examSweep.ts`): due-in-2-days reminder to the owner, overdue alert to owner + Controller +
+  Executive, once each. Student/parent notices (`EXAM_SCHEDULED`, `EXAM_RESULTS_RELEASED`) ship **disabled**
+  pending per-school branding.
+- Assigned exam stages appear in My To-Do but remain their own records.
+
 ### 6.3 Access
 All academics features are gated by the permission matrix for every role except Super Admin. Teachers
 (EMPLOYEE role) see a view filtered to their own batches.
