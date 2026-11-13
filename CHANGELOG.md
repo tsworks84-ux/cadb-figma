@@ -6,6 +6,7 @@ minor = new capability, patch = fix.
 
 | Version | Date | Summary |
 |---|---|---|
+| v1.29.0 | 2026-11-13 | Hybrid (pen & paper + online) exam mode; syllabus sign-off by every batch subject teacher before the blueprint (subject-head/Controller fallback, Controller bypass with reason) |
 | v1.28.0 | 2026-11-12 | Exam operations: 16-step exam cycle with owners, deadlines, reminders, blueprint + subject-head approval, results release gate, EXAMS module + read-only exam viewers, exam tasks in My To-Do |
 | v1.27.0 | 2026-11-07 | Grouped sidebar, revenue/leave overflow fixes, revenue crash fix |
 | v1.26.0 | 2026-11-07 | Assessments list paging/search + import keeps attendance |
