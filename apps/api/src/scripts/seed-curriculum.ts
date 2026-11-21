@@ -22,6 +22,8 @@ import { outlineCounts, writeOutline, type Outline } from "../utils/curriculum.j
 
 type Entry = { grade: string; subject: string; board: string; chapters: Outline };
 
+const SUBJECT_NAMES: Record<string, string> = { PHY: "physics", CHE: "chemistry", MAT: "mathematics", BIO: "biology" };
+
 async function main() {
   const file = process.argv[2];
   const apply = process.argv.includes("--apply");
@@ -30,11 +32,15 @@ async function main() {
 
   const entries: Entry[] = JSON.parse(readFileSync(file, "utf8"));
   const [subjects, grades] = await Promise.all([
-    prisma.subject.findMany({ select: { id: true, code: true } }),
+    prisma.subject.findMany({ select: { id: true, code: true, name: true } }),
     prisma.grade.findMany({ select: { id: true, name: true } }),
   ]);
-  const subjectId = new Map(subjects.map((s) => [s.code.toUpperCase(), s.id]));
-  const gradeId = new Map(grades.map((g) => [g.name.toUpperCase(), g.id]));
+  // Subject codes differ between environments (prod uses P/C/M/B, staging PHY/CHE/
+  // MAT/BIO), so fall back to the subject's name. Names are trimmed: prod has " Chemistry".
+  const byCode = new Map(subjects.map((s) => [s.code.trim().toUpperCase(), s.id]));
+  const byName = new Map(subjects.map((s) => [s.name.trim().toLowerCase(), s.id]));
+  const subjectId = { get: (code: string) => byCode.get(code) ?? byName.get(SUBJECT_NAMES[code] ?? "") };
+  const gradeId = new Map(grades.map((g) => [g.name.trim().toUpperCase(), g.id]));
 
   let wrote = 0, skipped = 0, missing = 0;
   for (const e of entries) {
