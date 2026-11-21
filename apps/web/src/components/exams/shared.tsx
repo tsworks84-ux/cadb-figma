@@ -12,7 +12,7 @@ import { useAuthStore } from "@/store/auth";
 
 export type Person = { id: string; firstName: string; lastName: string; employeeCode?: string };
 export type StageStatus = "NOT_STARTED" | "IN_PROGRESS" | "PENDING_APPROVAL" | "DONE" | "BYPASSED";
-export type OwnerRole = "CONTROLLER" | "EXECUTIVE" | "PAPER_SETTER" | "REVIEWER";
+export type OwnerRole = "CONTROLLER" | "EXECUTIVE" | "PAPER_SETTER" | "REVIEWER" | "EVALUATOR";
 
 export type ExamMe = {
   teamRole: "CONTROLLER" | "EXECUTIVE" | "VIEWER" | null;
@@ -20,7 +20,10 @@ export type ExamMe = {
   /** Show My Exam Tasks: open work, a submission awaiting approval, or something finished lately. */
   showTasks: boolean;
   canManageAny: boolean;
+  /** Change the exam team (Super Admin only). */
   canManageSettings: boolean;
+  /** Edit subject heads and exam types/timings (Super Admin, team Controller, or Controller on any exam). */
+  canManageSetup: boolean;
   openTasks: number;
   overdueTasks: number;
   pendingApprovals: number;
@@ -31,6 +34,7 @@ export const OWNER_ROLE_LABEL: Record<OwnerRole, string> = {
   EXECUTIVE: "Examination Executive",
   PAPER_SETTER: "Paper setter",
   REVIEWER: "Paper reviewer",
+  EVALUATOR: "Subject evaluator",
 };
 
 export type TeamRole = "CONTROLLER" | "EXECUTIVE" | "VIEWER";
@@ -87,7 +91,7 @@ export function ExamsHeader({ title, subtitle, actions }: { title: string; subti
   const tabs = [
     ...(me?.canViewBoard ? [{ href: "/dashboard/exams", label: "Exam Board", icon: LayoutDashboard }] : []),
     ...(me?.showTasks ? [{ href: "/dashboard/exams/tasks", label: "My Tasks", icon: ListChecks, badge: me?.overdueTasks || 0 }] : []),
-    ...(me?.canViewBoard ? [{ href: "/dashboard/exams/settings", label: "Settings", icon: Settings2 }] : []),
+    ...(me?.canViewBoard || me?.canManageSetup ? [{ href: "/dashboard/exams/settings", label: "Settings", icon: Settings2 }] : []),
   ];
   const active = (href: string) => href === "/dashboard/exams" ? pathname === href : pathname.startsWith(href);
 
@@ -199,14 +203,20 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
   );
 }
 
-/** Search-as-you-type employee picker backed by /exams/staff. */
+/**
+ * Search-as-you-type employee picker backed by /exams/staff. Only people on staff
+ * are offered. With `subjectId`, only that subject's faculty (its batch teachers
+ * and head). `blocked` people are listed but can't be picked, with the reason.
+ */
 export function PersonPicker({
-  value, onChange, placeholder = "Search staff…", disabled,
+  value, onChange, placeholder, disabled, subjectId, blocked,
 }: {
   value: Person | null;
   onChange: (p: Person | null) => void;
   placeholder?: string;
   disabled?: boolean;
+  subjectId?: string | null;
+  blocked?: { id: string | undefined | null; reason: string };
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -220,12 +230,14 @@ export function PersonPicker({
     return () => document.removeEventListener("mousedown", close);
   }, []);
 
-  const { data = [], isFetching } = useQuery<(Person & { designation?: { title: string } | null })[]>({
-    queryKey: ["exam-staff", debounced],
-    queryFn: () => api.get("/api/v1/exams/staff", { params: { search: debounced } }).then((r) => r.data.data),
+  const { data: res, isFetching } = useQuery<{ data: (Person & { designation?: { title: string } | null })[]; meta?: { subjectOnly?: boolean } }>({
+    queryKey: ["exam-staff", debounced, subjectId ?? null],
+    queryFn: () => api.get("/api/v1/exams/staff", { params: { search: debounced, ...(subjectId ? { subjectId } : {}) } }).then((r) => r.data),
     enabled: open,
     staleTime: 60 * 1000,
   });
+  const data = res?.data ?? [];
+  const subjectOnly = !!res?.meta?.subjectOnly;
 
   if (value && !open) {
     return (
@@ -248,26 +260,37 @@ export function PersonPicker({
         disabled={disabled}
         onFocus={() => setOpen(true)}
         onChange={(e) => { setQ(e.target.value); setOpen(true); }}
-        placeholder={placeholder}
+        placeholder={placeholder ?? (subjectId ? "Search subject faculty…" : "Search staff…")}
         className={`${inputCls} pl-9`}
       />
       {open && (
         <div className="absolute z-30 mt-1 w-full max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg">
+          {subjectId && res && (
+            <p className="px-3 pt-2 pb-1 text-[11px] text-gray-400 border-b border-gray-50">
+              {subjectOnly ? "Teachers of this subject" : "No teachers are mapped to this subject yet: showing all staff"}
+            </p>
+          )}
           {isFetching && data.length === 0 ? (
             <div className="flex items-center gap-2 px-3 py-3 text-sm text-gray-400"><Loader2 className="h-4 w-4 animate-spin" /> Searching…</div>
           ) : data.length === 0 ? (
             <div className="px-3 py-3 text-sm text-gray-400">No one found</div>
-          ) : data.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => { onChange(p); setOpen(false); setQ(""); }}
-              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 active:bg-gray-100"
-            >
-              <span className="font-medium text-gray-800">{personName(p)}</span>
-              <span className="text-gray-400"> · {p.employeeCode}{p.designation?.title ? ` · ${p.designation.title}` : ""}</span>
-            </button>
-          ))}
+          ) : data.map((p) => {
+            const isBlocked = !!blocked?.id && blocked.id === p.id;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                disabled={isBlocked}
+                title={isBlocked ? blocked!.reason : undefined}
+                onClick={() => { onChange(p); setOpen(false); setQ(""); }}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 active:bg-gray-100 disabled:cursor-not-allowed disabled:hover:bg-white"
+              >
+                <span className={`font-medium ${isBlocked ? "text-gray-400" : "text-gray-800"}`}>{personName(p)}</span>
+                <span className="text-gray-400"> · {p.employeeCode}{p.designation?.title ? ` · ${p.designation.title}` : ""}</span>
+                {isBlocked && <span className="block text-[11px] text-red-500">{blocked!.reason}</span>}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

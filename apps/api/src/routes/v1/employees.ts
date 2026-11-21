@@ -9,6 +9,7 @@ import { randomUUID } from "crypto";
 import { uploadFile } from "../../utils/s3.js";
 import { computeAccrued, computeCarryForward, lopDaysInMonth, roundDays, IN_FORCE_LEAVE_STATUSES } from "../../utils/leave.js";
 import { hasAnyPermission, ACADEMICS_MODULES } from "../../utils/permissions.js";
+import { WORKING_STATUSES, ARCHIVED_STATUSES } from "../../utils/staffStatus.js";
 import { createWriteStream, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -179,16 +180,16 @@ export async function employeeRoutes(fastify: FastifyInstance) {
     const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
     const [total, onLeaveToday, onboardedThisMonth, quitThisMonth] = await Promise.all([
-      // Total active employees (not terminated, not deleted)
+      // Headcount: everyone on the main (non-archived) Employees list
       prisma.employee.count({
-        where: { deletedAt: null, status: { not: "TERMINATED" } },
+        where: { deletedAt: null, status: { notIn: [...ARCHIVED_STATUSES] } },
       }),
 
       // Distinct employees on approved leave today
       prisma.employee.count({
         where: {
           deletedAt: null,
-          status: { not: "TERMINATED" },
+          status: { notIn: [...ARCHIVED_STATUSES] },
           leaveApplications: {
             some: {
               status: { in: IN_FORCE_LEAVE_STATUSES },
@@ -249,7 +250,7 @@ export async function employeeRoutes(fastify: FastifyInstance) {
       const employees = await prisma.employee.findMany({
         where: {
           deletedAt: null,
-          status: { not: "TERMINATED" },
+          status: { notIn: [...ARCHIVED_STATUSES] },
           leaveApplications: {
             some: {
               status: { in: IN_FORCE_LEAVE_STATUSES },
@@ -323,9 +324,13 @@ export async function employeeRoutes(fastify: FastifyInstance) {
     }
 
     const search = (q.search ?? "").trim();
+    // Pickers offer only people still on staff. `status=all` returns everyone, for
+    // screens that must still show a saved person who has since left.
+    const everyone = q.status === "all";
     const employees = await prisma.employee.findMany({
       where: {
         deletedAt: null,
+        ...(everyone ? {} : { status: { in: [...WORKING_STATUSES] } }),
         ...(search
           ? {
               OR: [
@@ -340,11 +345,17 @@ export async function employeeRoutes(fastify: FastifyInstance) {
         id: true, employeeCode: true, firstName: true, lastName: true, status: true,
         designation: { select: { id: true, title: true } },
         department:  { select: { id: true, name: true } },
+        // Subjects they teach in any batch, so a picker can narrow to one subject's faculty.
+        facultySubjects: { select: { subjectId: true } },
       },
       orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
     });
 
-    return reply.send({ success: true, data: employees });
+    const data = employees.map(({ facultySubjects, ...e }) => ({
+      ...e,
+      subjectIds: [...new Set(facultySubjects.map((f) => f.subjectId))],
+    }));
+    return reply.send({ success: true, data });
   });
 
   // List employees with pagination + search
@@ -364,6 +375,8 @@ export async function employeeRoutes(fastify: FastifyInstance) {
     const departmentId = query.departmentId;
     const designationId = query.designationId;
     const status = query.status;
+    // The list shows people on staff; `view=archived` shows those who have left.
+    const archivedView = query.view === "archived";
     const employmentType = query.employmentType;
     const gender = query.gender;
 
@@ -427,6 +440,7 @@ export async function employeeRoutes(fastify: FastifyInstance) {
     }
 
     if (designationId) andConditions.push({ designationId });
+    andConditions.push({ status: archivedView ? { in: [...ARCHIVED_STATUSES] } : { notIn: [...ARCHIVED_STATUSES] } });
     if (status)        andConditions.push({ status: status as any });
     if (employmentType) andConditions.push({ employmentType: employmentType as any });
     if (gender)        andConditions.push({ gender: gender as any });

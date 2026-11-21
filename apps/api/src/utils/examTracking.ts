@@ -20,7 +20,7 @@ import { prisma } from "@cadb/db";
 /** A transaction client or the root client — both expose the model delegates. */
 export type Tx = Omit<typeof prisma, "$connect" | "$disconnect" | "$on" | "$transaction" | "$extends">;
 
-export type StageOwnerRole = "CONTROLLER" | "EXECUTIVE" | "PAPER_SETTER" | "REVIEWER";
+export type StageOwnerRole = "CONTROLLER" | "EXECUTIVE" | "PAPER_SETTER" | "REVIEWER" | "EVALUATOR";
 export type StageDef = {
   sequenceNo: number;
   name: string;
@@ -43,8 +43,8 @@ export type StageDef = {
  */
 export const DEFAULT_STAGES: StageDef[] = [
   { sequenceNo: 1,  name: "Exam scheduled on calendar",          offsetDays: -28, ownerRole: "CONTROLLER",   scope: "EXAM",    description: "Date, timing and batches confirmed; no clash with other exams or holidays." },
-  { sequenceNo: 2,  name: "Syllabus approved by batch teachers", offsetDays: -25, ownerRole: "EXECUTIVE",    scope: "SUBJECT", approver: "BATCH_TEACHERS", description: "The chapters on the exam for this subject go to the subject's teacher in every batch writing the exam. Every teacher approves before the blueprint can be submitted." },
-  { sequenceNo: 3,  name: "Blueprint finalised",                 offsetDays: -21, ownerRole: "PAPER_SETTER", scope: "SUBJECT", form: "BLUEPRINT", approver: "SUBJECT_HEAD", description: "Marks, question count and question type for each syllabus chapter, plus the difficulty mix. Approved by the subject head." },
+  { sequenceNo: 2,  name: "Syllabus approved by batch teachers", offsetDays: -25, ownerRole: "EXECUTIVE",    scope: "SUBJECT", approver: "BATCH_TEACHERS", description: "The chapters on the exam for this subject go to the subject's teacher in every batch writing the exam. Every teacher approves before the paper is set." },
+  // No blueprint step: the blueprint comes with the exam template (Assessments → New Exam layout).
   { sequenceNo: 4,  name: "Exam notice to students & parents",   offsetDays: -14, ownerRole: "EXECUTIVE",    scope: "EXAM",    action: "NOTIFY_STUDENTS", description: "Marking this done emails the date, timing and syllabus to students and parents." },
   { sequenceNo: 5,  name: "Paper set (paper, key, solutions)",   offsetDays: -12, ownerRole: "PAPER_SETTER", scope: "SUBJECT", description: "Question paper, answer key and solutions uploaded. Link the Drive file or Learnyst test as evidence." },
   { sequenceNo: 6,  name: "Paper reviewed",                      offsetDays: -9,  ownerRole: "REVIEWER",     scope: "SUBJECT", description: "Matches syllabus and blueprint, key verified, marks add up, no errors. Note the corrections needed in remarks." },
@@ -54,7 +54,7 @@ export const DEFAULT_STAGES: StageDef[] = [
   { sequenceNo: 10, name: "Uploaded to Learnyst & test-run",     offsetDays: -3,  ownerRole: "EXECUTIVE",    scope: "EXAM",    mode: "ONLINE", description: "Test configured on Learnyst, timings set, test-run by a second person." },
   { sequenceNo: 11, name: "Papers delivered to centres",         offsetDays: -1,  ownerRole: "EXECUTIVE",    scope: "EXAM",    mode: "PEN_PAPER", description: "Receipt confirmed by each centre." },
   { sequenceNo: 12, name: "Exam conducted",                      offsetDays: 0,   ownerRole: "EXECUTIVE",    scope: "EXAM",    description: "Attendance taken, incidents noted in remarks, answer sheets / OMRs counted." },
-  { sequenceNo: 13, name: "Evaluation & marks entered",          offsetDays: 2,   ownerRole: "EXECUTIVE",    scope: "EXAM",    description: "OMR / manual evaluation done and marks imported." },
+  { sequenceNo: 13, name: "Evaluation & marks entered",          offsetDays: 2,   ownerRole: "EVALUATOR",    scope: "SUBJECT", description: "Each subject's evaluator marks the answer sheets within the evaluation window set for the subject, and the marks are entered." },
   { sequenceNo: 14, name: "Results verified",                    offsetDays: 3,   ownerRole: "CONTROLLER",   scope: "EXAM",    description: "Totals, missing students, absent vs zero and outliers checked." },
   { sequenceNo: 15, name: "Results released to students",        offsetDays: 4,   ownerRole: "CONTROLLER",   scope: "EXAM",    action: "RELEASE_RESULTS", description: "Marking this done shows results on the student portal and emails scores to students and parents." },
   { sequenceNo: 16, name: "Re-evaluation window closed",         offsetDays: 7,   ownerRole: "CONTROLLER",   scope: "EXAM",    canBypass: true, description: "All re-evaluation requests resolved. Can be bypassed with a reason." },
@@ -175,7 +175,7 @@ export async function syncExamStages(tx: Tx, examId: string, actor?: Actor): Pro
         select: signContextSelect.subjects.select,
         orderBy: [{ paperNum: "asc" }, { subjectSlot: "asc" }],
       },
-      subjectTeams: { select: { paperNum: true, subjectSlot: true, setterId: true, reviewerId: true, approverId: true } },
+      subjectTeams: { select: { paperNum: true, subjectSlot: true, setterId: true, reviewerId: true, approverId: true, evaluatorId: true, evalEndDate: true } },
       examType: { select: { stages: { orderBy: { sequenceNo: "asc" } } } },
       stages: true,
     },
@@ -194,7 +194,13 @@ export async function syncExamStages(tx: Tx, examId: string, actor?: Actor): Pro
     const team = teamBySlot.get(`${paperNum}_${subjectSlot}`);
     if (role === "PAPER_SETTER") return team?.setterId ?? null;
     if (role === "REVIEWER") return team?.reviewerId ?? null;
+    if (role === "EVALUATOR") return team?.evaluatorId ?? null;
     return null;
+  };
+  /** An evaluation stage is due on the last day of its subject's evaluation window, when one is set. */
+  const plannedFor = (role: string, offsetDays: number, paperNum: number, subjectSlot: number): Date => {
+    const end = role === "EVALUATOR" ? teamBySlot.get(`${paperNum}_${subjectSlot}`)?.evalEndDate : null;
+    return end ? utcDay(end) : plannedDateFor(exam.examDate, offsetDays, holidays);
   };
   const labelFor = (paperNum: number, subjectName: string | null | undefined, subjectSlot: number) => {
     const subject = subjectName ?? `Subject ${subjectSlot}`;
@@ -233,7 +239,7 @@ export async function syncExamStages(tx: Tx, examId: string, actor?: Actor): Pro
   }
 
   for (const w of wanted) {
-    const planned = plannedDateFor(exam.examDate, w.t.offsetDays, holidays);
+    const planned = plannedFor(w.t.ownerRole, w.t.offsetDays, w.paperNum, w.subjectSlot);
     const cur = existing.get(w.key);
 
     if (!cur) {
@@ -259,7 +265,7 @@ export async function syncExamStages(tx: Tx, examId: string, actor?: Actor): Pro
     const isOpen = !CLOSED.has(cur.status);
 
     // Dates use the stage's own snapshot offset, not today's template value.
-    const curPlanned = plannedDateFor(exam.examDate, cur.offsetDays, holidays);
+    const curPlanned = plannedFor(cur.ownerRole, cur.offsetDays, cur.paperNum, cur.subjectSlot);
     if (isOpen && utcDay(cur.plannedDate).getTime() !== curPlanned.getTime()) {
       data.plannedDate = curPlanned;
       // A moved deadline deserves a fresh reminder.

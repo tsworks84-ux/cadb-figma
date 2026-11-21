@@ -125,7 +125,9 @@ export default function ExamDetailPage() {
     (a: any, b: any) => a.paperNum - b.paperNum || a.subjectSlot - b.subjectSlot
   );
   const numPapers     = exam?.numPapers  ?? 1;
-  const numSubjects   = exam?.numSubjects ?? 1;
+  // Papers can carry different numbers of subjects, so group by each paper's own count.
+  const paperSlotCounts = Array.from({ length: numPapers }, (_, pi) => slots.filter((s) => s.paperNum === pi + 1).length);
+  const firstOfPaper = (idx: number) => idx > 0 && slots[idx]?.paperNum !== slots[idx - 1]?.paperNum;
   const perSlotMax    = exam?.totalMarks && slots.length > 0
     ? exam.totalMarks / slots.length
     : null;
@@ -861,8 +863,8 @@ export default function ExamDetailPage() {
                         <th className="sticky left-0 z-20 bg-gray-50 w-28 min-w-[112px] px-3 py-2" />
                         <th className="sticky left-28 z-20 bg-gray-50 w-40 min-w-[160px] px-3 py-2" />
                         <th className="px-3 py-2 w-24" />  {/* Present */}
-                        {Array.from({ length: numPapers }, (_, pi) => (
-                          <th key={pi} colSpan={numSubjects}
+                        {Array.from({ length: numPapers }, (_, pi) => paperSlotCounts[pi] > 0 && (
+                          <th key={pi} colSpan={paperSlotCounts[pi]}
                             className="px-3 py-2 text-center font-semibold text-indigo-600 border-l border-gray-200">
                             Paper {pi + 1}
                           </th>
@@ -892,7 +894,7 @@ export default function ExamDetailPage() {
                       </th>
                       {columns.map((col, idx) => (
                         <th key={col.key}
-                          className={`px-3 py-2.5 text-center font-semibold text-gray-600 min-w-[110px] ${idx % numSubjects === 0 && numPapers > 1 ? "border-l border-gray-200" : ""}`}>
+                          className={`px-3 py-2.5 text-center font-semibold text-gray-600 min-w-[110px] ${firstOfPaper(idx) ? "border-l border-gray-200" : ""}`}>
                           <div>{col.subjectName}</div>
                           {col.maxMarks && (
                             <div className="text-[10px] font-normal text-gray-400">/ {col.maxMarks}</div>
@@ -950,7 +952,7 @@ export default function ExamDetailPage() {
                           {/* Mark inputs per slot */}
                           {columns.map((col, idx) => (
                             <td key={col.key}
-                              className={`px-2 py-1.5 min-w-[110px] ${idx % numSubjects === 0 && numPapers > 1 ? "border-l border-gray-100" : ""}`}>
+                              className={`px-2 py-1.5 min-w-[110px] ${firstOfPaper(idx) ? "border-l border-gray-100" : ""}`}>
                               <MarksCell
                                 value={marksMap[s.id]?.[col.key] ?? ""}
                                 onChange={(v) => updateMark(s.id, col.paperNum, col.subjectSlot, v)}

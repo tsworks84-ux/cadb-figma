@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { formatDate, getInitials } from "@/lib/utils";
-import { Plus, Search, Trash2, ChevronDown, X, AlertTriangle, UserCheck, UserX, Users, CalendarOff, UserPlus, LogOut, Upload, Download, MoreVertical, Filter, ChevronRight, Eye, Copy, CalendarDays, Receipt } from "lucide-react";
+import { Plus, Search, Trash2, ChevronDown, X, AlertTriangle, UserCheck, UserX, Users, CalendarOff, UserPlus, LogOut, Upload, Download, MoreVertical, Filter, ChevronRight, Eye, Copy, CalendarDays, Receipt, Archive } from "lucide-react";
 import Link from "next/link";
 import type { EmployeeListItem } from "@cadb/types";
 import { toast } from "sonner";
@@ -389,7 +389,9 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 const EMPLOYMENT_TYPES = ["FULL_TIME", "PART_TIME", "CONTRACT", "VISITING", "INTERN"];
-const STATUSES = ["DRAFT", "ACTIVE", "PROBATION", "ON_LEAVE", "NOTICE_PERIOD", "TERMINATED", "RESIGNED", "RETIRED", "EXITED"];
+// The main list holds people on staff plus unfinished drafts; the rest live under Archive.
+const CURRENT_STATUSES = ["DRAFT", "ACTIVE", "PROBATION", "ON_LEAVE", "NOTICE_PERIOD"];
+const ARCHIVED_STATUSES = ["TERMINATED", "RESIGNED", "RETIRED", "EXITED"];
 
 export default function EmployeesPage() {
   const router = useRouter();
@@ -411,6 +413,8 @@ export default function EmployeesPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState("");
+  // Main list = people on staff (and unfinished drafts); Archive = those who have left.
+  const [view, setView] = useState<"current" | "archived">("current");
   const [departmentId, setDepartmentId] = useState("");
   const [designationId, setDesignationId] = useState("");
   const [employmentType, setEmploymentType] = useState("");
@@ -432,11 +436,12 @@ export default function EmployeesPage() {
   const activeFilterCount = [status, departmentId, designationId, employmentType, gender, incompleteOnly ? "1" : ""].filter(Boolean).length;
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["employees", page, search, status, departmentId, designationId, employmentType, gender],
+    queryKey: ["employees", view, page, search, status, departmentId, designationId, employmentType, gender],
     queryFn: () =>
       api.get<{ success: boolean; data: EmployeeListItem[]; meta: any }>("/api/v1/employees", {
         params: {
           page, limit: 20, search,
+          ...(view === "archived" && { view }),
           ...(status && { status }),
           ...(departmentId && { departmentId }),
           ...(designationId && { designationId }),
@@ -448,6 +453,22 @@ export default function EmployeesPage() {
     enabled: !!user?.id,
     retry: 2,
   });
+
+  // Size of the other tab, for its label.
+  const { data: otherCount } = useQuery({
+    queryKey: ["employees", "count", view === "archived" ? "current" : "archived"],
+    queryFn: () =>
+      api.get("/api/v1/employees", { params: { page: 1, limit: 1, ...(view === "current" && { view: "archived" }) } })
+        .then((r) => r.data.meta?.total as number),
+    enabled: !!user?.id,
+    staleTime: 60 * 1000,
+  });
+  const activeTotal = view === "current" ? data?.meta?.total : otherCount;
+  const archivedTotal = view === "archived" ? data?.meta?.total : otherCount;
+  const switchView = (v: "current" | "archived") => {
+    if (v === view) return;
+    setView(v); setStatus(""); setPage(1); setSelected(new Set());
+  };
 
   const { data: empStats } = useQuery({
     queryKey: ["employee-stats"],
@@ -602,7 +623,7 @@ export default function EmployeesPage() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Employees</h1>
-              <p className="text-sm text-gray-500">{data?.meta?.total ?? 0} total employees</p>
+              <p className="text-sm text-gray-500">{data?.meta?.total ?? 0} {view === "archived" ? "archived" : "active"} employees</p>
             </div>
           </div>
         </div>
@@ -750,6 +771,30 @@ export default function EmployeesPage() {
         </div>
       )}
 
+      {/* Active / Archive */}
+      <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 w-full sm:w-fit" role="tablist">
+        {([
+          { v: "current" as const, label: "Active", n: activeTotal, icon: UserCheck },
+          { v: "archived" as const, label: "Archive", n: archivedTotal, icon: Archive },
+        ]).map((t) => (
+          <button
+            key={t.v}
+            role="tab"
+            aria-selected={view === t.v}
+            onClick={() => switchView(t.v)}
+            className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+              view === t.v ? "bg-[#2C3E7C] text-white" : "text-gray-600 hover:bg-gray-50"
+            }`}
+          >
+            <t.icon className="h-4 w-4" /> {t.label}
+            {t.n !== undefined && <span className={`text-xs ${view === t.v ? "text-white/80" : "text-gray-400"}`}>{t.n}</span>}
+          </button>
+        ))}
+      </div>
+      {view === "archived" && (
+        <p className="-mt-2 text-xs text-gray-500">People who have resigned, retired, exited or been terminated. They don&apos;t appear in any staff dropdown.</p>
+      )}
+
       {/* Search + filter bar */}
       <div className="bg-white rounded-lg border border-gray-200 p-4">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
@@ -805,7 +850,7 @@ export default function EmployeesPage() {
               className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
             >
               <option value="">All</option>
-              {STATUSES.map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
+              {(view === "archived" ? ARCHIVED_STATUSES : CURRENT_STATUSES).map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
             </select>
           </div>
 

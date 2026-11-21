@@ -463,6 +463,7 @@ model Employee {
   examStagesToApprove  ExamStage[]               @relation("ExamStageApprover")
   examStageSignoffs    ExamStageSignoff[]        @relation("ExamStageSignoffs")
   examPapersApproved   ExamSubjectTeam[]         @relation("ExamPaperApprover")
+  examPapersEvaluated  ExamSubjectTeam[]         @relation("ExamPaperEvaluator")
   subjectsHeaded       Subject[]                 @relation("SubjectHead")
 
   @@index([departmentId])
@@ -1783,8 +1784,14 @@ model Exam {
   id           String     @id @default(cuid())
   academicYear String
   name         String
+  // <4 letters><ddmmyy of examDate>, e.g. JMWT211126. Null on exams made before codes existed.
+  code         String?    @unique
   numPapers    Int        @default(1)
   numSubjects  Int        @default(1)
+  // Paper → sections → subjects → question ranges, as built on the New Exam form
+  // (ExamLayout in @cadb/types). The ExamSubject rows are derived from it; null on
+  // exams made before layouts existed.
+  layout       Json?
   examDate     DateTime   @db.Date
   startTime    String
   endTime      String
@@ -1860,6 +1867,8 @@ model ExamTemplate {
   numPapers   Int      @default(1)
   numSubjects Int      @default(1)
   totalMarks  Int?
+  // Same shape as Exam.layout, without topics. Null on templates saved before layouts.
+  layout      Json?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -2231,6 +2240,7 @@ enum ExamStageOwnerRole {
   EXECUTIVE
   PAPER_SETTER
   REVIEWER
+  EVALUATOR // evaluates one subject's answer sheets and enters its marks
 }
 
 enum ExamStageScope {
@@ -2332,17 +2342,24 @@ model ExamSubjectTeam {
   reviewerId  String?
   // Approves this paper's blueprint. Blank = the subject's head.
   approverId  String?
+  // Evaluates this subject's answer sheets, within the evaluation window. The
+  // window's end is the evaluation stage's deadline for the subject.
+  evaluatorId   String?
+  evalStartDate DateTime? @db.Date
+  evalEndDate   DateTime? @db.Date
 
-  exam     Exam      @relation(fields: [examId], references: [id], onDelete: Cascade)
-  setter   Employee? @relation("ExamPaperSetter", fields: [setterId], references: [id], onDelete: SetNull)
-  reviewer Employee? @relation("ExamPaperReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
-  approver Employee? @relation("ExamPaperApprover", fields: [approverId], references: [id], onDelete: SetNull)
+  exam      Exam      @relation(fields: [examId], references: [id], onDelete: Cascade)
+  setter    Employee? @relation("ExamPaperSetter", fields: [setterId], references: [id], onDelete: SetNull)
+  reviewer  Employee? @relation("ExamPaperReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  approver  Employee? @relation("ExamPaperApprover", fields: [approverId], references: [id], onDelete: SetNull)
+  evaluator Employee? @relation("ExamPaperEvaluator", fields: [evaluatorId], references: [id], onDelete: SetNull)
 
   @@unique([examId, paperNum, subjectSlot])
   @@index([examId])
   @@index([setterId])
   @@index([reviewerId])
   @@index([approverId])
+  @@index([evaluatorId])
 }
 
 model ExamStage {

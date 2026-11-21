@@ -6,12 +6,12 @@ import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft, CheckCircle2, ChevronDown, ExternalLink, History, Lock, Play, RotateCcw, SkipForward,
-  UserCog, Settings2, Info, Mail, Send, ClipboardList, Hourglass, Undo2, ShieldCheck,
+  UserCog, Settings2, Info, Mail, Send, ClipboardList, Hourglass, Undo2, ShieldCheck, AlertTriangle, CalendarRange,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import {
   ExamsHeader, StatusChip, HealthChip, Select, Field, PersonPicker, fmtDay, fmtDateTime, relDays, personName,
-  btnPrimary, btnSecondary, apiError, MODE_LABEL, OWNER_ROLE_LABEL, AccessDenied, Chip,
+  btnPrimary, btnSecondary, apiError, MODE_LABEL, OWNER_ROLE_LABEL, AccessDenied, Chip, inputCls,
   type Person, type StageStatus, type OwnerRole,
 } from "@/components/exams/shared";
 import { MarkDoneDialog, BypassDialog, ReassignDialog, Notice, useInvalidateExams } from "@/components/exams/StageDialogs";
@@ -40,7 +40,10 @@ type ExamDetail = {
   resultsReleasedAt: string | null; studentsNotifiedAt: string | null;
   batches: { batch: { id: string; name: string } }[];
   subjects: { paperNum: number; subjectSlot: number; topics: string | null; subject: { id: string; name: string; head: Person | null } | null }[];
-  subjectTeams: { paperNum: number; subjectSlot: number; setter: Person | null; reviewer: Person | null; approver: Person | null }[];
+  subjectTeams: {
+    paperNum: number; subjectSlot: number; setter: Person | null; reviewer: Person | null; approver: Person | null;
+    evaluator: Person | null; evalStartDate: string | null; evalEndDate: string | null;
+  }[];
   daysToExam: number;
   summary: { total: number; done: number; overdue: number; health: string } | null;
   steps: Step[];
@@ -170,6 +173,12 @@ function SetupCard({ exam, subjectLabel, onSaved }: { exam: ExamDetail; subjectL
   const needsPaperTeam = !!chosen?.stages.some((s) => s.ownerRole === "PAPER_SETTER" || s.ownerRole === "REVIEWER");
   const needsHead = !!chosen?.stages.some((s) => s.approver === "SUBJECT_HEAD");
   const missingPaperTeam = needsPaperTeam && slots.some((s) => { const t = teams[`${s.paperNum}_${s.subjectSlot}`]; return !t?.setter || !t?.reviewer; });
+  // The setter of a paper can never review it.
+  const clashes = needsPaperTeam ? slots.filter((s) => {
+    const t = teams[`${s.paperNum}_${s.subjectSlot}`];
+    return t?.setter && t?.reviewer && t.setter.id === t.reviewer.id;
+  }) : [];
+  const subjectIdOf = (p: number, sl: number) => exam.subjects.find((x) => x.paperNum === p && x.subjectSlot === sl)?.subject?.id ?? null;
 
   const save = async () => {
     setSaving(true); setError(null);
@@ -228,9 +237,15 @@ function SetupCard({ exam, subjectLabel, onSaved }: { exam: ExamDetail; subjectL
         <div className="space-y-2">
           <p className="text-xs font-semibold text-gray-600">Paper setters and reviewers{needsHead ? ", blueprint approvers" : ""}</p>
           <p className="text-[11px] text-gray-400 -mt-1">
-            The reviewer must be a different person from the setter.
-            {needsHead ? " Leave the blueprint approver blank to use the subject head from Exam Settings." : ""}
+            Only teachers of each subject are listed. The reviewer must be a different person from the setter.
+            {needsHead ? " Leave the approver blank to use the subject head from Exam Settings." : ""}
           </p>
+          {clashes.length > 0 && (
+            <Notice icon={AlertTriangle} tone="red">
+              <b>Setter and reviewer can&apos;t be the same person.</b> Pick a different reviewer for{" "}
+              {clashes.map((c) => subjectLabel(c.paperNum, c.subjectSlot)).join(", ")}.
+            </Notice>
+          )}
           <div className="space-y-2">
             {slots.map((s) => {
               const key = `${s.paperNum}_${s.subjectSlot}`;
@@ -261,15 +276,23 @@ function SetupCard({ exam, subjectLabel, onSaved }: { exam: ExamDetail; subjectL
                   })()}
                   {(slotOpen[key] ?? (!t.setter || !t.reviewer || !!same)) && <div className="px-3 pb-3">
                   <div className={`grid grid-cols-1 sm:grid-cols-2 ${needsHead ? "lg:grid-cols-3" : ""} gap-3`}>
-                    <Field label="Setter"><PersonPicker value={t.setter} onChange={(p) => setTeams((x) => ({ ...x, [key]: { ...t, setter: p } }))} /></Field>
-                    <Field label="Reviewer"><PersonPicker value={t.reviewer} onChange={(p) => setTeams((x) => ({ ...x, [key]: { ...t, reviewer: p } }))} /></Field>
+                    <Field label="Setter">
+                      <PersonPicker value={t.setter} subjectId={subjectIdOf(s.paperNum, s.subjectSlot)}
+                        blocked={{ id: t.reviewer?.id, reason: "Already the reviewer of this paper" }}
+                        onChange={(p) => setTeams((x) => ({ ...x, [key]: { ...t, setter: p } }))} />
+                    </Field>
+                    <Field label="Reviewer">
+                      <PersonPicker value={t.reviewer} subjectId={subjectIdOf(s.paperNum, s.subjectSlot)}
+                        blocked={{ id: t.setter?.id, reason: "Already the setter of this paper" }}
+                        onChange={(p) => setTeams((x) => ({ ...x, [key]: { ...t, reviewer: p } }))} />
+                    </Field>
                     {needsHead && (
-                      <Field label="Blueprint approver" hint={t.approver ? undefined : head ? `Subject head: ${personName(head)}` : "No subject head set: falls to the Controller"}>
+                      <Field label="Approver" hint={t.approver ? undefined : head ? `Subject head: ${personName(head)}` : "No subject head set: falls to the Controller"}>
                         <PersonPicker value={t.approver} onChange={(p) => setTeams((x) => ({ ...x, [key]: { ...t, approver: p } }))} />
                       </Field>
                     )}
                   </div>
-                  {same && <p className="text-xs text-red-600 mt-1">Setter and reviewer can&apos;t be the same person.</p>}
+                  {same && <p className="flex items-center gap-1 text-xs font-semibold text-red-600 mt-1"><AlertTriangle className="h-3.5 w-3.5" /> Setter and reviewer can&apos;t be the same person.</p>}
                   </div>}
                 </div>
               );
@@ -281,7 +304,8 @@ function SetupCard({ exam, subjectLabel, onSaved }: { exam: ExamDetail; subjectL
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       <div className="flex justify-end">
-        <button className={btnPrimary} onClick={save} disabled={saving || !typeId || !controller || !executive}>
+        <button className={btnPrimary} onClick={save} disabled={saving || !typeId || !controller || !executive || clashes.length > 0}
+          title={clashes.length ? "Setter and reviewer can't be the same person" : undefined}>
           {saving ? "Saving…" : exam.examTypeId ? "Save setup" : "Set up tracking"}
         </button>
       </div>
@@ -367,12 +391,13 @@ function StageTimeline({ exam, onFlash }: { exam: ExamDetail; onFlash: (m: strin
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs text-gray-400">{OWNER_ROLE_LABEL[first.ownerRole]}</span>
-                    {first.action === "NOTIFY_STUDENTS" && <Chip className="bg-blue-50 text-blue-700">Emails students</Chip>}
+                    {first.action === "NOTIFY_STUDENTS" && <Chip className="bg-blue-50 text-blue-700">Student email optional</Chip>}
                     {first.action === "RELEASE_RESULTS" && <Chip className="bg-emerald-50 text-emerald-700">Releases results</Chip>}
                     {first.canBypass && <Chip className="bg-gray-100 text-gray-500">Can bypass</Chip>}
                     {first.approver && <Chip className="bg-violet-50 text-violet-700"><ShieldCheck className="h-3 w-3 mr-1" />{APPROVER_CHIP[first.approver]}</Chip>}
                   </div>
                   {first.description && <p className="text-xs text-gray-500 mt-0.5">{first.description}</p>}
+                  {first.ownerRole === "EVALUATOR" && <EvaluatorsPanel exam={exam} onFlash={onFlash} />}
                   <div className="mt-2 space-y-2">
                     {stages.map((s) => <StageRow key={s.id} stage={s} exam={exam} onFlash={onFlash} />)}
                   </div>
@@ -440,6 +465,14 @@ function StageRow({ stage: s, exam, onFlash }: { stage: Stage; exam: ExamDetail;
               ? <>closed {s.completedAt ? fmtDay(s.completedAt) : ""}{s.daysLate > 0 ? <span className="text-red-600"> ({s.daysLate}d late)</span> : null}</>
               : <span className={s.overdue ? "text-red-600 font-semibold" : ""}>due {fmtDay(s.plannedDate)}{s.overdue ? ` · ${s.daysLate}d late` : ""}</span>}
           </p>
+          {s.ownerRole === "EVALUATOR" && (() => {
+            const t = exam.subjectTeams.find((x) => x.paperNum === s.paperNum && x.subjectSlot === s.subjectSlot);
+            return t?.evalStartDate || t?.evalEndDate ? (
+              <p className="flex items-center gap-1 text-xs text-gray-500 mt-0.5">
+                <CalendarRange className="h-3 w-3 shrink-0" /> Evaluation {t.evalStartDate ? fmtDay(t.evalStartDate) : "…"} – {t.evalEndDate ? fmtDay(t.evalEndDate) : "…"}
+              </p>
+            ) : null;
+          })()}
           {pending && !isSignoff && (
             <p className="flex items-center gap-1 text-xs text-amber-800 mt-0.5">
               <Hourglass className="h-3 w-3 shrink-0" /> Awaiting approval from <b>{personName(s.approverPerson)}</b>
@@ -547,7 +580,115 @@ function StageRow({ stage: s, exam, onFlash }: { stage: Stage; exam: ExamDetail;
         <SyllabusReviewDialog stage={s} batchNames={mySignoff?.batchNames} onClose={() => setDialog(null)} onDone={(msg) => { setDialog(null); onFlash(msg); }} />
       )}
       {dialog === "bypass" && <BypassDialog stage={s} onClose={() => setDialog(null)} />}
-      {dialog === "reassign" && <ReassignDialog stage={s} current={s.owner} onClose={() => setDialog(null)} />}
+      {dialog === "reassign" && (() => {
+        // Per-subject stages are offered to that subject's faculty; a paper's setter can't take its review, and vice versa.
+        const slotSubject = s.scope === "SUBJECT" ? exam.subjects.find((x) => x.paperNum === s.paperNum && x.subjectSlot === s.subjectSlot)?.subject?.id ?? null : null;
+        const counterpartRole = s.ownerRole === "REVIEWER" ? "PAPER_SETTER" : s.ownerRole === "PAPER_SETTER" ? "REVIEWER" : null;
+        const team = exam.subjectTeams.find((x) => x.paperNum === s.paperNum && x.subjectSlot === s.subjectSlot);
+        const counterpart = counterpartRole
+          ? exam.stages.find((x) => x.ownerRole === counterpartRole && x.paperNum === s.paperNum && x.subjectSlot === s.subjectSlot && x.owner)?.owner
+            ?? (counterpartRole === "PAPER_SETTER" ? team?.setter : team?.reviewer) ?? null
+          : null;
+        return (
+          <ReassignDialog stage={s} current={s.owner} onClose={() => setDialog(null)} subjectId={slotSubject}
+            blocked={counterpart ? { id: counterpart.id, reason: counterpartRole === "PAPER_SETTER" ? "Sets this paper, so can't review it" : "Reviews this paper, so can't set it" } : undefined} />
+        );
+      })()}
+    </div>
+  );
+}
+
+// ─── Evaluators ───────────────────────────────────────────────────────────────
+
+/**
+ * The evaluation step's per-subject evaluators and evaluation windows. The
+ * evaluator owns that subject's evaluation stage; the window's end is its deadline.
+ */
+function EvaluatorsPanel({ exam, onFlash }: { exam: ExamDetail; onFlash: (m: string) => void }) {
+  const invalidate = useInvalidateExams();
+  const canEdit = exam.permissions.canManage;
+  const examDay = exam.examDate.slice(0, 10);
+  const initial = () => Object.fromEntries(exam.subjects.map((x) => {
+    const t = exam.subjectTeams.find((y) => y.paperNum === x.paperNum && y.subjectSlot === x.subjectSlot);
+    return [`${x.paperNum}_${x.subjectSlot}`, {
+      evaluator: t?.evaluator ?? null,
+      start: t?.evalStartDate?.slice(0, 10) ?? "",
+      end: t?.evalEndDate?.slice(0, 10) ?? "",
+    }];
+  })) as Record<string, { evaluator: Person | null; start: string; end: string }>;
+  const [rows, setRows] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Re-read when the exam reloads (another save, a sync).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => setRows(initial()), [exam.subjectTeams]);
+
+  const label = (p: number, sl: number, name?: string | null) => (exam.numPapers > 1 ? `Paper ${p} · ` : "") + (name ?? `Subject ${sl}`);
+  const problemOf = (r: { start: string; end: string }) =>
+    r.start && r.start < examDay ? "Starts before the exam" :
+    r.end && r.end < examDay ? "Ends before the exam" :
+    r.start && r.end && r.end < r.start ? "Ends before it starts" : null;
+  const problems = exam.subjects.filter((x) => problemOf(rows[`${x.paperNum}_${x.subjectSlot}`]));
+  const assigned = exam.subjects.filter((x) => rows[`${x.paperNum}_${x.subjectSlot}`]?.evaluator).length;
+
+  const save = async () => {
+    setSaving(true); setError(null);
+    try {
+      const r = await api.put(`/api/v1/exams/${exam.id}/evaluation`, {
+        subjects: exam.subjects.map((x) => {
+          const row = rows[`${x.paperNum}_${x.subjectSlot}`];
+          return { paperNum: x.paperNum, subjectSlot: x.subjectSlot, evaluatorId: row.evaluator?.id ?? null, evalStartDate: row.start || null, evalEndDate: row.end || null };
+        }),
+      });
+      invalidate();
+      onFlash(r.data.message ?? "Evaluators saved.");
+    } catch (e) { setError(apiError(e, "Could not save evaluators")); } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50/50 px-3 py-3 space-y-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-xs font-semibold text-gray-700">Evaluators by subject</p>
+        <p className="text-[11px] text-gray-500">{assigned}/{exam.subjects.length} assigned · the end date is the subject&apos;s deadline</p>
+      </div>
+      <div className="space-y-3">
+        {exam.subjects.map((x) => {
+          const key = `${x.paperNum}_${x.subjectSlot}`;
+          const row = rows[key];
+          const set = (p: Partial<typeof row>) => setRows((all) => ({ ...all, [key]: { ...all[key], ...p } }));
+          const problem = problemOf(row);
+          return (
+            <div key={key} className="rounded-lg border border-gray-100 bg-white px-3 py-2.5">
+              <p className="text-sm font-medium text-gray-800 mb-2">{label(x.paperNum, x.subjectSlot, x.subject?.name)}</p>
+              {canEdit ? (
+                <div className="grid grid-cols-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 [&>*:first-child]:col-span-2 sm:[&>*:first-child]:col-span-1">
+                  <Field label="Evaluator">
+                    <PersonPicker value={row.evaluator} subjectId={x.subject?.id ?? null} onChange={(p) => set({ evaluator: p })} />
+                  </Field>
+                  <Field label="Start date">
+                    <input type="date" className={inputCls} min={examDay} value={row.start} onChange={(e) => set({ start: e.target.value })} />
+                  </Field>
+                  <Field label="End date">
+                    <input type="date" className={inputCls} min={row.start || examDay} value={row.end} onChange={(e) => set({ end: e.target.value })} />
+                  </Field>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-600">
+                  {row.evaluator ? personName(row.evaluator) : <span className="text-amber-700">No evaluator yet</span>}
+                  {" · "}{row.start ? fmtDay(row.start) : "…"} – {row.end ? fmtDay(row.end) : "…"}
+                </p>
+              )}
+              {problem && <p className="flex items-center gap-1 text-xs text-red-600 mt-1.5"><AlertTriangle className="h-3.5 w-3.5" /> {problem}</p>}
+            </div>
+          );
+        })}
+      </div>
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {canEdit && (
+        <div className="flex justify-end">
+          <button className={btnPrimary} onClick={save} disabled={saving || problems.length > 0}>{saving ? "Saving…" : "Save evaluators"}</button>
+        </div>
+      )}
     </div>
   );
 }

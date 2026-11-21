@@ -25,18 +25,21 @@ type ExamType = {
 export default function ExamSettingsPage() {
   const { data: me, isLoading } = useExamMe();
   if (isLoading) return null;
-  if (!me?.canViewBoard) return <AccessDenied message="Exam settings are for the exam team and Super Admins." />;
-  const canEdit = me.canManageSettings;
+  if (!me?.canViewBoard && !me?.canManageSetup) return <AccessDenied message="Exam settings are for the exam team and Super Admins." />;
+  const canEditTeam = me.canManageSettings;
+  const canEdit = me.canManageSetup;
 
   return (
     <div className="space-y-4">
       <ExamsHeader
         title="Exam Settings"
-        subtitle={canEdit
+        subtitle={canEditTeam
           ? "Who runs exams, which exam types exist each academic year, and the stages and timings each type follows."
-          : "Read-only — only a Super Admin can change these."}
+          : canEdit
+            ? "Subject heads, exam types and their timings. Only a Super Admin can change the exam team."
+            : "Read-only — only a Super Admin or a Controller can change these."}
       />
-      <TeamSection canEdit={canEdit} />
+      <TeamSection canEdit={canEditTeam} />
       <SubjectHeadsSection canEdit={canEdit} />
       <TypesSection canEdit={canEdit} />
     </div>
@@ -139,8 +142,8 @@ function SubjectHeadsSection({ canEdit }: { canEdit: boolean }) {
       summary={isLoading ? undefined : `${subjects.filter((x) => x.head).length} of ${subjects.length} subjects have a head`}>
       <div className="space-y-3">
         <p className="text-xs text-gray-500">
-          The subject head (HoD) approves each exam&apos;s blueprint for their subject. An exam can name a different approver for a paper in its setup.
-          With no head set, the exam&apos;s Controller approves. Nobody approves their own blueprint: if the head set the paper, it goes to the Controller.
+          The subject head (HoD) signs the syllabus for a batch that has no teacher for their subject, and approves any step set to &ldquo;Subject head&rdquo;.
+          Heads are also offered as paper setters, reviewers and evaluators for their subject. With no head set, the exam&apos;s Controller steps in.
         </p>
         {isLoading ? <p className="text-sm text-gray-400">Loading…</p>
           : subjects.length === 0 ? <p className="text-sm text-gray-400">No active subjects.</p>
@@ -382,7 +385,7 @@ function TypeCard({ type: t, canEdit, onChanged }: { type: ExamType; canEdit: bo
   );
 }
 
-const SHORT_ROLE: Record<OwnerRole, string> = { CONTROLLER: "Controller", EXECUTIVE: "Executive", PAPER_SETTER: "Paper setter", REVIEWER: "Reviewer" };
+const SHORT_ROLE: Record<OwnerRole, string> = { CONTROLLER: "Controller", EXECUTIVE: "Executive", PAPER_SETTER: "Paper setter", REVIEWER: "Reviewer", EVALUATOR: "Evaluator" };
 
 /** One stage: a single summary line, expanding into its settings. */
 function StageEditorRow({ stage: s, open, canEdit, onToggle, onChange, onRemove }: {
@@ -391,11 +394,11 @@ function StageEditorRow({ stage: s, open, canEdit, onToggle, onChange, onRemove 
   const chips: [string, string][] = [];
   if (s.approver) chips.push([s.approver === "SUBJECT_HEAD" ? "HoD approves" : s.approver === "BATCH_TEACHERS" ? "Batch teachers approve" : "Controller approves", "bg-violet-50 text-violet-700"]);
   if (s.form === "BLUEPRINT") chips.push(["Blueprint form", "bg-indigo-50 text-indigo-700"]);
-  if (s.action === "NOTIFY_STUDENTS") chips.push(["Emails students", "bg-blue-50 text-blue-700"]);
+  if (s.action === "NOTIFY_STUDENTS") chips.push(["Exam notice", "bg-blue-50 text-blue-700"]);
   if (s.action === "RELEASE_RESULTS") chips.push(["Releases results", "bg-emerald-50 text-emerald-700"]);
   if (s.mode) chips.push([s.mode === "ONLINE" ? "Online only" : "Pen & paper only", "bg-gray-100 text-gray-600"]);
   if (s.canBypass) chips.push(["Can bypass", "bg-gray-100 text-gray-600"]);
-  const paperRole = s.ownerRole === "PAPER_SETTER" || s.ownerRole === "REVIEWER";
+  const paperRole = s.ownerRole === "PAPER_SETTER" || s.ownerRole === "REVIEWER" || s.ownerRole === "EVALUATOR";
 
   return (
     <li className={open ? "bg-gray-50/60" : "bg-white"}>
@@ -432,7 +435,7 @@ function StageEditorRow({ stage: s, open, canEdit, onToggle, onChange, onRemove 
             <Field label="Owner">
               <Select disabled={!canEdit} value={s.ownerRole} onChange={(e) => {
                 const ownerRole = e.target.value as OwnerRole;
-                onChange({ ownerRole, ...(ownerRole === "PAPER_SETTER" || ownerRole === "REVIEWER" ? { scope: "SUBJECT" as const } : {}) });
+                onChange({ ownerRole, ...(ownerRole === "PAPER_SETTER" || ownerRole === "REVIEWER" || ownerRole === "EVALUATOR" ? { scope: "SUBJECT" as const } : {}) });
               }}>
                 {(Object.keys(OWNER_ROLE_LABEL) as OwnerRole[]).map((r) => <option key={r} value={r}>{OWNER_ROLE_LABEL[r]}</option>)}
               </Select>
@@ -462,19 +465,11 @@ function StageEditorRow({ stage: s, open, canEdit, onToggle, onChange, onRemove 
                 <option value="BATCH_TEACHERS">Every batch&apos;s subject teacher</option>
               </Select>
             </Field>
-            <Field label="Form to fill">
-              <Select disabled={!canEdit} value={s.form ?? ""} onChange={(e) => {
-                const form = (e.target.value || null) as StageDef["form"];
-                onChange({ form, ...(form === "BLUEPRINT" ? { scope: "SUBJECT" as const, approver: s.approver && s.approver !== "BATCH_TEACHERS" ? s.approver : "SUBJECT_HEAD" } : {}) });
-              }}>
-                <option value="">None</option>
-                <option value="BLUEPRINT">Blueprint</option>
-              </Select>
-            </Field>
-            <Field label="When done">
+            {/* No blueprint step: the blueprint comes with the exam template. */}
+            <Field label="When done" hint={s.action ? "Emails to students/parents go out only if ticked when the step is marked done" : undefined}>
               <Select disabled={!canEdit} value={s.action ?? ""} onChange={(e) => onChange({ action: (e.target.value || null) as StageDef["action"], ...(e.target.value ? { canBypass: false } : {}) })}>
                 <option value="">Nothing extra</option>
-                <option value="NOTIFY_STUDENTS">Email exam notice</option>
+                <option value="NOTIFY_STUDENTS">Exam notice (option to email)</option>
                 <option value="RELEASE_RESULTS">Release results</option>
               </Select>
             </Field>

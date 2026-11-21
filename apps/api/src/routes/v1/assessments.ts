@@ -38,11 +38,112 @@ const slotSchema = z.object({
   maxMarks:  z.number().nullable().optional(),
 });
 
+// ── Exam layout: paper → sections → subjects → question ranges ──────────────
+// See ExamLayout in @cadb/types. When a request carries a layout, the ExamSubject
+// rows, numPapers, numSubjects and totalMarks are all derived from it here.
+const QUESTION_TYPES = ["SCQ", "MCQ", "NAT", "INTEGER", "MATRIX", "ASSERTION", "PARAGRAPH", "SUBJECTIVE"] as const;
+
+const rangeSchema = z.object({
+  from:     z.number().int().min(1).max(999),
+  to:       z.number().int().min(1).max(999),
+  type:     z.enum(QUESTION_TYPES),
+  marks:    z.number().positive("Marks per question must be more than 0").max(1000),
+  negative: z.number().min(0, "Negative marks are entered as a positive number").max(1000),
+}).refine((r) => r.to >= r.from, { message: "A question range must end at or after where it starts" });
+
+const layoutSchema = z.object({
+  papers: z.array(z.object({
+    sections: z.array(z.object({
+      name: z.string().trim().max(40).default(""),
+      subjects: z.array(z.object({
+        subjectId: z.string().nullable(),
+        topics:    z.string().nullable().optional(),
+        maxMarks:  z.number().min(0).nullable().optional(),
+        ranges:    z.array(rangeSchema).max(30),
+      })).min(1, "Every section needs at least one subject").max(10),
+    })).min(1, "Every paper needs at least one section").max(10),
+  })).min(1).max(10),
+}).superRefine((layout, ctx) => {
+  // Question numbers may restart per section (some papers number each subject
+  // from 1), but can't overlap within one.
+  layout.papers.forEach((paper, pi) => paper.sections.forEach((sec, si) => {
+    const ranges = sec.subjects.flatMap((s) => s.ranges).sort((a, b) => a.from - b.from);
+    for (let i = 1; i < ranges.length; i++) {
+      if (ranges[i].from <= ranges[i - 1].to) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Paper ${pi + 1}, ${sec.name || `Section ${si + 1}`}: Q${ranges[i].from}–${ranges[i].to} overlaps Q${ranges[i - 1].from}–${ranges[i - 1].to}`,
+        });
+        return;
+      }
+    }
+  }));
+});
+
+type Layout = z.infer<typeof layoutSchema>;
+type SubjectRow = { paperNum: number; subjectSlot: number; subjectId: string | null; topics: string | null; maxMarks: number | null };
+
+function subjectMaxMarks(s: Layout["papers"][number]["sections"][number]["subjects"][number]) {
+  if (s.ranges.length === 0) return s.maxMarks ?? null;
+  return s.ranges.reduce((n, r) => n + (r.to - r.from + 1) * r.marks, 0);
+}
+
+/**
+ * One marks slot per distinct subject within a paper, in order of first
+ * appearance — Physics in Section A and again in Section B is one column whose
+ * max marks are the two added together. Unpicked subjects each keep their own slot.
+ */
+function slotsFromLayout(layout: Layout) {
+  const rows: SubjectRow[] = [];
+  layout.papers.forEach((paper, pi) => {
+    const paperRows: SubjectRow[] = [];
+    for (const sec of paper.sections) {
+      for (const sub of sec.subjects) {
+        const max = subjectMaxMarks(sub);
+        const topics = sub.topics?.trim() || null;
+        const same = sub.subjectId ? paperRows.find((r) => r.subjectId === sub.subjectId) : undefined;
+        if (same) {
+          same.maxMarks = same.maxMarks == null && max == null ? null : (same.maxMarks ?? 0) + (max ?? 0);
+          if (topics) same.topics = same.topics ? `${same.topics}, ${topics}` : topics;
+        } else {
+          paperRows.push({ paperNum: pi + 1, subjectSlot: paperRows.length + 1, subjectId: sub.subjectId, topics, maxMarks: max });
+        }
+      }
+    }
+    rows.push(...paperRows);
+  });
+  const numSubjects = Math.max(1, ...layout.papers.map((_, pi) => rows.filter((r) => r.paperNum === pi + 1).length));
+  const maxes = rows.map((r) => r.maxMarks).filter((m): m is number => m != null);
+  const totalMarks = maxes.length ? Math.round(maxes.reduce((a, b) => a + b, 0)) : null;
+  return { rows, numPapers: layout.papers.length, numSubjects, totalMarks };
+}
+
+/** A template keeps the pattern, not this sitting's syllabus. */
+function stripTopics(layout: Layout): Layout {
+  return { papers: layout.papers.map((p) => ({ sections: p.sections.map((sec) => ({ ...sec, subjects: sec.subjects.map(({ topics: _t, ...sub }) => sub) })) })) };
+}
+
+/** <4 letters><ddmmyy>, where the date part is the exam's own date. */
+const examCodeSchema = z.string().trim().toUpperCase().regex(/^[A-Z]{4}\d{6}$/, "Exam code must be 4 letters followed by the exam date as ddmmyy, e.g. JMWT211126");
+
+function codeDateSuffix(examDate: string) {
+  const d = new Date(examDate);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getUTCDate())}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCFullYear() % 100)}`;
+}
+
+const codeConflict = (code: string) => ({ success: false, error: `Exam code ${code} is already used by another exam` });
+
+/** Which unique column a P2002 hit — `code` on Exam, `name` on ExamTemplate. */
+const uniqueTarget = (e: any): string => String(e?.meta?.target ?? "");
+
 const examSchema = z.object({
   academicYear:  z.string().min(1),
   name:          z.string().min(1).max(40),
-  numPapers:     z.number().int().min(1).max(5).optional(),
-  numSubjects:   z.number().int().min(1).max(5).optional(),
+  code:          examCodeSchema.nullable().optional(),
+  layout:        layoutSchema.optional(),
+  numPapers:     z.number().int().min(1).max(10).optional(),
+  numSubjects:   z.number().int().min(1).max(20).optional(),
   batchIds:      z.array(z.string()).min(1),
   paperSubjects: z.array(z.array(slotSchema)).optional(),
   examDate:      z.string(),
@@ -75,7 +176,7 @@ async function templateNameTaken(name: string) {
 const templateNameConflict = (name: string) => ({ success: false, error: `A template named "${name}" already exists — pick another name` });
 
 function buildSubjectRows(paperSubjects: Slot[][], numPapers: number, numSubjects: number) {
-  const rows: { paperNum: number; subjectSlot: number; subjectId: string | null; topics: string | null; maxMarks: number | null }[] = [];
+  const rows: SubjectRow[] = [];
   for (let p = 0; p < numPapers; p++) {
     for (let s = 0; s < numSubjects; s++) {
       const slot = paperSubjects[p]?.[s];
@@ -432,6 +533,7 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
       listWhere.AND = [{
         OR: [
           { name:     { contains: term, mode: "insensitive" } },
+          { code:     { contains: term, mode: "insensitive" } },
           { batches:  { some: { batch:   { name: { contains: term, mode: "insensitive" } } } } },
           { subjects: { some: { subject: { name: { contains: term, mode: "insensitive" } } } } },
         ],
@@ -457,8 +559,25 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
     const parsed = createExamSchema.safeParse(req.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.issues[0]?.message });
 
-    const { batchIds, paperSubjects = [], note, examDate, totalMarks, numPapers = 1, numSubjects = 1, saveAsTemplate, ...rest } = parsed.data;
-    const subjectRows = buildSubjectRows(paperSubjects, numPapers, numSubjects);
+    const { batchIds, paperSubjects = [], note, examDate, layout, code, saveAsTemplate, ...rest } = parsed.data;
+    let { totalMarks, numPapers = 1, numSubjects = 1 } = parsed.data;
+    let subjectRows: SubjectRow[];
+    if (layout) {
+      const derived = slotsFromLayout(layout);
+      subjectRows = derived.rows;
+      ({ numPapers, numSubjects } = derived);
+      totalMarks = derived.totalMarks ?? totalMarks ?? null;
+    } else {
+      subjectRows = buildSubjectRows(paperSubjects, numPapers, numSubjects);
+    }
+    delete (rest as any).numPapers; delete (rest as any).numSubjects; delete (rest as any).totalMarks;
+
+    if (code) {
+      if (!code.endsWith(codeDateSuffix(examDate))) {
+        return reply.status(400).send({ success: false, error: `Exam code must end with the exam date as ddmmyy (${codeDateSuffix(examDate)})` });
+      }
+      if (await prisma.exam.findUnique({ where: { code }, select: { id: true } })) return reply.status(409).send(codeConflict(code));
+    }
 
     // Checked before anything is written, so a clashing template name can't leave
     // behind an exam the user believes failed to save.
@@ -471,6 +590,8 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
         const created = await tx.exam.create({
           data: {
             ...rest,
+            code:       code ?? null,
+            layout:     layout ?? undefined,
             numPapers,
             numSubjects,
             examDate:   new Date(examDate),
@@ -489,6 +610,7 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
           await tx.examTemplate.create({
             data: {
               name: saveAsTemplate, numPapers, numSubjects, totalMarks: totalMarks ?? null,
+              layout: layout ? stripTopics(layout) : undefined,
               subjects: { create: subjectRows.map(({ topics: _topics, ...row }) => row) },
             },
           });
@@ -497,9 +619,9 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
       });
       return reply.status(201).send({ success: true, data: exam });
     } catch (e: any) {
-      // Exam has no unique columns, so P2002 here is the template name, taken
-      // between the check above and the insert.
-      if (saveAsTemplate && e?.code === "P2002") return reply.status(409).send(templateNameConflict(saveAsTemplate));
+      // Both were checked above; a P2002 here means one was taken in between.
+      if (e?.code === "P2002" && code && uniqueTarget(e).includes("code")) return reply.status(409).send(codeConflict(code));
+      if (e?.code === "P2002" && saveAsTemplate) return reply.status(409).send(templateNameConflict(saveAsTemplate));
       throw e;
     }
   });
@@ -510,6 +632,36 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get("/templates", async (_req, reply) => {
     const data = await prisma.examTemplate.findMany({ include: templateInclude, orderBy: { name: "asc" } });
     return reply.send({ success: true, data });
+  });
+
+  // Save a pattern on its own, without creating an exam (the form's "Save as Template").
+  const templateSchema = z.object({
+    name:   z.string().trim().min(1, "Template name is required").max(40, "Template name cannot exceed 40 characters"),
+    layout: layoutSchema,
+  });
+  fastify.post("/templates", async (req, reply) => {
+    const parsed = templateSchema.safeParse(req.body);
+    if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.issues[0]?.message });
+    const { name } = parsed.data;
+    const layout = stripTopics(parsed.data.layout);
+    if (!layout.papers.some((p) => p.sections.some((s) => s.subjects.some((sub) => sub.subjectId)))) {
+      return reply.status(400).send({ success: false, error: "Pick at least one subject before saving this as a template" });
+    }
+    if (await templateNameTaken(name)) return reply.status(409).send(templateNameConflict(name));
+    const { rows, numPapers, numSubjects, totalMarks } = slotsFromLayout(layout);
+    try {
+      const data = await prisma.examTemplate.create({
+        data: {
+          name, numPapers, numSubjects, totalMarks, layout,
+          subjects: { create: rows.map(({ topics: _topics, ...row }) => row) },
+        },
+        include: templateInclude,
+      });
+      return reply.status(201).send({ success: true, data });
+    } catch (e: any) {
+      if (e?.code === "P2002") return reply.status(409).send(templateNameConflict(name));
+      throw e;
+    }
   });
 
   fastify.delete("/templates/:templateId", async (req, reply) => {
@@ -525,8 +677,20 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
     const parsed = examSchema.partial().safeParse(req.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.issues[0]?.message });
 
-    const { batchIds, paperSubjects, note, examDate, totalMarks, numPapers, numSubjects, ...rest } = parsed.data;
+    const { batchIds, paperSubjects, note, examDate, totalMarks, numPapers, numSubjects, layout, code, ...rest } = parsed.data;
     const updates: any = { ...rest };
+
+    if (code !== undefined) {
+      updates.code = code;
+      if (code) {
+        const date = examDate ?? (await prisma.exam.findUnique({ where: { id }, select: { examDate: true } }))?.examDate.toISOString();
+        if (date && !code.endsWith(codeDateSuffix(date))) {
+          return reply.status(400).send({ success: false, error: `Exam code must end with the exam date as ddmmyy (${codeDateSuffix(date)})` });
+        }
+        const clash = await prisma.exam.findUnique({ where: { code }, select: { id: true } });
+        if (clash && clash.id !== id) return reply.status(409).send(codeConflict(code));
+      }
+    }
     if (examDate    !== undefined) updates.examDate    = new Date(examDate);
     if (note        !== undefined) updates.note        = note       ?? null;
     if (totalMarks  !== undefined) updates.totalMarks  = totalMarks ?? null;
@@ -538,7 +702,15 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
         await tx.examBatch.deleteMany({ where: { examId: id } });
         updates.batches = { create: batchIds.map((batchId) => ({ batchId })) };
       }
-      if (paperSubjects !== undefined) {
+      if (layout) {
+        const derived = slotsFromLayout(layout);
+        Object.assign(updates, {
+          layout, numPapers: derived.numPapers, numSubjects: derived.numSubjects,
+          totalMarks: derived.totalMarks ?? totalMarks ?? null,
+        });
+        await tx.examSubject.deleteMany({ where: { examId: id } });
+        updates.subjects = { create: derived.rows };
+      } else if (paperSubjects !== undefined) {
         const current = await tx.exam.findUnique({ where: { id }, select: { numPapers: true, numSubjects: true } });
         const np = numPapers   ?? current?.numPapers   ?? 1;
         const ns = numSubjects ?? current?.numSubjects ?? 1;
@@ -546,11 +718,15 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
         updates.subjects = { create: buildSubjectRows(paperSubjects, np, ns) };
       }
       return tx.exam.update({ where: { id }, data: updates, include: examInclude });
+    }).catch((e: any) => {
+      if (e?.code === "P2002" && code && uniqueTarget(e).includes("code")) return null;
+      throw e;
     });
+    if (!exam) return reply.status(409).send(codeConflict(code!));
 
     // A tracked exam's stages follow its date and subject grid.
     const tracked = await prisma.exam.findUnique({ where: { id }, select: { examTypeId: true } });
-    if (tracked?.examTypeId && (examDate !== undefined || paperSubjects !== undefined || numPapers !== undefined)) {
+    if (tracked?.examTypeId && (examDate !== undefined || paperSubjects !== undefined || numPapers !== undefined || layout !== undefined)) {
       const actor = await actorFor((req.user as any).sub);
       const sync = await syncExamStages(prisma, id, actor);
       await notifyAssignments(id, sync);

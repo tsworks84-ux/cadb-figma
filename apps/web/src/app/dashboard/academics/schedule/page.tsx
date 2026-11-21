@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, Suspense } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { pickableStaff } from "@/lib/staff";
 import { toast } from "sonner";
 import {
   Plus, X, Calendar, User, ChevronDown, ChevronRight,
@@ -937,7 +938,7 @@ function ScheduleModal({
                 <DField label="Faculty">
                   <DSelect value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })}>
                     <option value="">Select faculty</option>
-                    {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+                    {pickableStaff(employees, { subjectId: form.subjectId, keep: [form.employeeId] }).map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
                   </DSelect>
                 </DField>
               </div>
@@ -1597,7 +1598,7 @@ function AssignmentTab({
           <DField label="Faculty">
             <DSelect value={assForm.employeeId} onChange={(e) => setAssForm({ ...assForm, employeeId: e.target.value })}>
               <option value="">— Faculty —</option>
-              {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+              {pickableStaff(employees, { subjectId: assForm.subjectId, keep: [assForm.employeeId] }).map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
             </DSelect>
           </DField>
         </div>
@@ -1872,7 +1873,7 @@ function SchedulePage() {
   const { data: locationsData } = useQuery({ queryKey: ["locations"],        queryFn: () => api.get("/api/v1/academics/locations").then((r) => r.data) });
   const { data: subjectsData }  = useQuery({ queryKey: ["subjects"],         queryFn: () => api.get("/api/v1/academics/subjects").then((r) => r.data.data) });
   const { data: batchesData }   = useQuery({ queryKey: ["batches-all"],      queryFn: () => api.get("/api/v1/academics/batches").then((r) => r.data) });
-  const { data: empData }       = useQuery({ queryKey: ["employees-lookup"], queryFn: () => api.get("/api/v1/employees/lookup").then((r) => r.data) });
+  const { data: empData }       = useQuery({ queryKey: ["employees-lookup", "all"], queryFn: () => api.get("/api/v1/employees/lookup", { params: { status: "all" } }).then((r) => r.data) });
 
   const years     = (yearsData            ?? []) as any[];
   const grades    = (gradesData?.data     ?? []) as any[];
@@ -2111,7 +2112,7 @@ function SchedulePage() {
         <label style={filterLabelStyle}>Faculty</label>
         <DSelect value={filterFaculty} onChange={(e) => setFilterFaculty(e.target.value)}>
           <option value="">All faculty</option>
-          {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+          {pickableStaff(employees, { keep: [filterFaculty] }).map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
         </DSelect>
       </div>
 

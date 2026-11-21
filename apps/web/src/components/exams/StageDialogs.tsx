@@ -34,6 +34,8 @@ type StageLite = {
 export function MarkDoneDialog({ stage, onClose, onDone }: { stage: StageLite; onClose: () => void; onDone: (message?: string | null) => void }) {
   const [remarks, setRemarks] = useState(stage.remarks ?? "");
   const [evidenceUrl, setEvidenceUrl] = useState(stage.evidenceUrl ?? "");
+  // Student/parent emails are opt-in each time: off unless ticked here.
+  const [notifyStudents, setNotifyStudents] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const invalidate = useInvalidateExams();
@@ -45,6 +47,7 @@ export function MarkDoneDialog({ stage, onClose, onDone }: { stage: StageLite; o
         status: "DONE",
         remarks: remarks.trim() || null,
         evidenceUrl: evidenceUrl.trim() || null,
+        ...(stage.action ? { notifyStudents } : {}),
       });
       invalidate();
       onDone(r.data.message);
@@ -68,17 +71,27 @@ export function MarkDoneDialog({ stage, onClose, onDone }: { stage: StageLite; o
         <p className="text-sm font-semibold text-gray-900">{stage.name}</p>
         {stage.subjectLabel && <p className="text-xs text-gray-500">{stage.subjectLabel}</p>}
       </div>
-      {stage.action === "NOTIFY_STUDENTS" && (
-        <Notice icon={Mail} tone="blue">
-          Marking this done emails the exam date, timing and syllabus to every student in the exam&apos;s batches and their parents
-          (if student emails are switched on in Administration → Notifications). Check the syllabus on the assessment first.
-        </Notice>
-      )}
       {stage.action === "RELEASE_RESULTS" && (
         <Notice icon={AlertTriangle} tone="amber">
-          Marking this done makes the marks visible on the student portal and emails each student and their parents their score
-          (if switched on). Only do this after the results have been verified.
+          Marking this done makes the marks visible on the student portal. Only do this after the results have been verified.
         </Notice>
+      )}
+      {stage.action && (
+        <label className={`flex items-start gap-3 rounded-xl border px-3 py-2.5 cursor-pointer ${notifyStudents ? "border-blue-200 bg-blue-50" : "border-gray-200"}`}>
+          <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[#2C3E7C]" checked={notifyStudents} onChange={(e) => setNotifyStudents(e.target.checked)} />
+          <span className="text-sm">
+            <span className="flex items-center gap-1.5 font-medium text-gray-900">
+              <Mail className="h-4 w-4 text-blue-600" />
+              {stage.action === "NOTIFY_STUDENTS" ? "Email the exam notice to students and parents" : "Email each student and parent their score"}
+            </span>
+            <span className="block text-xs text-gray-500 mt-0.5">
+              {stage.action === "NOTIFY_STUDENTS"
+                ? "Date, timing and syllabus go to every student in the exam's batches. Check the syllabus on the assessment first."
+                : "Leave unticked to show results on the portal without emailing anyone."}
+              {" "}Also needs student emails switched on in Administration → Notifications.
+            </span>
+          </span>
+        </label>
       )}
       <Field label="Evidence link (optional)" hint="Drive file, Learnyst test link, or anything that shows the work is done.">
         <input className={inputCls} value={evidenceUrl} onChange={(e) => setEvidenceUrl(e.target.value)} placeholder="https://…" inputMode="url" />
@@ -129,7 +142,13 @@ export function BypassDialog({ stage, onClose }: { stage: StageLite; onClose: ()
 }
 
 /** Exam team: hand a stage to someone else. */
-export function ReassignDialog({ stage, current, onClose }: { stage: StageLite; current: Person | null; onClose: () => void }) {
+export function ReassignDialog({ stage, current, onClose, subjectId, blocked }: {
+  stage: StageLite; current: Person | null; onClose: () => void;
+  /** Offer only this subject's faculty. */
+  subjectId?: string | null;
+  /** Someone who can't take this stage (the paper's setter can't review it, and vice versa). */
+  blocked?: { id: string | undefined | null; reason: string };
+}) {
   const [person, setPerson] = useState<Person | null>(current);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -151,13 +170,14 @@ export function ReassignDialog({ stage, current, onClose }: { stage: StageLite; 
       onClose={onClose}
       footer={<>
         <button className={btnSecondary} onClick={onClose}>Cancel</button>
-        <button className={btnPrimary} onClick={submit} disabled={saving || !person || person.id === current?.id}>{saving ? "Saving…" : "Reassign"}</button>
+        <button className={btnPrimary} onClick={submit} disabled={saving || !person || person.id === current?.id || person.id === blocked?.id}>{saving ? "Saving…" : "Reassign"}</button>
       </>}
     >
       <p className="text-sm text-gray-700"><span className="font-semibold">{stage.name}</span>{stage.subjectLabel ? ` · ${stage.subjectLabel}` : ""}</p>
       <Field label="New owner" hint="The new owner is notified. This stays with them even if the exam team changes later.">
-        <PersonPicker value={person} onChange={setPerson} />
+        <PersonPicker value={person} onChange={setPerson} subjectId={subjectId} blocked={blocked} />
       </Field>
+      {person && blocked?.id === person.id && <p className="text-sm text-red-600">{blocked.reason}</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
     </Modal>
   );

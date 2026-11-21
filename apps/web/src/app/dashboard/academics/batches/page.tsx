@@ -360,8 +360,8 @@ function BatchesPage() {
   // Name-only staff list: unpaginated, and reachable by roles that hold an
   // Academics grant without department access (the paginated directory is not).
   const { data: employees = [] } = useQuery({
-    queryKey: ["employees-lookup"],
-    queryFn: () => api.get("/api/v1/employees/lookup").then((r) => r.data.data),
+    queryKey: ["employees-lookup", "all"],
+    queryFn: () => api.get("/api/v1/employees/lookup", { params: { status: "all" } }).then((r) => r.data.data),
     staleTime: 5 * 60 * 1000,
     enabled: canEdit,
   });

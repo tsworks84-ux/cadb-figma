@@ -9,6 +9,7 @@ import {
   openBlockers, refreshSignoffs, signContextSelect, syllabusOf, syncExamStages, todayIST, topicsKey, utcDay, type Blueprint, type SyncResult,
 } from "../../utils/examTracking.js";
 import { notifyExamStaff, notifyExamStudents } from "../../utils/notify/exam.js";
+import { WORKING_STATUSES } from "../../utils/staffStatus.js";
 
 /**
  * Exam operations: who does what for each exam, by when, and whether it's done.
@@ -43,15 +44,16 @@ async function teamRoleOf(employeeId: string): Promise<TeamRole> {
   return (m?.role as TeamRole) ?? null;
 }
 
-type Access = { user: JwtPayload; isSA: boolean; teamRole: TeamRole; permView: boolean; permEdit: boolean };
+type Access = { user: JwtPayload; isSA: boolean; teamRole: TeamRole; permView: boolean; permEdit: boolean; controlsAnExam: boolean };
 
 async function accessOf(user: JwtPayload): Promise<Access> {
-  const [teamRole, permView, permEdit] = await Promise.all([
+  const [teamRole, permView, permEdit, controlled] = await Promise.all([
     teamRoleOf(user.sub),
     hasPermission(user, "EXAMS", "canView"),
     hasPermission(user, "EXAMS", "canEdit"),
+    prisma.exam.count({ where: { controllerId: user.sub }, take: 1 }),
   ]);
-  return { user, isSA: user.role === "SUPER_ADMIN", teamRole, permView, permEdit };
+  return { user, isSA: user.role === "SUPER_ADMIN", teamRole, permView, permEdit, controlsAnExam: controlled > 0 };
 }
 
 const canViewBoard = (a: Access) => a.isSA || a.teamRole !== null || a.permView || a.permEdit;
@@ -61,6 +63,10 @@ const isControllerFor = (a: Access, exam: { controllerId: string | null }) =>
 /** May change the exam's setup and reassign owners. */
 const canManageExam = (a: Access, exam: { controllerId: string | null; executiveId: string | null }) =>
   isControllerFor(a, exam) || a.teamRole === "EXECUTIVE" || exam.executiveId === a.user.sub || a.permEdit;
+
+/** May edit subject heads and exam types/timings: Super Admin, a team Controller, or anyone named
+ * Controller on an exam. The team itself stays Super Admin only. */
+const canManageSetup = (a: Access) => a.isSA || a.teamRole === "CONTROLLER" || a.controlsAnExam;
 
 const forbidden = (reply: FastifyReply, error = "You don't have access to this") =>
   reply.status(403).send({ success: false, error, statusCode: 403 });
@@ -72,7 +78,7 @@ const stageDefSchema = z.object({
   name:        z.string().trim().min(1).max(80),
   description: z.string().trim().max(500).nullable().optional(),
   offsetDays:  z.number().int().min(-180).max(180),
-  ownerRole:   z.enum(["CONTROLLER", "EXECUTIVE", "PAPER_SETTER", "REVIEWER"]),
+  ownerRole:   z.enum(["CONTROLLER", "EXECUTIVE", "PAPER_SETTER", "REVIEWER", "EVALUATOR"]),
   scope:       z.enum(["EXAM", "SUBJECT"]),
   mode:        z.enum(["PEN_PAPER", "ONLINE"]).nullable().optional(),
   action:      z.enum(["NOTIFY_STUDENTS", "RELEASE_RESULTS"]).nullable().optional(),
@@ -91,9 +97,10 @@ function validateStageList(stages: z.infer<typeof stageDefSchema>[]): string | n
   if (stages.filter((s) => s.action === "NOTIFY_STUDENTS").length > 1) return "Only one stage can send the exam notice";
   if (stages.filter((s) => s.action === "RELEASE_RESULTS").length > 1) return "Only one stage can release results";
   if (stages.some((s) => s.action && s.canBypass)) return "Stages that notify students or release results can't be bypassable";
-  if (stages.some((s) => s.scope === "EXAM" && (s.ownerRole === "PAPER_SETTER" || s.ownerRole === "REVIEWER"))) {
-    return "Paper setter and reviewer stages must be per subject";
+  if (stages.some((s) => s.scope === "EXAM" && (s.ownerRole === "PAPER_SETTER" || s.ownerRole === "REVIEWER" || s.ownerRole === "EVALUATOR"))) {
+    return "Paper setter, reviewer and evaluator stages must be per subject";
   }
+  if (stages.some((s) => s.form === "BLUEPRINT")) return "The blueprint comes with the exam template, so it isn't a step any more";
   if (stages.some((s) => s.scope === "EXAM" && (s.form === "BLUEPRINT" || s.approver === "SUBJECT_HEAD"))) {
     return "Blueprint and subject-head approval stages must be per subject";
   }
@@ -273,7 +280,12 @@ async function notifyDecision(stageId: string, decision: "APPROVED" | "SENT_BACK
 }
 
 /** What happens when a NOTIFY_STUDENTS / RELEASE_RESULTS stage is completed. */
-async function runStageAction(action: string, examId: string, actorId: string): Promise<string | null> {
+/**
+ * Side effects of closing an action stage. Student/parent emails go out only when
+ * whoever marks the stage done ticks "email students" (`sendEmails`); the portal
+ * effects (notice date, results visibility) happen either way.
+ */
+async function runStageAction(action: string, examId: string, actorId: string, sendEmails = false): Promise<string | null> {
   const exam = await prisma.exam.findUnique({
     where: { id: examId },
     include: {
@@ -288,6 +300,7 @@ async function runStageAction(action: string, examId: string, actorId: string): 
   };
 
   if (action === "NOTIFY_STUDENTS") {
+    if (!sendEmails) return "Stage done. No email was sent to students or parents.";
     const syllabus = exam.subjects
       .map((s) => `${subjectName(s.paperNum, s.subjectSlot)}: ${s.topics?.trim() || "To be announced"}`)
       .join("\n");
@@ -303,6 +316,7 @@ async function runStageAction(action: string, examId: string, actorId: string): 
 
   if (action === "RELEASE_RESULTS") {
     await prisma.exam.update({ where: { id: examId }, data: { resultsReleasedAt: new Date(), resultsReleasedById: actorId } });
+    if (!sendEmails) return "Results are now visible on the student portal. No result email was sent.";
     const results = await prisma.examResult.findMany({
       where: { examId, isExcluded: false },
       include: { marks: true },
@@ -378,6 +392,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
         canManageAny: a.isSA || a.teamRole === "CONTROLLER" || a.teamRole === "EXECUTIVE" || a.permEdit,
         canViewBoard: canViewBoard(a),
         canManageSettings: a.isSA,
+        canManageSetup: canManageSetup(a),
         openTasks: open.length + approvals.length,
         overdueTasks: [...open, ...approvals].filter((s) => isOverdue(s, today)).length,
         pendingApprovals: approvals.length,
@@ -389,10 +404,22 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get("/staff", async (req, reply) => {
     const a = await accessOf(req.user as JwtPayload);
     if (!canViewBoard(a)) return forbidden(reply);
-    const search = ((req.query as any).search ?? "").trim();
+    const q = req.query as any;
+    const search = (q.search ?? "").trim();
+    // With a subject: only its faculty (anyone teaching it in a batch, plus its head).
+    // If nobody is mapped to the subject yet, everyone on staff is offered instead.
+    const subjectId = typeof q.subjectId === "string" && q.subjectId ? q.subjectId : null;
+    let subjectFilter: object | null = null;
+    if (subjectId) {
+      const f = { OR: [{ facultySubjects: { some: { subjectId } } }, { subjectsHeaded: { some: { id: subjectId } } }] };
+      const mapped = await prisma.employee.count({ where: { deletedAt: null, status: { in: [...WORKING_STATUSES] }, ...f } });
+      if (mapped > 0) subjectFilter = f;
+    }
     const data = await prisma.employee.findMany({
       where: {
         deletedAt: null,
+        status: { in: [...WORKING_STATUSES] },
+        ...(subjectFilter ? { AND: [subjectFilter] } : {}),
         ...(search ? { OR: [
           { firstName: { contains: search, mode: "insensitive" as const } },
           { lastName: { contains: search, mode: "insensitive" as const } },
@@ -403,14 +430,14 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
       orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
       take: 30,
     });
-    return reply.send({ success: true, data });
+    return reply.send({ success: true, data, meta: { subjectOnly: !!subjectFilter } });
   });
 
-  // ═══ SETTINGS (Super Admin) ═══════════════════════════════════════════════
+  // ═══ SETTINGS (team: Super Admin; heads + types: also Controllers) ═══════════════════════════════════════════════
 
   fastify.get("/settings/team", async (req, reply) => {
     const a = await accessOf(req.user as JwtPayload);
-    if (!canViewBoard(a)) return forbidden(reply);
+    if (!canViewBoard(a) && !canManageSetup(a)) return forbidden(reply);
     const data = await prisma.examTeamMember.findMany({
       include: { employee: { select: { id: true, firstName: true, lastName: true, employeeCode: true, deletedAt: true } } },
       orderBy: [{ role: "asc" }, { createdAt: "asc" }],
@@ -441,7 +468,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
   /** Subject heads (HoDs): approve blueprints for their subject. */
   fastify.get("/settings/subject-heads", async (req, reply) => {
     const a = await accessOf(req.user as JwtPayload);
-    if (!canViewBoard(a)) return forbidden(reply);
+    if (!canViewBoard(a) && !canManageSetup(a)) return forbidden(reply);
     const data = await prisma.subject.findMany({
       where: { isActive: true },
       select: { id: true, code: true, name: true, head: nameSel },
@@ -452,7 +479,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.put("/settings/subject-heads/:subjectId", async (req, reply) => {
     const a = await accessOf(req.user as JwtPayload);
-    if (!a.isSA) return forbidden(reply, "Only a Super Admin can set subject heads");
+    if (!canManageSetup(a)) return forbidden(reply, "Only a Super Admin or a Controller can set subject heads");
     const body = z.object({ headId: z.string().min(1).nullable() }).safeParse(req.body);
     if (!body.success) return reply.status(400).send({ success: false, error: "Pick a person" });
     const subjectId = (req.params as any).subjectId as string;
@@ -475,14 +502,14 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.get("/settings/academic-years", async (req, reply) => {
     const a = await accessOf(req.user as JwtPayload);
-    if (!canViewBoard(a)) return forbidden(reply);
+    if (!canViewBoard(a) && !canManageSetup(a)) return forbidden(reply);
     const data = await prisma.academicYear.findMany({ where: { isArchived: false }, orderBy: { name: "desc" }, select: { id: true, name: true, isActive: true } });
     return reply.send({ success: true, data });
   });
 
   fastify.get("/settings/types", async (req, reply) => {
     const a = await accessOf(req.user as JwtPayload);
-    if (!canViewBoard(a)) return forbidden(reply);
+    if (!canViewBoard(a) && !canManageSetup(a)) return forbidden(reply);
     const { academicYear } = req.query as { academicYear?: string };
     const data = await prisma.examType.findMany({
       where: academicYear ? { academicYear } : {},
@@ -494,7 +521,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.post("/settings/types", async (req, reply) => {
     const a = await accessOf(req.user as JwtPayload);
-    if (!a.isSA) return forbidden(reply, "Only a Super Admin can change exam types");
+    if (!canManageSetup(a)) return forbidden(reply, "Only a Super Admin or a Controller can change exam types");
     const body = z.object({
       academicYear: z.string().trim().min(1),
       name: z.string().trim().min(1).max(60),
@@ -525,7 +552,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
   /** Copy every type of one academic year into another (skips names that exist). */
   fastify.post("/settings/types/copy-year", async (req, reply) => {
     const a = await accessOf(req.user as JwtPayload);
-    if (!a.isSA) return forbidden(reply, "Only a Super Admin can change exam types");
+    if (!canManageSetup(a)) return forbidden(reply, "Only a Super Admin or a Controller can change exam types");
     const body = z.object({ fromYear: z.string().min(1), toYear: z.string().min(1) }).safeParse(req.body);
     if (!body.success) return reply.status(400).send({ success: false, error: body.error.issues[0]?.message });
     const { fromYear, toYear } = body.data;
@@ -552,7 +579,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.patch("/settings/types/:id", async (req, reply) => {
     const a = await accessOf(req.user as JwtPayload);
-    if (!a.isSA) return forbidden(reply, "Only a Super Admin can change exam types");
+    if (!canManageSetup(a)) return forbidden(reply, "Only a Super Admin or a Controller can change exam types");
     const body = z.object({
       name: z.string().trim().min(1).max(60).optional(),
       description: z.string().trim().max(300).nullable().optional(),
@@ -569,7 +596,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.put("/settings/types/:id/stages", async (req, reply) => {
     const a = await accessOf(req.user as JwtPayload);
-    if (!a.isSA) return forbidden(reply, "Only a Super Admin can change exam types");
+    if (!canManageSetup(a)) return forbidden(reply, "Only a Super Admin or a Controller can change exam types");
     const body = z.object({ stages: z.array(stageDefSchema).max(60) }).safeParse(req.body);
     if (!body.success) return reply.status(400).send({ success: false, error: body.error.issues[0]?.message });
     const problem = validateStageList(body.data.stages);
@@ -596,7 +623,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.delete("/settings/types/:id", async (req, reply) => {
     const a = await accessOf(req.user as JwtPayload);
-    if (!a.isSA) return forbidden(reply, "Only a Super Admin can change exam types");
+    if (!canManageSetup(a)) return forbidden(reply, "Only a Super Admin or a Controller can change exam types");
     const id = (req.params as any).id as string;
     const used = await prisma.exam.count({ where: { examTypeId: id } });
     if (used > 0) return reply.status(409).send({ success: false, error: `Used by ${used} exam(s) — deactivate it instead` });
@@ -742,7 +769,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
         executive: nameSel,
         batches: { include: { batch: { select: { id: true, name: true } } } },
         subjects: { include: { subject: { select: { id: true, name: true, head: nameSel } } }, orderBy: [{ paperNum: "asc" }, { subjectSlot: "asc" }] },
-        subjectTeams: { include: { setter: nameSel, reviewer: nameSel, approver: nameSel } },
+        subjectTeams: { include: { setter: nameSel, reviewer: nameSel, approver: nameSel, evaluator: nameSel } },
         stages: {
           include: { owner: nameSel, approverPerson: nameSel, signoffs: signoffInclude, events: { orderBy: { createdAt: "desc" }, take: 20 } },
           orderBy: [{ sequenceNo: "asc" }, { paperNum: "asc" }, { subjectSlot: "asc" }],
@@ -846,6 +873,80 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.send({ success: true, data: { rescheduled: sync.rescheduled, assigned: sync.newAssignments.size } });
   });
 
+  /**
+   * Evaluators by subject, each with an evaluation window. The evaluator owns the
+   * subject's evaluation stage, and the window's last day is that stage's deadline.
+   */
+  fastify.put("/:examId/evaluation", async (req, reply) => {
+    const a = await accessOf(req.user as JwtPayload);
+    const examId = (req.params as any).examId as string;
+    const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Dates must be yyyy-mm-dd").nullable().optional();
+    const body = z.object({
+      subjects: z.array(z.object({
+        paperNum: z.number().int().min(1),
+        subjectSlot: z.number().int().min(1),
+        evaluatorId: z.string().nullable().optional(),
+        evalStartDate: day,
+        evalEndDate: day,
+      })).min(1),
+    }).safeParse(req.body);
+    if (!body.success) return reply.status(400).send({ success: false, error: body.error.issues[0]?.message });
+
+    const exam = await prisma.exam.findUnique({
+      where: { id: examId },
+      select: {
+        id: true, examDate: true, examTypeId: true, status: true, controllerId: true, executiveId: true, numPapers: true,
+        subjects: { select: { paperNum: true, subjectSlot: true, subject: { select: { name: true } } } },
+      },
+    });
+    if (!exam) return reply.status(404).send({ success: false, error: "Exam not found" });
+    if (!canManageExam(a, exam)) return forbidden(reply, "Only the exam team can assign evaluators");
+    if (!exam.examTypeId) return reply.status(409).send({ success: false, error: "Set up tracking for this exam first" });
+    if (["CANCELLED", "ARCHIVED"].includes(exam.status)) return reply.status(409).send({ success: false, error: "This exam is cancelled or archived" });
+
+    const examDay = utcDay(exam.examDate).toISOString().slice(0, 10);
+    for (const r of body.data.subjects) {
+      const row = exam.subjects.find((x) => x.paperNum === r.paperNum && x.subjectSlot === r.subjectSlot);
+      if (!row) return reply.status(400).send({ success: false, error: `Paper ${r.paperNum}, subject ${r.subjectSlot} isn't on this exam` });
+      const label = (exam.numPapers > 1 ? `Paper ${r.paperNum} · ` : "") + (row.subject?.name ?? `Subject ${r.subjectSlot}`);
+      if (r.evalStartDate && r.evalStartDate < examDay) return reply.status(400).send({ success: false, error: `${label}: evaluation can't start before the exam (${fmt(exam.examDate)})` });
+      if (r.evalEndDate && r.evalEndDate < examDay) return reply.status(400).send({ success: false, error: `${label}: evaluation can't end before the exam (${fmt(exam.examDate)})` });
+      if (r.evalStartDate && r.evalEndDate && r.evalEndDate < r.evalStartDate) {
+        return reply.status(400).send({ success: false, error: `${label}: the end date is before the start date` });
+      }
+    }
+
+    const toDate = (d: string | null | undefined) => (d ? new Date(`${d}T00:00:00.000Z`) : null);
+    const actor = await actorFor(a.user.sub);
+    const sync = await prisma.$transaction(async (tx) => {
+      const before = await tx.examSubjectTeam.findMany({ where: { examId }, select: { paperNum: true, subjectSlot: true, evaluatorId: true } });
+      for (const r of body.data.subjects) {
+        const evaluatorId = r.evaluatorId ?? null;
+        const data = { evaluatorId, evalStartDate: toDate(r.evalStartDate), evalEndDate: toDate(r.evalEndDate) };
+        await tx.examSubjectTeam.upsert({
+          where: { examId_paperNum_subjectSlot: { examId, paperNum: r.paperNum, subjectSlot: r.subjectSlot } },
+          create: { examId, paperNum: r.paperNum, subjectSlot: r.subjectSlot, ...data },
+          update: data,
+        });
+        // Picking an evaluator here wins over an earlier hand reassignment of the stage.
+        const prev = before.find((b) => b.paperNum === r.paperNum && b.subjectSlot === r.subjectSlot)?.evaluatorId ?? null;
+        if (prev !== evaluatorId) {
+          await tx.examStage.updateMany({
+            where: { examId, ownerRole: "EVALUATOR", paperNum: r.paperNum, subjectSlot: r.subjectSlot, status: { in: [...OPEN_STATUSES] } },
+            data: { ownerOverridden: false },
+          });
+        }
+      }
+      return syncExamStages(tx, examId, actor);
+    });
+    await notifyAssignments(examId, sync);
+    return reply.send({
+      success: true,
+      data: { assigned: sync.newAssignments.size },
+      message: `Evaluators saved.${sync.newAssignments.size ? ` ${sync.newAssignments.size} person(s) notified.` : ""}`,
+    });
+  });
+
   // ═══ STAGES ════════════════════════════════════════════════════════════════
 
   async function loadStage(stageId: string) {
@@ -870,6 +971,8 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
     const a = await accessOf(req.user as JwtPayload);
     const body = z.object({
       status: z.enum(["IN_PROGRESS", "DONE", "NOT_STARTED"]).optional(),
+      // Notice / results stages: also email students and parents. Off unless asked for.
+      notifyStudents: z.boolean().optional(),
       remarks: z.string().trim().max(2000).nullable().optional(),
       evidenceUrl: z.string().trim().max(1000).nullable().optional()
         .refine((v) => !v || /^https?:\/\//i.test(v), "Evidence must be a link starting with http:// or https://"),
@@ -960,7 +1063,7 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
     });
 
     let message: string | null = null;
-    if (eventAction === "DONE" && stage.action) message = await runStageAction(stage.action, stage.exam.id, a.user.sub);
+    if (eventAction === "DONE" && stage.action) message = await runStageAction(stage.action, stage.exam.id, a.user.sub, body.data.notifyStudents === true);
     if (eventAction === "REOPENED" && stage.action === "RELEASE_RESULTS") message = "Results are hidden from students again until this stage is done.";
     return reply.send({ success: true, data: updated, message });
   });
@@ -1309,6 +1412,25 @@ export const examRoutes: FastifyPluginAsync = async (fastify) => {
     if (!canManageExam(a, stage.exam)) return forbidden(reply, "Only the exam team can reassign a stage");
     if (stage.status === "DONE" || stage.status === "BYPASSED") return reply.status(409).send({ success: false, error: "This stage is already closed" });
     if (stage.ownerId === body.data.ownerId) return reply.send({ success: true, data: stage });
+
+    // The person who sets a paper never reviews it, and the other way round.
+    if (stage.scope === "SUBJECT" && (stage.ownerRole === "REVIEWER" || stage.ownerRole === "PAPER_SETTER")) {
+      const other = stage.ownerRole === "REVIEWER" ? "PAPER_SETTER" : "REVIEWER";
+      const slot = { examId: stage.exam.id, paperNum: stage.paperNum, subjectSlot: stage.subjectSlot };
+      const [team, counterpart] = await Promise.all([
+        prisma.examSubjectTeam.findUnique({ where: { examId_paperNum_subjectSlot: slot }, select: { setterId: true, reviewerId: true } }),
+        prisma.examStage.findMany({ where: { ...slot, ownerRole: other }, select: { ownerId: true } }),
+      ]);
+      const clash = new Set([other === "PAPER_SETTER" ? team?.setterId : team?.reviewerId, ...counterpart.map((c) => c.ownerId)]);
+      if (clash.has(body.data.ownerId)) {
+        return reply.status(400).send({
+          success: false,
+          error: other === "PAPER_SETTER"
+            ? "This person sets this paper, so they can't also review it. Pick someone else."
+            : "This person reviews this paper, so they can't also set it. Pick someone else.",
+        });
+      }
+    }
 
     const [actor, next] = await Promise.all([actorFor(a.user.sub), actorFor(body.data.ownerId)]);
     const prev = stage.ownerId ? await actorFor(stage.ownerId) : null;

@@ -8,7 +8,7 @@ import {
   Users, Home, CalendarOff, Receipt, Shield,
   GraduationCap, Settings, LogOut, BarChart3, Building2, User,
   CalendarDays, UsersRound, ListTodo, Megaphone, ClipboardList, School, MessageSquare, IndianRupee, X,
-  Archive, FolderOpen, ChevronRight, Briefcase, Wallet, BookOpen, ClipboardCheck, ListChecks,
+  Archive, FolderOpen, ChevronRight, Briefcase, Wallet, BookOpen, ClipboardCheck, ListChecks, Settings2,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useRouter } from "next/navigation";
@@ -160,6 +160,8 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
     { key: "exams", label: "Examinations", icon: ClipboardCheck, items: [
       ...(examMe?.canViewBoard ? [{ name: "Exam Board",    href: "/dashboard/exams",       icon: ClipboardCheck }] : []),
       ...(showExamTasks        ? [{ name: "My Exam Tasks", href: "/dashboard/exams/tasks", icon: ListChecks, badge: examMe?.overdueTasks ?? 0 }] : []),
+      // Board users reach Settings from the exam tabs; a per-exam Controller off the team needs a way in.
+      ...(examMe?.canManageSetup && !examMe?.canViewBoard ? [{ name: "Exam Settings", href: "/dashboard/exams/settings", icon: Settings2 }] : []),
     ] },
     { key: "finance", label: "Finance & Reports", icon: BarChart3, items: [
       ...(canViewAdmin ? [{ name: "Revenue",     href: "/dashboard/revenue", icon: IndianRupee }] : []),

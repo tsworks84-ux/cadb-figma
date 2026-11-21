@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
+import { pickableStaff } from "@/lib/staff";
 import { formatDate, formatCurrency, getInitials, resolvePhotoUrl } from "@/lib/utils";
 import {
   ArrowLeft, User, GraduationCap, Award, Wallet, CalendarOff,
@@ -3511,7 +3512,8 @@ function SearchableEmployee({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  const filtered = employees
+  // Only people still on staff can be picked; the saved manager keeps showing even if they've left.
+  const filtered = pickableStaff(employees, { keep: [value] })
     .filter((e) => e.id !== excludeId)
     .filter((e) => {
       if (!search) return true;
@@ -3960,8 +3962,8 @@ export default function EmployeeDetailPage() {
   // lookup: the paginated directory caps at 100 rows and hides employees outside
   // the viewer's department access, which silently truncated the list.
   const { data: allEmployeesList = [] } = useQuery({
-    queryKey: ["employees-lookup"],
-    queryFn: () => api.get("/api/v1/employees/lookup").then((r) => r.data.data),
+    queryKey: ["employees-lookup", "all"],
+    queryFn: () => api.get("/api/v1/employees/lookup", { params: { status: "all" } }).then((r) => r.data.data),
     enabled: (activeTab === "personal" || activeTab === "position") && isAdmin && editingEmployment,
     staleTime: 5 * 60 * 1000,
   });

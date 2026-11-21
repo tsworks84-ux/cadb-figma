@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
-  Plus, Minus, X, Calendar, ChevronDown, Loader2,
+  X, Calendar, ChevronDown, Loader2,
   Trash2, Clock, BookOpen, FileCheck2, Pencil, Archive, ArchiveRestore, Check,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
@@ -20,55 +20,8 @@ import { format, parseISO } from "date-fns";
 import { AssessmentStatsPanel } from "./StatsPanel";
 import { EXAM_PRESETS, PRESET_LABELS, resolveSubjectId, type ExamPreset } from "./examPresets";
 
-// ── Design tokens ─────────────────────────────────────────────────────────────
-const D = { line: "#e6e8ef", muted: "#7c8598", ink: "#111827", nav2: "#28245f", bg: "#f4f6fa" };
-
-const inputBase: React.CSSProperties = {
-  width: "100%", minHeight: 42, border: `1px solid ${D.line}`,
-  borderRadius: 12, padding: "9px 12px", background: "white",
-  color: D.ink, font: "inherit", fontSize: 14, outline: "none", boxSizing: "border-box",
-};
-
-// ── Primitives ────────────────────────────────────────────────────────────────
-function DInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} style={{ ...inputBase, ...props.style }} />;
-}
-function DSelect({ children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props} style={{ ...inputBase, ...props.style }}>{children}</select>;
-}
-function DTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea {...props} style={{ ...inputBase, minHeight: 88, resize: "vertical", ...props.style }} />;
-}
-function DBtn({ primary, children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { primary?: boolean }) {
-  return (
-    <button {...props} style={{
-      minHeight: 42, border: 0, borderRadius: 12, padding: "0 20px",
-      font: "inherit", fontWeight: 850, cursor: props.disabled ? "not-allowed" : "pointer",
-      ...(primary
-        ? { background: "linear-gradient(135deg, #28245f, #4f46e5)", color: "white", boxShadow: "0 12px 24px rgba(79,70,229,.24)" }
-        : { background: "white", color: "#374151", boxShadow: `inset 0 0 0 1px ${D.line}` }),
-      opacity: props.disabled ? 0.6 : 1, ...props.style,
-    }}>{children}</button>
-  );
-}
-function DField({ label, req, children }: { label: string; req?: boolean; children: React.ReactNode }) {
-  return (
-    <div style={{ display: "grid", gap: 7 }}>
-      <label style={{ color: "#4b5563", fontSize: 13, fontWeight: 850 }}>
-        {label}{req && <span style={{ color: "#ef4444" }}> *</span>}
-      </label>
-      {children}
-    </div>
-  );
-}
-function SCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div style={{ border: `1px solid ${D.line}`, borderRadius: 16, padding: 18, background: "#fbfcfe" }}>
-      <h2 style={{ margin: "0 0 14px", fontSize: 17, fontWeight: 800 }}>{title}</h2>
-      {children}
-    </div>
-  );
-}
+import { D, inputBase, DInput, DSelect, DTextarea, DBtn, DField, SCard } from "./formKit";
+import { StructureEditor, emptyPaper, layoutToPapers, papersToLayout, legacyPapers, validatePapers, presetToLayout, type PaperF } from "./ExamStructure";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtDate(iso: string) { try { return format(parseISO(iso), "dd MMM yyyy"); } catch { return iso; } }
@@ -101,37 +54,6 @@ function StatusBadge({ status }: { status: string }) {
     <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box", minWidth: 88, borderRadius: 999, padding: "2px 10px", fontSize: 12, fontWeight: 700, ...(s[status] ?? { background: "#f1f5f9", color: "#64748b" }) }}>
       {STATUS_LABEL[status] ?? status}
     </span>
-  );
-}
-
-// ── TopicsInput ───────────────────────────────────────────────────────────────
-function TopicsInput({ topics, onChange }: { topics: string[]; onChange: (t: string[]) => void }) {
-  const [input, setInput] = useState("");
-  const add = () => {
-    const t = input.trim();
-    if (t && !topics.includes(t)) onChange([...topics, t]);
-    setInput("");
-  };
-  return (
-    <div>
-      <div style={{ minHeight: 42, border: `1px solid ${D.line}`, borderRadius: 12, padding: "8px 12px", background: "white", display: "flex", flexWrap: "wrap", gap: 6 }}>
-        {topics.length === 0 && <span style={{ color: D.muted, fontSize: 13, alignSelf: "center" }}>No topics added</span>}
-        {topics.map((t) => (
-          <span key={t} style={{ display: "inline-flex", alignItems: "center", gap: 4, borderRadius: 999, background: "#eef2ff", border: "1px solid #c7d2fe", padding: "2px 10px", fontSize: 12, fontWeight: 700, color: "#4338ca" }}>
-            {t}
-            <button type="button" onClick={() => onChange(topics.filter((x) => x !== t))} style={{ border: "none", background: "none", cursor: "pointer", color: "#a5b4fc", padding: 0, display: "flex" }}>
-              <X style={{ width: 10, height: 10 }} />
-            </button>
-          </span>
-        ))}
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: 10, marginTop: 10 }}>
-        <DInput placeholder="Type a topic and press Add…" value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e: React.KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} />
-        <DBtn type="button" onClick={add} style={{ padding: "0 16px" }}>+ Add</DBtn>
-      </div>
-    </div>
   );
 }
 
@@ -205,87 +127,41 @@ function BatchMultiSelect({ batches, selected, onChange }: {
   );
 }
 
-// ── Stepper ───────────────────────────────────────────────────────────────────
-function Stepper({ value, min, max, onChange, label, unit }: {
-  value: number; min: number; max: number; label: string; onChange: (n: number) => void;
-  /** [singular, plural] — read from the label before, and "Subjects per Paper" contains "paper". */
-  unit: [string, string];
-}) {
-  return (
-    <div>
-      <label style={{ color: "#4b5563", fontSize: 13, fontWeight: 850 }}>{label}</label>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 10 }}>
-        <button type="button" onClick={() => onChange(Math.max(min, value - 1))} disabled={value <= min}
-          style={{ width: 42, height: 42, border: `1px solid ${D.line}`, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", background: "white", cursor: value <= min ? "not-allowed" : "pointer", opacity: value <= min ? 0.3 : 1 }}>
-          <Minus style={{ width: 16, height: 16 }} />
-        </button>
-        <strong style={{ fontSize: 22, minWidth: 34, textAlign: "center" }}>{value}</strong>
-        <button type="button" onClick={() => onChange(Math.min(max, value + 1))} disabled={value >= max}
-          style={{ width: 42, height: 42, border: `1px solid ${D.line}`, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", background: "white", cursor: value >= max ? "not-allowed" : "pointer", opacity: value >= max ? 0.3 : 1 }}>
-          <Plus style={{ width: 16, height: 16 }} />
-        </button>
-      </div>
-      <div style={{ marginTop: 8, color: D.muted, fontSize: 13, fontWeight: 850 }}>
-        {value} {value === 1 ? unit[0] : unit[1]}
-      </div>
-    </div>
-  );
-}
-
 // ── Types ─────────────────────────────────────────────────────────────────────
-type SubjectSlot = { subjectId: string; topics: string[]; maxMarks: string };
-function resizePS(ps: SubjectSlot[][], np: number, ns: number): SubjectSlot[][] {
-  return Array.from({ length: np }, (_, pi) =>
-    Array.from({ length: ns }, (_, si) => ps[pi]?.[si] ?? { subjectId: "", topics: [], maxMarks: "" })
-  );
-}
 type ExamForm = {
   academicYear: string; name: string;
-  numPapers: number; numSubjects: number; batchIds: string[];
-  paperSubjects: SubjectSlot[][];
+  /** The 4 letters of the exam code; the ddmmyy half always follows examDate. */
+  codePrefix: string;
+  batchIds: string[];
+  papers: PaperF[];
   examDate: string; startTime: string; endTime: string;
-  totalMarks: string; note: string;
+  note: string;
 };
 function emptyForm(defaultYear = ""): ExamForm {
   return {
-    academicYear: defaultYear, name: "",
-    numPapers: 1, numSubjects: 1, batchIds: [],
-    paperSubjects: [[{ subjectId: "", topics: [], maxMarks: "" }]],
+    academicYear: defaultYear, name: "", codePrefix: "",
+    batchIds: [], papers: [emptyPaper()],
     examDate: todayStr(), startTime: "9:00 AM", endTime: "10:00 AM",
-    totalMarks: "", note: "",
+    note: "",
   };
+}
+
+/** ddmmyy of a yyyy-mm-dd date — the second half of the exam code. */
+function codeSuffix(isoDate: string) {
+  const [y, m, d] = (isoDate || "").split("-");
+  return y && m && d ? `${d}${m}${y.slice(2)}` : "ddmmyy";
 }
 
 // ── Exam patterns (built-in presets + saved templates) ────────────────────────
-type PatternSlot = { subjectId: string | null; maxMarks: number | null; missing?: string };
-type Pattern = { numPapers: number; numSubjects: number; totalMarks: number | null; slots: PatternSlot[][] };
-
-function presetPattern(p: ExamPreset, subjects: any[]): Pattern {
-  return {
-    numPapers: p.numPapers, numSubjects: p.numSubjects, totalMarks: p.totalMarks,
-    slots: p.slots.map((paper) => paper.map((s) => {
-      const subjectId = resolveSubjectId(s.subject, subjects);
-      return { subjectId, maxMarks: s.maxMarks, missing: subjectId ? undefined : s.subject };
-    })),
-  };
-}
-
-function templatePattern(t: any, subjects: any[]): Pattern {
+function templateToPapers(t: any, subjects: any[]): { papers: PaperF[]; missing: string[] } {
   const active = new Set(subjects.map((s) => s.id));
-  const slots: PatternSlot[][] = Array.from({ length: t.numPapers }, () =>
-    Array.from({ length: t.numSubjects }, () => ({ subjectId: null, maxMarks: null })));
-  for (const ts of t.subjects ?? []) {
-    const row = slots[ts.paperNum - 1];
-    if (!row || ts.subjectSlot < 1 || ts.subjectSlot > row.length) continue;
-    // A subject deactivated since the template was saved isn't in the dropdown,
-    // so it can't be preselected — say so rather than leave a blank slot unexplained.
-    const usable = !!ts.subjectId && active.has(ts.subjectId);
-    row[ts.subjectSlot - 1] = {
-      subjectId: usable ? ts.subjectId : null, maxMarks: ts.maxMarks,
-      missing: ts.subjectId && !usable ? (ts.subject?.name ?? "A subject") : undefined,
-    };
-  }
-  return { numPapers: t.numPapers, numSubjects: t.numSubjects, totalMarks: t.totalMarks, slots };
+  const isActive = (id: string) => active.has(id);
+  // A subject deactivated since the template was saved isn't in the dropdown, so
+  // it can't be preselected — say so rather than leave a blank slot unexplained.
+  const missing = [...new Set(((t.subjects ?? []) as any[])
+    .filter((ts) => ts.subjectId && !active.has(ts.subjectId)).map((ts) => ts.subject?.name ?? "A subject"))];
+  const papers = t.layout ? layoutToPapers(t.layout, isActive) : legacyPapers(t.subjects ?? [], t.numPapers, isActive);
+  return { papers, missing };
 }
 
 function templateSummary(t: any) {
@@ -330,22 +206,24 @@ function ExamModal({ open, onClose, initial, examId, batches, subjects, academic
   const qc = useQueryClient();
   const isCreate = !examId;
   const [form, setForm] = useState<ExamForm>(initial ?? emptyForm(defaultYear));
-  // Key of the pattern last applied ("preset:jee-main" / "tpl:<id>"), and the slots
-  // it produced — so switching patterns only asks to confirm once the user has
-  // actually typed over what the previous one filled in.
+  // Key of the pattern last applied ("preset:jee-main" / "tpl:<id>"), and the
+  // structure it produced — so switching patterns only asks to confirm once the
+  // user has actually typed over what the previous one filled in.
   const [pattern, setPattern] = useState<string | null>(null);
-  const appliedSlots = useRef<string | null>(null);
-  const [saveTemplate, setSaveTemplate] = useState(false);
+  const appliedPapers = useRef<string | null>(null);
+  // "Save as Template" swaps the footer for a template-name row.
+  const [naming, setNaming] = useState(false);
   const [templateName, setTemplateName] = useState("");
   useEffect(() => {
     if (!open) return;
     setForm(initial ?? emptyForm(defaultYear));
-    setPattern(null); appliedSlots.current = null;
-    setSaveTemplate(false); setTemplateName("");
+    setPattern(null); appliedPapers.current = null;
+    setNaming(false); setTemplateName("");
   }, [open]); // eslint-disable-line
 
   const filteredBatches = form.academicYear ? batches.filter((b) => b.academicYear === form.academicYear) : batches;
   const timeError = !!(form.startTime && form.endTime && form.startTime === form.endTime);
+  const code = form.codePrefix ? `${form.codePrefix}${codeSuffix(form.examDate)}` : "";
 
   const { data: templates = [] } = useQuery<any[]>({
     queryKey: ["exam-templates"],
@@ -358,25 +236,18 @@ function ExamModal({ open, onClose, initial, examId, batches, subjects, academic
     onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to delete template"),
   });
 
-  const applyPattern = (key: string, label: string, p: Pattern) => {
-    const current = JSON.stringify(form.paperSubjects);
-    const entered = form.paperSubjects.some((paper) => paper.some((s) => s.subjectId || s.maxMarks || s.topics.length));
-    if (entered && current !== appliedSlots.current &&
-        !confirm(`Replace the subjects, max marks and topics entered below with the ${label} pattern?`)) return;
+  const applyPattern = (key: string, label: string, papers: PaperF[], missing: string[]) => {
+    const current = JSON.stringify(form.papers);
+    const pristine = JSON.stringify([emptyPaper()]);
+    if (current !== pristine && current !== appliedPapers.current &&
+        !confirm(`Replace the papers, sections and question ranges entered below with the ${label} pattern?`)) return;
 
-    const paperSubjects: SubjectSlot[][] = p.slots.map((paper) => paper.map((s) => ({
-      subjectId: s.subjectId ?? "", topics: [], maxMarks: s.maxMarks != null ? String(s.maxMarks) : "",
-    })));
-    setForm((prev) => ({
-      ...prev, numPapers: p.numPapers, numSubjects: p.numSubjects, paperSubjects,
-      totalMarks: p.totalMarks != null ? String(p.totalMarks) : "",
-    }));
-    appliedSlots.current = JSON.stringify(paperSubjects);
+    setForm((prev) => ({ ...prev, papers }));
+    appliedPapers.current = JSON.stringify(papers);
     setPattern(key);
 
-    const missing = [...new Set(p.slots.flat().map((s) => s.missing).filter(Boolean))];
     if (subjects.length === 0) {
-      toast.warning("The subject list couldn't be loaded, so subjects were left blank — marks are filled in; pick each subject by hand");
+      toast.warning("The subject list couldn't be loaded, so subjects were left blank — question ranges are filled in; pick each subject by hand");
     } else if (missing.length) {
       const one = missing.length === 1;
       toast.warning(`${missing.join(", ")} ${one ? "isn't an active subject" : "aren't active subjects"} under Academics → Settings — pick ${one ? "it" : "them"} by hand`);
@@ -385,222 +256,125 @@ function ExamModal({ open, onClose, initial, examId, batches, subjects, academic
 
   const createMut = useMutation({
     mutationFn: (d: any) => api.post("/api/v1/academics/assessments", d).then((r) => r.data),
-    onSuccess: (res, vars) => {
+    onSuccess: (res) => {
       if (!res.success) { toast.error(res.error); return; }
       invalidateAssessments(qc);
-      if (vars.saveAsTemplate) {
-        qc.invalidateQueries({ queryKey: ["exam-templates"] });
-        toast.success(`Assessment created · template "${vars.saveAsTemplate}" saved`);
-      } else {
-        toast.success("Assessment created");
-      }
+      toast.success("Exam created");
+      onClose();
     },
-    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to create assessment"),
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to create exam"),
   });
   const updateMut = useMutation({
     mutationFn: (d: any) => api.patch(`/api/v1/academics/assessments/${examId}`, d).then((r) => r.data),
-    onSuccess: (res) => { if (!res.success) { toast.error(res.error); return; } invalidateAssessments(qc); toast.success("Assessment updated"); onClose(); },
-    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to update assessment"),
+    onSuccess: (res) => { if (!res.success) { toast.error(res.error); return; } invalidateAssessments(qc); toast.success("Exam updated"); onClose(); },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to update exam"),
   });
-  const busy = createMut.isPending || updateMut.isPending;
+  const templateMut = useMutation({
+    mutationFn: (d: any) => api.post("/api/v1/academics/assessments/templates", d).then((r) => r.data),
+    onSuccess: (res, vars) => {
+      if (!res.success) { toast.error(res.error); return; }
+      qc.invalidateQueries({ queryKey: ["exam-templates"] });
+      toast.success(`Template "${vars.name}" saved`);
+      setNaming(false); setTemplateName("");
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? "Failed to save template"),
+  });
+  const busy = createMut.isPending || updateMut.isPending || templateMut.isPending;
 
   const buildPayload = () => {
-    if (!form.academicYear)           { toast.error("Academic year is required");   return null; }
-    if (!form.name.trim())            { toast.error("Test name is required");       return null; }
-    if (form.name.trim().length > 40) { toast.error("Name cannot exceed 40 chars"); return null; }
-    if (!form.examDate)               { toast.error("Date is required");            return null; }
-    if (!form.startTime)              { toast.error("Start time is required");      return null; }
-    if (!form.endTime)                { toast.error("End time is required");        return null; }
-    if (form.batchIds.length === 0)   { toast.error("Select at least one batch");   return null; }
-    const tplName = templateName.trim();
-    const withTemplate = isCreate && saveTemplate;
-    if (withTemplate) {
-      if (!tplName) { toast.error("Name the template, or untick “Save this pattern as a template”"); return null; }
-      if (PRESET_LABELS.includes(tplName.toLowerCase()) || templates.some((t) => t.name.toLowerCase() === tplName.toLowerCase())) {
-        toast.error(`A template named "${tplName}" already exists — pick another name`); return null;
-      }
-      if (!form.paperSubjects.some((paper) => paper.some((s) => s.subjectId))) {
-        toast.error("Pick at least one subject before saving this as a template"); return null;
-      }
-    }
+    if (!form.academicYear)           { toast.error("Academic year is required");      return null; }
+    if (!form.name.trim())            { toast.error("Name of exam is required");       return null; }
+    if (form.name.trim().length > 40) { toast.error("Name cannot exceed 40 chars");    return null; }
+    if (!form.examDate)               { toast.error("Exam date is required");          return null; }
+    if (isCreate && !form.codePrefix) { toast.error("Enter the 4 letters of the exam code"); return null; }
+    if (form.codePrefix && form.codePrefix.length !== 4) { toast.error("The exam code starts with exactly 4 letters"); return null; }
+    if (!form.startTime)              { toast.error("Start time is required");         return null; }
+    if (!form.endTime)                { toast.error("End time is required");           return null; }
+    if (form.batchIds.length === 0)   { toast.error("Select at least one batch");      return null; }
+    const problem = validatePapers(form.papers, subjects);
+    if (problem) { toast.error(problem); return null; }
     return {
-      ...(withTemplate ? { saveAsTemplate: tplName } : {}),
       academicYear: form.academicYear, name: form.name.trim(),
-      numPapers: form.numPapers, numSubjects: form.numSubjects, batchIds: form.batchIds,
-      paperSubjects: form.paperSubjects.map((paper) =>
-        paper.map((slot) => ({
-          subjectId: slot.subjectId || null,
-          topics: slot.topics.length > 0 ? slot.topics.join(", ") : null,
-          maxMarks: slot.maxMarks ? parseFloat(slot.maxMarks) : null,
-        }))
-      ),
+      code: code || null,
+      layout: papersToLayout(form.papers),
+      batchIds: form.batchIds,
       examDate: new Date(form.examDate).toISOString(),
       startTime: form.startTime, endTime: form.endTime,
-      totalMarks: form.totalMarks ? parseInt(form.totalMarks) : null,
       note: form.note.trim() || null,
     };
   };
 
   const handleSave = () => {
     const p = buildPayload(); if (!p) return;
-    if (examId) updateMut.mutate(p);
-    else createMut.mutate(p, { onSuccess: (res) => { if (res.success) onClose(); } });
+    if (examId) updateMut.mutate(p); else createMut.mutate(p);
   };
-  const handleSaveAnother = () => {
-    const p = buildPayload(); if (!p) return;
-    createMut.mutate(p, {
-      onSuccess: (res) => {
-        if (!res.success) return;
-        setForm({ ...emptyForm(defaultYear), academicYear: form.academicYear, examDate: form.examDate });
-        setPattern(null); appliedSlots.current = null;
-        setSaveTemplate(false); setTemplateName("");
-      },
-    });
+  const handleSaveTemplate = () => {
+    const name = templateName.trim();
+    if (!name) { toast.error("Name the template"); return; }
+    if (PRESET_LABELS.includes(name.toLowerCase()) || templates.some((t) => t.name.toLowerCase() === name.toLowerCase())) {
+      toast.error(`A template named "${name}" already exists — pick another name`); return;
+    }
+    if (!form.papers.some((p) => p.sections.some((s) => s.subjects.some((sub) => sub.subjectId)))) {
+      toast.error("Pick at least one subject before saving this as a template"); return;
+    }
+    const problem = validatePapers(form.papers, subjects);
+    if (problem) { toast.error(problem); return; }
+    templateMut.mutate({ name, layout: papersToLayout(form.papers) });
   };
 
   if (!open) return null;
   const charLeft = 40 - form.name.trim().length;
-  const structureDesc = (() => {
-    const { numPapers: np, numSubjects: ns } = form;
-    if (np === 1 && ns === 1) return "1 paper · 1 subject";
-    if (np === 1)             return `1 paper covering ${ns} subjects`;
-    if (ns === 1)             return `${np} papers · 1 subject each`;
-    return `${np} papers · ${ns} subjects each (${np * ns} total)`;
-  })();
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "grid", placeItems: "center", padding: 28, background: "linear-gradient(135deg, rgba(20,23,53,.72), rgba(40,36,95,.62))" }}
+    <div className="p-0 sm:p-7" style={{ position: "fixed", inset: 0, zIndex: 50, display: "grid", placeItems: "center", background: "linear-gradient(135deg, rgba(20,23,53,.72), rgba(40,36,95,.62))" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ width: "min(960px, 100%)", background: "white", borderRadius: 22, overflow: "hidden", boxShadow: "0 32px 90px rgba(0,0,0,.28)", maxHeight: "90vh", overflowY: "auto" }}>
+      <div className="rounded-none sm:rounded-[22px] h-[100dvh] sm:h-auto sm:max-h-[90vh]"
+        style={{ width: "min(960px, 100%)", background: "white", overflow: "hidden", boxShadow: "0 32px 90px rgba(0,0,0,.28)", display: "flex", flexDirection: "column" }}>
 
         {/* Head */}
-        <div style={{ padding: "24px 28px", borderBottom: `1px solid ${D.line}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 20 }}>
+        <div className="px-4 py-4 sm:px-7 sm:py-6" style={{ borderBottom: `1px solid ${D.line}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 20, flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 15 }}>
             <div style={{ width: 44, height: 44, borderRadius: 14, display: "grid", placeItems: "center", background: "#eef2ff", color: D.nav2, fontWeight: 900 }}>TE</div>
-            <h1 style={{ margin: 0, fontSize: 28 }}>{examId ? "Edit Assessment" : "New Assessment"}</h1>
+            <h1 className="text-xl sm:text-[28px]" style={{ margin: 0 }}>{examId ? "Edit Exam" : "New Exam"}</h1>
           </div>
-          <button onClick={onClose} style={{ border: "none", background: "none", cursor: "pointer", color: "#9aa3b4", fontSize: 28, lineHeight: 1 }}>×</button>
+          <button onClick={onClose} aria-label="Close" style={{ border: "none", background: "none", cursor: "pointer", color: "#9aa3b4", fontSize: 28, lineHeight: 1 }}>×</button>
         </div>
 
         {/* Body */}
-        <div style={{ padding: "24px 28px", display: "flex", flexDirection: "column", gap: 18 }}>
+        <div className="px-4 py-5 sm:px-7 sm:py-6" style={{ display: "flex", flexDirection: "column", gap: 18, overflowY: "auto", flex: 1 }}>
 
-          {/* Test Context */}
-          <SCard title="Test Context">
+          {/* Exam */}
+          <SCard title="Exam">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <DField label="Name of Exam" req>
+                <div style={{ position: "relative" }}>
+                  <DInput placeholder="e.g. JEE Main Weekly Test 12" value={form.name} maxLength={40}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ paddingRight: 44 }} />
+                  <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", fontSize: 11, color: charLeft < 5 ? "#ef4444" : D.muted }}>{charLeft}</span>
+                </div>
+              </DField>
               <DField label="Academic Year" req>
                 <DSelect value={form.academicYear} onChange={(e) => setForm({ ...form, academicYear: e.target.value, batchIds: [] })}>
                   <option value="">Select academic year</option>
                   {academicYears.filter((y) => !y.isArchived).map((y) => <option key={y.id} value={y.name}>{y.name}</option>)}
                 </DSelect>
               </DField>
-              <DField label="Test Name" req>
-                <div style={{ position: "relative" }}>
-                  <DInput placeholder="e.g. Maths Integration, JEE or 10th Unit Test" value={form.name} maxLength={40}
-                    onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ paddingRight: 44 }} />
-                  <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", fontSize: 11, color: charLeft < 5 ? "#ef4444" : D.muted }}>{charLeft}</span>
-                </div>
-              </DField>
-            </div>
-            <div style={{ marginTop: 14 }}>
-              <DField label="Batch(es)" req>
-                <BatchMultiSelect batches={filteredBatches} selected={form.batchIds} onChange={(ids) => setForm({ ...form, batchIds: ids })} />
-                {form.batchIds.length > 0 && <p style={{ fontSize: 12, color: "#4f46e5", marginTop: 4 }}>{form.batchIds.length} batch{form.batchIds.length > 1 ? "es" : ""} selected</p>}
-              </DField>
-            </div>
-          </SCard>
-
-          {/* Structure */}
-          <SCard title="Structure">
-            {isCreate && (
-              <div style={{ marginBottom: 16 }}>
-                <p style={{ margin: "0 0 8px", color: "#4b5563", fontSize: 13, fontWeight: 850 }}>Start from an exam pattern</p>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  {EXAM_PRESETS.map((p) => (
-                    <PatternChip key={p.key} title={p.label} detail={p.summary} active={pattern === `preset:${p.key}`}
-                      onClick={() => applyPattern(`preset:${p.key}`, p.label, presetPattern(p, subjects))} />
-                  ))}
-                </div>
-                {templates.length > 0 && (
-                  <>
-                    <p style={{ margin: "14px 0 8px", color: "#4b5563", fontSize: 13, fontWeight: 850 }}>Saved templates</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                      {templates.map((t) => (
-                        <PatternChip key={t.id} title={t.name} detail={templateSummary(t)} active={pattern === `tpl:${t.id}`}
-                          onClick={() => applyPattern(`tpl:${t.id}`, t.name, templatePattern(t, subjects))}
-                          onDelete={canDeleteTemplates ? () => {
-                            if (!confirm(`Delete the template "${t.name}"? Tests already created from it are not affected.`)) return;
-                            if (pattern === `tpl:${t.id}`) setPattern(null);
-                            deleteTemplateMut.mutate(t.id);
-                          } : undefined} />
-                      ))}
-                    </div>
-                  </>
-                )}
-                {pattern && (
-                  <p style={{ margin: "10px 0 0", fontSize: 12, fontWeight: 700, color: "#4f46e5" }}>
-                    Subjects and marks filled in below — adjust anything before saving.
-                  </p>
-                )}
-              </div>
-            )}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5" style={{ background: "white", border: `1px solid ${D.line}`, borderRadius: 14, padding: 16 }}>
-              <Stepper label="No. of Papers" unit={["paper", "papers"]} value={form.numPapers} min={1} max={5}
-                onChange={(n) => setForm({ ...form, numPapers: n, paperSubjects: resizePS(form.paperSubjects, n, form.numSubjects) })} />
-              <Stepper label="Subjects per Paper" unit={["subject", "subjects"]} value={form.numSubjects} min={1} max={5}
-                onChange={(n) => setForm({ ...form, numSubjects: n, paperSubjects: resizePS(form.paperSubjects, form.numPapers, n) })} />
-            </div>
-            <p style={{ marginTop: 10, fontSize: 13, color: D.muted, fontWeight: 850 }}>{structureDesc}</p>
-          </SCard>
-
-          {/* Test Details */}
-          <SCard title="Test Details">
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {Array.from({ length: form.numPapers }, (_, pi) => (
-                <div key={pi} style={{ border: `1px solid ${D.line}`, borderRadius: 14, background: "white", padding: 16 }}>
-                  {form.numPapers > 1 && (
-                    <p style={{ margin: "0 0 12px", fontSize: 12, fontWeight: 900, color: "#4f46e5", textTransform: "uppercase", letterSpacing: ".06em" }}>Paper {pi + 1}</p>
-                  )}
-                  {Array.from({ length: form.numSubjects }, (_, si) => {
-                    const slot = form.paperSubjects[pi]?.[si] ?? { subjectId: "", topics: [], maxMarks: "" };
-                    const updateSlot = (patch: Partial<SubjectSlot>) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        paperSubjects: prev.paperSubjects.map((row, rIdx) =>
-                          rIdx === pi ? row.map((s, cIdx) => cIdx === si ? { ...s, ...patch } : s) : row
-                        ),
-                      }));
-                    return (
-                      <div key={si} style={si > 0 ? { borderTop: `1px solid ${D.line}`, paddingTop: 12, marginTop: 12 } : {}}>
-                        {form.numSubjects > 1 && (
-                          <p style={{ margin: "0 0 10px", fontSize: 11, fontWeight: 900, color: D.muted, textTransform: "uppercase", letterSpacing: ".06em" }}>Subject {si + 1}</p>
-                        )}
-                        <div className="grid grid-cols-1 sm:grid-cols-[1fr_120px] gap-3">
-                          <DField label="Subject">
-                            <DSelect value={slot.subjectId} onChange={(e) => updateSlot({ subjectId: e.target.value })}>
-                              <option value="">Select subject</option>
-                              {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                            </DSelect>
-                          </DField>
-                          <DField label="Max Marks">
-                            <DInput type="number" min={0} placeholder="—" value={slot.maxMarks} onChange={(e) => updateSlot({ maxMarks: e.target.value })} />
-                          </DField>
-                        </div>
-                        <div style={{ marginTop: 12 }}>
-                          <DField label="Topics">
-                            <TopicsInput topics={slot.topics} onChange={(t) => updateSlot({ topics: t })} />
-                          </DField>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mt-4">
-              <DField label="Date" req>
+              <DField label="Exam Date" req>
                 <DInput type="date" max="2099-12-31" min="1900-01-01" value={form.examDate} onChange={(e) => setForm({ ...form, examDate: e.target.value })} />
+              </DField>
+              <DField label="Exam Code" req={isCreate}>
+                <div style={{ display: "flex", alignItems: "stretch" }}>
+                  <DInput aria-label="Exam code letters" placeholder="ABCD" value={form.codePrefix} maxLength={4}
+                    onChange={(e) => setForm({ ...form, codePrefix: e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4) })}
+                    style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0, letterSpacing: ".12em", fontWeight: 800, textTransform: "uppercase" }} />
+                  <span title="Taken from the exam date (ddmmyy)"
+                    style={{ display: "flex", alignItems: "center", padding: "0 12px", border: `1px solid ${D.line}`, borderLeft: "none", borderRadius: "0 12px 12px 0", background: "#f4f6fa", color: "#4b5563", fontWeight: 800, letterSpacing: ".12em", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                    {codeSuffix(form.examDate)}
+                  </span>
+                </div>
+                <span style={{ fontSize: 12, color: D.muted, fontWeight: 650 }}>
+                  4 letters + the exam date (ddmmyy){code ? <> · <strong style={{ color: D.nav2 }}>{code}</strong></> : null}
+                </span>
               </DField>
               <DField label="Start Time">
                 <DSelect value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })}>
@@ -612,64 +386,87 @@ function ExamModal({ open, onClose, initial, examId, batches, subjects, academic
                   style={timeError ? { borderColor: "#ef4444" } : {}}>
                   {TIME_SLOTS.map((t) => <option key={t} value={t}>{t}</option>)}
                 </DSelect>
+                {timeError && <span style={{ fontSize: 12, color: "#ef4444" }}>Start and end time can't be the same</span>}
               </DField>
             </div>
-            {timeError && <p style={{ fontSize: 12, color: "#ef4444", marginTop: 4 }}>Start and end time can't be the same</p>}
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mt-4">
-              <DField label="Total Marks">
-                <DInput type="number" min={0} placeholder="Auto or e.g. 100" value={form.totalMarks} onChange={(e) => setForm({ ...form, totalMarks: e.target.value })} />
-              </DField>
-              <DField label="Result Visibility">
-                <DSelect defaultValue="">
-                  <option value="">Keep hidden until published</option>
-                  <option value="auto">Publish after marking</option>
-                </DSelect>
-              </DField>
-            </div>
-
             <div style={{ marginTop: 14 }}>
-              <DField label="Note">
-                <DTextarea rows={2} placeholder="Additional instructions or notes…" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
+              <DField label="Batch(es)" req>
+                <BatchMultiSelect batches={filteredBatches} selected={form.batchIds} onChange={(ids) => setForm({ ...form, batchIds: ids })} />
+                {form.batchIds.length > 0 && <p style={{ fontSize: 12, color: "#4f46e5", marginTop: 4 }}>{form.batchIds.length} batch{form.batchIds.length > 1 ? "es" : ""} selected</p>}
               </DField>
             </div>
           </SCard>
 
-          {/* Save as template */}
-          {isCreate && (
-            <div style={{ border: `1px solid ${saveTemplate ? "#c7d2fe" : D.line}`, borderRadius: 16, padding: 18, background: saveTemplate ? "#f5f7ff" : "#fbfcfe" }}>
-              <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
-                <input type="checkbox" checked={saveTemplate} onChange={(e) => setSaveTemplate(e.target.checked)}
-                  style={{ accentColor: "#4f46e5", width: 16, height: 16, marginTop: 2, flexShrink: 0 }} />
-                <span>
-                  <span style={{ display: "block", fontSize: 14, fontWeight: 850, color: D.ink }}>Save this pattern as a template</span>
-                  <span style={{ display: "block", marginTop: 2, fontSize: 12, fontWeight: 650, color: D.muted, lineHeight: 1.4 }}>
-                    Keeps the papers, subjects, max marks and total for next time — not the batches, date or topics.
-                  </span>
-                </span>
-              </label>
-              {saveTemplate && (
-                <div style={{ marginTop: 12, maxWidth: 420 }}>
-                  <DField label="Template Name" req>
-                    <DInput autoFocus placeholder="e.g. XI JEE Main Weekly" maxLength={40} value={templateName}
-                      onChange={(e) => setTemplateName(e.target.value)} />
-                  </DField>
+          {/* Papers */}
+          <SCard title="Papers">
+            {isCreate && (
+              <div style={{ marginBottom: 16 }}>
+                <p style={{ margin: "0 0 8px", color: "#4b5563", fontSize: 13, fontWeight: 850 }}>Start from an exam pattern</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {EXAM_PRESETS.map((p) => (
+                    <PatternChip key={p.key} title={p.label} detail={p.summary} active={pattern === `preset:${p.key}`}
+                      onClick={() => {
+                        const { layout, missing } = presetToLayout(p.layout, subjects);
+                        applyPattern(`preset:${p.key}`, p.label, layoutToPapers(layout), missing);
+                      }} />
+                  ))}
                 </div>
-              )}
-            </div>
-          )}
+                {templates.length > 0 && (
+                  <>
+                    <p style={{ margin: "14px 0 8px", color: "#4b5563", fontSize: 13, fontWeight: 850 }}>Saved templates</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      {templates.map((t) => (
+                        <PatternChip key={t.id} title={t.name} detail={templateSummary(t)} active={pattern === `tpl:${t.id}`}
+                          onClick={() => { const r = templateToPapers(t, subjects); applyPattern(`tpl:${t.id}`, t.name, r.papers, r.missing); }}
+                          onDelete={canDeleteTemplates ? () => {
+                            if (!confirm(`Delete the template "${t.name}"? Exams already created from it are not affected.`)) return;
+                            if (pattern === `tpl:${t.id}`) setPattern(null);
+                            deleteTemplateMut.mutate(t.id);
+                          } : undefined} />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+            <StructureEditor papers={form.papers} subjects={subjects} onChange={(papers) => setForm((prev) => ({ ...prev, papers }))} />
+          </SCard>
+
+          <DField label="Note">
+            <DTextarea rows={2} placeholder="Additional instructions or notes…" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
+          </DField>
         </div>
 
         {/* Foot */}
-        <div style={{ padding: "18px 28px", borderTop: `1px solid ${D.line}`, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-          <DBtn onClick={onClose} disabled={busy}>Cancel</DBtn>
-          <div style={{ display: "flex", gap: 10 }}>
-            {!examId && <DBtn onClick={handleSaveAnother} disabled={busy}>Save &amp; Add Another</DBtn>}
-            <DBtn primary onClick={handleSave} disabled={busy}>
-              {busy && <Loader2 className="inline animate-spin mr-1.5" style={{ width: 14, height: 14 }} />}
-              {examId ? "Save Changes" : "Save"}
-            </DBtn>
-          </div>
+        <div className="px-4 py-3 sm:px-7 sm:py-[18px]" style={{ borderTop: `1px solid ${D.line}`, flexShrink: 0 }}>
+          {naming ? (
+            <div className="flex flex-col sm:flex-row gap-2.5 sm:items-center">
+              <DInput autoFocus aria-label="Template name" placeholder="Template name, e.g. XI JEE Main Weekly" maxLength={40} value={templateName}
+                onChange={(e) => setTemplateName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleSaveTemplate(); } if (e.key === "Escape") setNaming(false); }}
+                style={{ flex: 1 }} />
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <DBtn onClick={() => setNaming(false)} disabled={busy}>Back</DBtn>
+                <DBtn primary onClick={handleSaveTemplate} disabled={busy}>
+                  {templateMut.isPending && <Loader2 className="inline animate-spin mr-1.5" style={{ width: 14, height: 14 }} />}
+                  Save Template
+                </DBtn>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <DBtn onClick={onClose} disabled={busy}>Cancel</DBtn>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <DBtn onClick={() => setNaming(true)} disabled={busy} title="Keeps the papers, sections, subjects and question ranges — not the batches, date, code or topics">
+                  Save as Template
+                </DBtn>
+                <DBtn primary onClick={handleSave} disabled={busy}>
+                  {(createMut.isPending || updateMut.isPending) && <Loader2 className="inline animate-spin mr-1.5" style={{ width: 14, height: 14 }} />}
+                  {examId ? "Save Changes" : "Save"}
+                </DBtn>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -749,6 +546,11 @@ function ExamCard({ exam, canEdit, canDelete, onEdit, onDelete, onStatus }: {
           style={{ border: "none", background: "none", cursor: "pointer", padding: 0, fontSize: 16, fontWeight: 800, color: D.nav2, textAlign: "left", lineHeight: 1.3 }}>
           {exam.name}
         </button>
+        {exam.code && (
+          <span style={{ marginLeft: 8, verticalAlign: "2px", fontSize: 11, fontWeight: 800, letterSpacing: ".08em", color: "#4338ca", background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: 6, padding: "1px 6px" }}>
+            {exam.code}
+          </span>
+        )}
 
         {/* Meta row — date / time / batches / subjects */}
         <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 16px", marginTop: 6, fontSize: 13, color: D.muted, fontWeight: 600 }}>
@@ -973,30 +775,17 @@ function AssessmentsPage() {
   });
 
   const openEdit = (exam: any) => {
-    const np = exam.numPapers ?? 1;
-    const ns = exam.numSubjects ?? 1;
-    const ps: SubjectSlot[][] = resizePS([], np, ns);
-    for (const es of exam.subjects ?? []) {
-      const pi = (es.paperNum ?? 1) - 1;
-      const si = (es.subjectSlot ?? 1) - 1;
-      if (ps[pi] && si < ps[pi].length) {
-        ps[pi][si] = {
-          subjectId: es.subjectId ?? "",
-          topics: es.topics ? es.topics.split(",").map((t: string) => t.trim()).filter(Boolean) : [],
-          maxMarks: es.maxMarks != null ? String(es.maxMarks) : "",
-        };
-      }
-    }
     setEditTarget({
       id: exam.id,
       form: {
         academicYear: exam.academicYear, name: exam.name,
-        numPapers: np, numSubjects: ns,
+        codePrefix: exam.code ? String(exam.code).slice(0, 4) : "",
         batchIds: exam.batches?.map((eb: any) => eb.batchId) ?? [],
-        paperSubjects: ps,
+        // Exams made before layouts open as one section per paper, each subject
+        // carrying its old max marks until question ranges are added.
+        papers: exam.layout ? layoutToPapers(exam.layout) : legacyPapers(exam.subjects ?? [], exam.numPapers ?? 1),
         examDate: exam.examDate?.split("T")[0] ?? "",
         startTime: exam.startTime, endTime: exam.endTime,
-        totalMarks: exam.totalMarks != null ? String(exam.totalMarks) : "",
         note: exam.note ?? "",
       } satisfies ExamForm,
     });
@@ -1050,7 +839,7 @@ function AssessmentsPage() {
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         {!showStats && <DBtn onClick={exportCSV}>Export</DBtn>}
         <DBtn onClick={() => setShowStats((v) => !v)}>{showStats ? "← Tests" : "Stats"}</DBtn>
-        {!showStats && canCreate && <DBtn primary onClick={() => { setEditTarget(null); setModalOpen(true); }}>+ New Test</DBtn>}
+        {!showStats && canCreate && <DBtn primary onClick={() => { setEditTarget(null); setModalOpen(true); }}>+ New Exam</DBtn>}
       </div>
     </div>
   );
@@ -1148,7 +937,7 @@ function AssessmentsPage() {
             <DInput placeholder="Search assessments by test name, batch, subject, or faculty" value={toolbarSearch}
               onChange={(e) => setToolbarSearch(e.target.value)} style={{ minHeight: 48, borderRadius: 14, fontSize: 15 }} />
             <span style={{ color: D.muted, fontWeight: 850, whiteSpace: "nowrap" }}>{totalExams} test{totalExams !== 1 ? "s" : ""}</span>
-            {canCreate && <DBtn primary onClick={() => { setEditTarget(null); setModalOpen(true); }}>+ New Test</DBtn>}
+            {canCreate && <DBtn primary onClick={() => { setEditTarget(null); setModalOpen(true); }}>+ New Exam</DBtn>}
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
@@ -1178,7 +967,7 @@ function AssessmentsPage() {
                   <p style={{ margin: "8px auto 18px", color: D.muted, maxWidth: 500, lineHeight: 1.5, fontWeight: 650 }}>
                     Create the first test with papers, subjects, marks, batches, date, and time. Results and marking analytics will appear here once assessments are conducted.
                   </p>
-                  {canCreate && <DBtn primary onClick={() => { setEditTarget(null); setModalOpen(true); }}>+ Create Assessment</DBtn>}
+                  {canCreate && <DBtn primary onClick={() => { setEditTarget(null); setModalOpen(true); }}>+ New Exam</DBtn>}
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">

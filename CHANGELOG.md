@@ -6,6 +6,7 @@ minor = new capability, patch = fix.
 
 | Version | Date | Summary |
 |---|---|---|
+| v1.30.0 | 2026-11-21 | New Exam layout (exam code, papers → sections → subjects → question ranges, Save as Template); exam ops: blueprint step removed, setter ≠ reviewer enforced, subject-faculty pickers, per-subject evaluators with evaluation windows, opt-in student/parent emails, Controllers edit exam settings; Employees Active/Archive and on-staff-only staff dropdowns |
 | v1.29.0 | 2026-11-13 | Hybrid (pen & paper + online) exam mode; syllabus sign-off by every batch subject teacher before the blueprint (subject-head/Controller fallback, Controller bypass with reason) |
 | v1.28.0 | 2026-11-12 | Exam operations: 16-step exam cycle with owners, deadlines, reminders, blueprint + subject-head approval, results release gate, EXAMS module + read-only exam viewers, exam tasks in My To-Do |
 | v1.27.0 | 2026-11-07 | Grouped sidebar, revenue/leave overflow fixes, revenue crash fix |

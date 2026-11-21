@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, Suspense } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { pickableStaff } from "@/lib/staff";
 import { toast } from "sonner";
 import {
   Plus, X, BookOpen, User, Calendar, ChevronDown,
@@ -524,7 +525,7 @@ function AssignmentModal({
                 <DField label="Faculty" required>
                   <DSelect value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })}>
                     <option value="">Select faculty</option>
-                    {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+                    {pickableStaff(employees, { subjectId: form.subjectId, keep: [form.employeeId] }).map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
                   </DSelect>
                 </DField>
               </div>
@@ -1104,7 +1105,7 @@ function AssignmentsPage() {
   const { data: gradesData }   = useQuery({ queryKey: ["grades"],           queryFn: () => api.get("/api/v1/academics/grades").then((r) => r.data) });
   const { data: subjectsData } = useQuery({ queryKey: ["subjects"],         queryFn: () => api.get("/api/v1/academics/subjects").then((r) => r.data.data) });
   const { data: batchesData }  = useQuery({ queryKey: ["batches-all", teacherId ?? "all"],  queryFn: () => api.get(batchesUrl).then((r) => r.data) });
-  const { data: empData }      = useQuery({ queryKey: ["employees-lookup"], queryFn: () => api.get("/api/v1/employees/lookup").then((r) => r.data) });
+  const { data: empData }      = useQuery({ queryKey: ["employees-lookup", "all"], queryFn: () => api.get("/api/v1/employees/lookup", { params: { status: "all" } }).then((r) => r.data) });
 
   const years     = (yearsData          ?? []) as any[];
   const grades    = (gradesData?.data   ?? []) as any[];
@@ -1351,7 +1352,7 @@ function AssignmentsPage() {
         <label style={filterLabelStyle}>Faculty</label>
         <DSelect value={filterFaculty} onChange={(e) => setFilterFaculty(e.target.value)}>
           <option value="">All faculty</option>
-          {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+          {pickableStaff(employees, { subjectId: filterSubject, keep: [filterFaculty] }).map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
         </DSelect>
       </div>
 

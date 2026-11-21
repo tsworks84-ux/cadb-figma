@@ -96,6 +96,13 @@ while deciding.
 - **Employee code:** `YYMM` + 3-digit global serial (e.g. `2603001`); login uses this code, not email.
 - **Probation:** new joiners auto-confirm to ACTIVE after **3 months** (daily job, `utils/probation.ts`).
 - An employee can belong to **several departments**; one is primary (`Employee.departmentId`).
+- **On staff vs archived** (`utils/staffStatus.ts`, mirrored in web `lib/staff.ts`): ACTIVE, PROBATION, ON_LEAVE and
+  NOTICE_PERIOD are on staff; TERMINATED, RESIGNED, RETIRED and EXITED are archived. The Employees list shows
+  on-staff people plus unfinished DRAFTs; **Archive** shows the rest. The headcount card matches the list.
+- **Staff dropdowns** offer only on-staff people (`/employees/lookup` default; `?status=all` for screens that keep a
+  saved choice visible after the person has left). Where a subject is chosen (class, assignment, exam paper), only
+  that subject's faculty are offered: people who teach it in any batch (`BatchSubject`), plus its head for exam
+  pickers. If nobody is mapped to the subject yet, all on-staff people are offered instead of an empty list.
 
 ---
 
@@ -157,12 +164,14 @@ computes the preview. Deleting can target one class or the series.
   Import Marks saves unsaved grid edits first.
 
 ### 6.4 Exam operations (tracking)
-- Optional layer on an assessment: exam type (Super Admin parameter per academic year), mode, Controller of
-  Examinations, Examination Executive, and per-subject setter / reviewer / approver (`ExamSubjectTeam`, keyed by
+- Optional layer on an assessment: exam type (per academic year, set by Super Admin or a Controller), mode, Controller of
+  Examinations, Examination Executive, and per-subject setter / reviewer / evaluator (`ExamSubjectTeam`, keyed by
   paper × subject slot). Rules live in `utils/examTracking.ts`.
+- **Setter ≠ reviewer** for the same paper: blocked in the setup form, on save, and when reassigning either stage.
+  Setter, reviewer and evaluator pickers list only that subject's faculty.
 - **Mode:** Pen & paper, Online (Learnyst), or **Hybrid** (both: a printed paper and a Learnyst test). A stage
   template tagged with a mode applies only to that mode; Hybrid gets the printing *and* Learnyst stages.
-- Setting up an exam snapshots the type's stage templates (17 by default) into `ExamStage` rows. Planned date =
+- Setting up an exam snapshots the type's stage templates (16 by default) into `ExamStage` rows. Planned date =
   exam date + offset, moved back to the previous working day if it lands on a Sunday/holiday; exam day never moves.
   Overdue is derived on read. A stage is blocked until earlier exam-wide stages and same-slot subject stages are done.
 - **Syllabus sign-off** (step 2, `approver = BATCH_TEACHERS`, owned by the Executive, one per subject): the
@@ -170,15 +179,22 @@ computes the preview. Deleting can target one class or the series.
   (`BatchSubject.employeeId`) must approve. A teacher of several of the exam's batches signs once. A batch with no
   teacher for the subject (or whose teacher is the owner) falls to the subject head, else the Controller. One row
   per signer in `ExamStageSignoff`; the step closes when all are approved/bypassed, and it gates that subject's
-  blueprint and every later exam-wide step. A teacher **sending back** returns it to the Executive; the others'
+  later steps and every later exam-wide step. A teacher **sending back** returns it to the Executive; the others'
   approvals stand, and on resubmission only the objector is asked again — **unless the chapters changed**, in which
   case everyone signs again (an approval only carries over for the chapters it was given for). Changing the chapters
   after sending/closing reopens the step. The Controller can **bypass one teacher** with a reason, and a Controller
   reopen resets every sign-off. The hourly sweep re-works signers (a batch's teacher can change in Academics) and
   reminds/chases teachers who haven't responded.
-- **Blueprint** stage: chapters come from `ExamSubject.topics`; marks must sum to the paper's max marks and
-  easy/medium/hard to 100%. Submitting sends it to the approver (per-exam override → subject head → Controller,
-  never the owner); approval completes it, send-back needs a comment. Changing chapters or max marks reopens it.
+- **No blueprint step** (removed 2026-11-21): the blueprint comes with the exam template (the New Exam layout).
+  Exam types can't add one back. Migration `20261121100100` deleted untouched blueprint stages and bypassed open
+  ones with a reason; finished ones stay as history.
+- **Evaluation** (one stage per subject, owner role EVALUATOR): on the Evaluation step the exam team picks each
+  subject's evaluator and an evaluation window (start/end, not before the exam). The evaluator owns that subject's
+  stage and the **end date is its deadline** (otherwise exam date + offset). Results verification waits for every
+  subject's evaluation.
+- **Student/parent emails are opt-in each time:** marking the exam-notice or results-release step done sends emails
+  only if "email students and parents" is ticked (off by default). The portal effects (results visible) happen
+  regardless.
 - **Results release gate:** students see marks only once `resultsReleasedAt` is set (Controller-only stage;
   reopening hides them again). Untracked exams get it at creation, so their behaviour is unchanged.
 - Hourly sweep (`utils/examSweep.ts`): due-in-2-days reminder to the owner, overdue alert to owner + Controller +
