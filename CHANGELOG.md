@@ -6,6 +6,7 @@ minor = new capability, patch = fix.
 
 | Version | Date | Summary |
 |---|---|---|
+| v1.31.0 | 2026-11-21 | Academic Settings → Curriculum: chapter/topic/subtopic lists by subject, grade and board (xlsx import/export, manual rows), offered as tick-box topics in New Exam, Assignments and Schedule; seeded with 40 curricula (Foundation, CBSE, ICSE, JEE/NEET) |
 | v1.30.1 | 2026-11-21 | Saved exam templates picked from a dropdown in the New Exam window |
 | v1.30.0 | 2026-11-21 | New Exam layout (exam code, papers → sections → subjects → question ranges, Save as Template); exam ops: blueprint step removed, setter ≠ reviewer enforced, subject-faculty pickers, per-subject evaluators with evaluation windows, opt-in student/parent emails, Controllers edit exam settings; Employees Active/Archive and on-staff-only staff dropdowns |
 | v1.29.0 | 2026-11-13 | Hybrid (pen & paper + online) exam mode; syllabus sign-off by every batch subject teacher before the blueprint (subject-head/Controller fallback, Controller bypass with reason) |
