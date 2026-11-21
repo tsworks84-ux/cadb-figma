@@ -411,22 +411,40 @@ function ExamModal({ open, onClose, initial, examId, batches, subjects, academic
                       }} />
                   ))}
                 </div>
-                {templates.length > 0 && (
-                  <>
-                    <p style={{ margin: "14px 0 8px", color: "#4b5563", fontSize: 13, fontWeight: 850 }}>Saved templates</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                      {templates.map((t) => (
-                        <PatternChip key={t.id} title={t.name} detail={templateSummary(t)} active={pattern === `tpl:${t.id}`}
-                          onClick={() => { const r = templateToPapers(t, subjects); applyPattern(`tpl:${t.id}`, t.name, r.papers, r.missing); }}
-                          onDelete={canDeleteTemplates ? () => {
-                            if (!confirm(`Delete the template "${t.name}"? Exams already created from it are not affected.`)) return;
-                            if (pattern === `tpl:${t.id}`) setPattern(null);
-                            deleteTemplateMut.mutate(t.id);
-                          } : undefined} />
-                      ))}
+                {templates.length > 0 && (() => {
+                  const selected = pattern?.startsWith("tpl:") ? templates.find((t) => `tpl:${t.id}` === pattern) : null;
+                  return (
+                    <div style={{ marginTop: 14 }}>
+                      <DField label="Or start from a saved template">
+                        <DSelect value={selected?.id ?? ""} onChange={(e) => {
+                          const t = templates.find((x) => x.id === e.target.value);
+                          if (!t) return;
+                          const r = templateToPapers(t, subjects);
+                          applyPattern(`tpl:${t.id}`, t.name, r.papers, r.missing);
+                        }}>
+                          <option value="" disabled>Select a saved template ({templates.length})…</option>
+                          {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                        </DSelect>
+                      </DField>
+                      {selected && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+                          <p style={{ flex: 1, minWidth: 0, margin: 0, fontSize: 12, fontWeight: 650, color: D.muted, lineHeight: 1.35 }}>{templateSummary(selected)}</p>
+                          {canDeleteTemplates && (
+                            <button type="button" title="Delete template" aria-label={`Delete template ${selected.name}`}
+                              onClick={() => {
+                                if (!confirm(`Delete the template "${selected.name}"? Exams already created from it are not affected.`)) return;
+                                setPattern(null);
+                                deleteTemplateMut.mutate(selected.id);
+                              }}
+                              style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 8px", borderRadius: 8, border: "1px solid #fecaca", background: "white", cursor: "pointer", color: "#ef4444", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
+                              <Trash2 style={{ width: 13, height: 13 }} /> Delete
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  </>
-                )}
+                  );
+                })()}
               </div>
             )}
             <StructureEditor papers={form.papers} subjects={subjects} onChange={(papers) => setForm((prev) => ({ ...prev, papers }))} />
