@@ -12,6 +12,7 @@ import { Plus, Trash2, ChevronDown, ChevronRight, X } from "lucide-react";
 import type { ExamLayout, QuestionType } from "@cadb/types";
 import { D, DInput, DSelect, TopicsInput } from "./formKit";
 import { resolveSubjectId, type PresetLayout } from "./examPresets";
+import { CurriculumPicker } from "./CurriculumPicker";
 
 export const QUESTION_TYPES: { value: QuestionType; label: string }[] = [
   { value: "SCQ",        label: "SCQ (single correct)" },
@@ -212,8 +213,10 @@ function Count({ label, value }: { label: string; value: number }) {
   );
 }
 
-export function StructureEditor({ papers, onChange, subjects }: {
+export function StructureEditor({ papers, onChange, subjects, gradeIds = [] }: {
   papers: PaperF[]; onChange: (p: PaperF[]) => void; subjects: any[];
+  /** Grades of the selected batches — picks which curriculum the topic picker opens on. */
+  gradeIds?: string[];
 }) {
   // Every edit clones the tree and mutates the copy — the nesting is too deep
   // for spread-based updates to stay readable.
@@ -272,7 +275,7 @@ export function StructureEditor({ papers, onChange, subjects }: {
 
                     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                       {sec.subjects.map((sub, ui) => (
-                        <SubjectBlock key={ui} sub={sub} subjects={subjects}
+                        <SubjectBlock key={ui} sub={sub} subjects={subjects} gradeIds={gradeIds}
                           canRemove={sec.subjects.length > 1}
                           onRemove={() => edit((d) => { d[pi].sections[si].subjects.splice(ui, 1); })}
                           onEdit={(fn) => edit((d) => fn(d[pi].sections[si].subjects[ui]))}
@@ -307,8 +310,8 @@ export function StructureEditor({ papers, onChange, subjects }: {
   );
 }
 
-function SubjectBlock({ sub, subjects, canRemove, onRemove, onEdit, nextQ }: {
-  sub: SubjectF; subjects: any[]; canRemove: boolean; onRemove: () => void;
+function SubjectBlock({ sub, subjects, gradeIds, canRemove, onRemove, onEdit, nextQ }: {
+  sub: SubjectF; subjects: any[]; gradeIds: string[]; canRemove: boolean; onRemove: () => void;
   onEdit: (fn: (s: SubjectF) => void) => void; nextQ: () => number;
 }) {
   const [topicsOpen, setTopicsOpen] = useState(sub.topics.length > 0);
@@ -400,6 +403,7 @@ function SubjectBlock({ sub, subjects, canRemove, onRemove, onEdit, nextQ }: {
       </div>
       {topicsOpen && (
         <div style={{ marginTop: 8 }}>
+          <CurriculumPicker subjectId={sub.subjectId} gradeIds={gradeIds} topics={sub.topics} onChange={(t) => onEdit((s) => { s.topics = t; })} />
           <TopicsInput topics={sub.topics} onChange={(t) => onEdit((s) => { s.topics = t; })} />
         </div>
       )}

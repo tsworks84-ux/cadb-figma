@@ -222,6 +222,7 @@ function ExamModal({ open, onClose, initial, examId, batches, subjects, academic
   }, [open]); // eslint-disable-line
 
   const filteredBatches = form.academicYear ? batches.filter((b) => b.academicYear === form.academicYear) : batches;
+  const selectedGradeIds = [...new Set(batches.filter((b) => form.batchIds.includes(b.id)).map((b) => b.grade?.id ?? b.gradeId).filter(Boolean))] as string[];
   const timeError = !!(form.startTime && form.endTime && form.startTime === form.endTime);
   const code = form.codePrefix ? `${form.codePrefix}${codeSuffix(form.examDate)}` : "";
 
@@ -447,7 +448,7 @@ function ExamModal({ open, onClose, initial, examId, batches, subjects, academic
                 })()}
               </div>
             )}
-            <StructureEditor papers={form.papers} subjects={subjects} onChange={(papers) => setForm((prev) => ({ ...prev, papers }))} />
+            <StructureEditor papers={form.papers} subjects={subjects} gradeIds={selectedGradeIds} onChange={(papers) => setForm((prev) => ({ ...prev, papers }))} />
           </SCard>
 
           <DField label="Note">

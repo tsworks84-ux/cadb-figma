@@ -13,6 +13,7 @@ import {
 import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { hasAcademicsAction } from "@/lib/academicsAccess";
+import CurriculumTab from "./CurriculumTab";
 
 // ── Design tokens ───────────────────────────────────────────────────────────────
 const D = { line: "#e6e8ef", muted: "#7c8598", ink: "#111827", nav2: "#28245f", bg: "#f4f6fa", accent: "#eef2ff" };
@@ -956,7 +957,7 @@ function InstalmentPlansTab({ canEdit }: { canEdit: boolean }) {
 
 // ── Nav config ─────────────────────────────────────────────────────────────────
 const NAV_GROUPS = [
-  { label: "Academic Core", items: [{ id: "academic-years", label: "Academic Years" }, { id: "grades", label: "Grades" }, { id: "subjects", label: "Subjects" }, { id: "courses", label: "Courses" }] },
+  { label: "Academic Core", items: [{ id: "academic-years", label: "Academic Years" }, { id: "grades", label: "Grades" }, { id: "subjects", label: "Subjects" }, { id: "curriculum", label: "Curriculum" }, { id: "courses", label: "Courses" }] },
   { label: "Organisation",  items: [{ id: "schools", label: "Schools" }, { id: "locations", label: "City" }, { id: "centres", label: "Centres" }] },
   { label: "Examinations",  items: [{ id: "target-exams", label: "Target Exams" }] },
   { label: "Fees",          items: [{ id: "instalment-plans", label: "Instalment Plans" }] },
@@ -1023,6 +1024,7 @@ export default function AcademicSettingsPage() {
           {tab === "academic-years"   && <AcademicYearsTab   canEdit={canEdit} />}
           {tab === "grades"           && <GradesTab          canEdit={canEdit} />}
           {tab === "subjects"         && <SubjectsTab        canEdit={canEdit} />}
+          {tab === "curriculum"       && <CurriculumTab      canEdit={canEdit} />}
           {tab === "courses"          && <CoursesTab         canEdit={canEdit} />}
           {tab === "schools"          && <SchoolsTab         canEdit={canEdit} />}
           {tab === "locations"        && <LocationsTab       canEdit={canEdit} />}

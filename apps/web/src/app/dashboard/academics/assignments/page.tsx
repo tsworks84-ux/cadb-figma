@@ -18,6 +18,7 @@ import {
 import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { hasAcademicsAction } from "@/lib/academicsAccess";
+import { CurriculumPicker } from "../assessments/CurriculumPicker";
 import { useRouter, useSearchParams } from "next/navigation";
 import { format, parseISO, startOfWeek, endOfWeek } from "date-fns";
 
@@ -327,6 +328,7 @@ function AssignmentModal({
   const filteredBatches = form.academicYear
     ? batches.filter((b) => b.academicYear === form.academicYear)
     : batches;
+  const selectedGradeIds = [...new Set(batches.filter((b) => form.batchIds.includes(b.id)).map((b) => b.grade?.id ?? b.gradeId).filter(Boolean))] as string[];
 
   const submissionError = Boolean(
     form.assignmentDate && form.submissionDate &&
@@ -535,6 +537,7 @@ function AssignmentModal({
             <section style={sectionStyle}>
               <h3 style={sectionHeadStyle}>Topics, Attachment &amp; Notes</h3>
               <DField label="Topics">
+                <CurriculumPicker collapsible subjectId={form.subjectId} gradeIds={selectedGradeIds} topics={form.topics} onChange={(t) => setForm({ ...form, topics: t })} />
                 <TopicsInput topics={form.topics} onChange={(t) => setForm({ ...form, topics: t })} />
               </DField>
 

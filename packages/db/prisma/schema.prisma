@@ -1452,6 +1452,7 @@ model Subject {
   assignments          Assignment[]
   examSubjects         ExamSubject[]
   examTemplateSubjects ExamTemplateSubject[]
+  curricula            Curriculum[]
 
   @@index([isActive])
 }
@@ -1498,6 +1499,51 @@ model TargetExam {
   @@index([isActive])
 }
 
+// A syllabus for one subject at one grade under one board (e.g. Physics · XI ·
+// JEE/NEET): a chapter → topic → subtopic outline, imported from xlsx or built row
+// by row in Academic Settings → Curriculum. Exam forms offer it as topic choices.
+model Curriculum {
+  id        String   @id @default(cuid())
+  subjectId String
+  gradeId   String
+  board     String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subject Subject          @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  grade   Grade            @relation(fields: [gradeId], references: [id], onDelete: Cascade)
+  items   CurriculumItem[]
+
+  @@unique([subjectId, gradeId, board])
+  @@index([gradeId])
+}
+
+enum CurriculumLevel {
+  CHAPTER
+  TOPIC
+  SUBTOPIC
+}
+
+// One node of the outline. Chapters have no parent; a topic's parent is a
+// chapter; a subtopic's parent is a topic. Siblings are ordered by sortOrder.
+model CurriculumItem {
+  id           String          @id @default(cuid())
+  curriculumId String
+  parentId     String?
+  level        CurriculumLevel
+  name         String
+  sortOrder    Int             @default(0)
+  createdAt    DateTime        @default(now())
+
+  curriculum Curriculum       @relation(fields: [curriculumId], references: [id], onDelete: Cascade)
+  parent     CurriculumItem?  @relation("CurriculumTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children   CurriculumItem[] @relation("CurriculumTree")
+
+  @@index([curriculumId, sortOrder])
+  @@index([parentId])
+}
+
 model Grade {
   id        String   @id @default(cuid())
   name      String   @unique
@@ -1506,8 +1552,9 @@ model Grade {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  students Student[]
-  batches  Batch[]
+  students  Student[]
+  batches   Batch[]
+  curricula Curriculum[]
 }
 
 model Course {

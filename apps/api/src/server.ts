@@ -38,6 +38,7 @@ import { studentAnnouncementRoutes } from "./routes/v1/studentAnnouncements.js";
 import { studentPortalRoutes } from "./routes/v1/studentPortal.js";
 import { academicsRoutes } from "./routes/v1/academics.js";
 import { academicSettingsRoutes } from "./routes/v1/academicSettings.js";
+import { curriculumRoutes } from "./routes/v1/curriculum.js";
 import { studentRoutes } from "./routes/v1/students.js";
 import { scheduleRoutes } from "./routes/v1/schedule.js";
 import { assignmentRoutes } from "./routes/v1/assignments.js";
@@ -143,6 +144,7 @@ await server.register(studentAnnouncementRoutes,  { prefix: "/api/v1/student/ann
 await server.register(studentPortalRoutes,        { prefix: "/api/v1/student/portal" });
 await server.register(academicsRoutes,         { prefix: "/api/v1/academics" });
 await server.register(academicSettingsRoutes,  { prefix: "/api/v1/academics" });
+await server.register(curriculumRoutes,        { prefix: "/api/v1/academics" });
 await server.register(studentRoutes,           { prefix: "/api/v1/academics/students" });
 await server.register(scheduleRoutes,           { prefix: "/api/v1/academics/schedules" });
 await server.register(assignmentRoutes,         { prefix: "/api/v1/academics/assignments" });

@@ -206,6 +206,28 @@ computes the preview. Deleting can target one class or the series.
 All academics features are gated by the permission matrix for every role except Super Admin. Teachers
 (EMPLOYEE role) see a view filtered to their own batches.
 
+### 6.5 Curriculum
+- Academic Settings → Curriculum. One curriculum per **subject × grade × board** (board is free text, e.g. CBSE,
+  ICSE, Foundation, JEE/NEET), holding a **chapter → topic → subtopic** outline in sheet order.
+- Built row by row in the app, or imported from xlsx/csv with **Chapter, Topic, Subtopic** columns (found by
+  header, so extra columns are ignored). Blank Chapter/Topic cells continue the row above; names repeated under
+  the same parent merge (case-insensitive). Import is validated first (dry run); **Replace** swaps the whole
+  outline, **Add to it** merges by name and removes nothing. Export produces the same format, so it round-trips.
+- Reads are open to every signed-in user; writes need `ACA_SETTINGS` edit, like the rest of Academic Settings.
+- The New Exam topics, Assignment topics and Schedule class topics offer the subject's curricula as tick-boxes,
+  opening on the grade of the selected batches. Ticked names are stored as plain topic text (commas inside a
+  name become " / ", because topics are stored comma-joined) — editing or deleting the curriculum later never
+  changes an existing exam.
+- Initial data, normalised into `apps/api/seed/curriculum-centum-pow.json` and loaded with
+  `node dist/scripts/seed-curriculum.js seed/curriculum-centum-pow.json --apply` (skips curricula that already
+  exist):
+  - "CENTUM POW" sheet — grades VIII–X twice, as **Foundation** (the "ACE Syllabus" columns; ACE = the Foundation
+    programme) and **CBSE**; XI–XII under **JEE/NEET**.
+  - "Subject wise POWs – FOUNDATION / New" workbooks — the `Grade 8 ICSE` and `Grade 9 ICSE` sheets as **ICSE**
+    (no Grade 10 ICSE sheet exists; Biology's `Grade 8 ICSE (2)` draft is ignored). Workbook/question-paper/project
+    rows are dropped, lecture splits ("Force Lec 1…8") fold into one chapter, and teach-ahead chapters stay on the
+    sheet's grade tagged "(Grade 9)" / "(Grade 10)".
+
 ---
 
 ## 7. Resources library

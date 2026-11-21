@@ -15,6 +15,7 @@ import {
 import { useAuthStore } from "@/store/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { hasAcademicsAction } from "@/lib/academicsAccess";
+import { CurriculumPicker } from "../assessments/CurriculumPicker";
 import { useRouter, useSearchParams } from "next/navigation";
 import { format, parseISO, startOfWeek, endOfWeek } from "date-fns";
 import {
@@ -759,6 +760,7 @@ function ScheduleModal({
   const filteredBatches = form.academicYear
     ? batches.filter((b) => b.academicYear === form.academicYear)
     : batches;
+  const selectedGradeIds = [...new Set(batches.filter((b) => form.batchIds.includes(b.id)).map((b) => b.grade?.id ?? b.gradeId).filter(Boolean))] as string[];
 
   const endTimeError = Boolean(
     form.date && form.startTime && form.endTime &&
@@ -1150,6 +1152,11 @@ function ScheduleModal({
               <DField label="Topics">
                 <DInput placeholder="e.g. Quadratic Equations, Chapter 5" value={form.topics} onChange={(e) => setForm({ ...form, topics: e.target.value })} />
               </DField>
+              <div style={{ marginTop: 6 }}>
+                <CurriculumPicker collapsible subjectId={form.subjectId} gradeIds={selectedGradeIds}
+                  topics={form.topics.split(",").map((t) => t.trim()).filter(Boolean)}
+                  onChange={(t) => setForm({ ...form, topics: t.join(", ") })} />
+              </div>
               <div style={{ marginTop: 14 }}>
                 <DField label="Notes">
                   <DTextarea placeholder="Additional notes…" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
