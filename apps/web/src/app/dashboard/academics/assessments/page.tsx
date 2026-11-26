@@ -30,9 +30,10 @@ function todayStr() { return new Date().toISOString().split("T")[0]; }
 const TIME_SLOTS = (() => {
   const slots: string[] = [];
   for (let h = 0; h < 24; h++) {
-    for (const m of [0, 30]) {
+    // 5-minute steps — some tests run 80 or 100 minutes.
+    for (let m = 0; m < 60; m += 5) {
       const hour = h % 12 === 0 ? 12 : h % 12;
-      slots.push(`${hour}:${m === 0 ? "00" : "30"} ${h < 12 ? "AM" : "PM"}`);
+      slots.push(`${hour}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`);
     }
   }
   return slots;
@@ -287,7 +288,6 @@ function ExamModal({ open, onClose, initial, examId, batches, subjects, academic
     if (!form.name.trim())            { toast.error("Name of exam is required");       return null; }
     if (form.name.trim().length > 40) { toast.error("Name cannot exceed 40 chars");    return null; }
     if (!form.examDate)               { toast.error("Exam date is required");          return null; }
-    if (isCreate && !form.codePrefix) { toast.error("Enter the 4 letters of the exam code"); return null; }
     if (form.codePrefix && form.codePrefix.length !== 4) { toast.error("The exam code starts with exactly 4 letters"); return null; }
     if (!form.startTime)              { toast.error("Start time is required");         return null; }
     if (!form.endTime)                { toast.error("End time is required");           return null; }
@@ -363,7 +363,7 @@ function ExamModal({ open, onClose, initial, examId, batches, subjects, academic
               <DField label="Exam Date" req>
                 <DInput type="date" max="2099-12-31" min="1900-01-01" value={form.examDate} onChange={(e) => setForm({ ...form, examDate: e.target.value })} />
               </DField>
-              <DField label="Exam Code" req={isCreate}>
+              <DField label="Exam Code (optional)">
                 <div style={{ display: "flex", alignItems: "stretch" }}>
                   <DInput aria-label="Exam code letters" placeholder="ABCD" value={form.codePrefix} maxLength={4}
                     onChange={(e) => setForm({ ...form, codePrefix: e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4) })}
@@ -374,7 +374,7 @@ function ExamModal({ open, onClose, initial, examId, batches, subjects, academic
                   </span>
                 </div>
                 <span style={{ fontSize: 12, color: D.muted, fontWeight: 650 }}>
-                  4 letters + the exam date (ddmmyy){code ? <> · <strong style={{ color: D.nav2 }}>{code}</strong></> : null}
+                  4 letters + the exam date (ddmmyy); can be shared by several exams{code ? <> · <strong style={{ color: D.nav2 }}>{code}</strong></> : null}
                 </span>
               </DField>
               <DField label="Start Time">

@@ -1831,8 +1831,9 @@ model Exam {
   id           String     @id @default(cuid())
   academicYear String
   name         String
-  // <4 letters><ddmmyy of examDate>, e.g. JMWT211126. Null on exams made before codes existed.
-  code         String?    @unique
+  // <4 letters><ddmmyy of examDate>, e.g. JMWT211126. Optional, and deliberately not
+  // unique: the same paper run at several centres is entered as one exam per centre.
+  code         String?
   numPapers    Int        @default(1)
   numSubjects  Int        @default(1)
   // Paper → sections → subjects → question ranges, as built on the New Exam form
@@ -1873,6 +1874,7 @@ model Exam {
   @@index([status])
   @@index([examDate])
   @@index([examTypeId])
+  @@index([code])
 }
 
 model ExamSubject {

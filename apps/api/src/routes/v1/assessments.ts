@@ -132,10 +132,6 @@ function codeDateSuffix(examDate: string) {
   return `${pad(d.getUTCDate())}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCFullYear() % 100)}`;
 }
 
-const codeConflict = (code: string) => ({ success: false, error: `Exam code ${code} is already used by another exam` });
-
-/** Which unique column a P2002 hit — `code` on Exam, `name` on ExamTemplate. */
-const uniqueTarget = (e: any): string => String(e?.meta?.target ?? "");
 
 const examSchema = z.object({
   academicYear:  z.string().min(1),
@@ -576,7 +572,6 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
       if (!code.endsWith(codeDateSuffix(examDate))) {
         return reply.status(400).send({ success: false, error: `Exam code must end with the exam date as ddmmyy (${codeDateSuffix(examDate)})` });
       }
-      if (await prisma.exam.findUnique({ where: { code }, select: { id: true } })) return reply.status(409).send(codeConflict(code));
     }
 
     // Checked before anything is written, so a clashing template name can't leave
@@ -619,8 +614,7 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
       });
       return reply.status(201).send({ success: true, data: exam });
     } catch (e: any) {
-      // Both were checked above; a P2002 here means one was taken in between.
-      if (e?.code === "P2002" && code && uniqueTarget(e).includes("code")) return reply.status(409).send(codeConflict(code));
+      // The name was checked above; a P2002 here means it was taken in between.
       if (e?.code === "P2002" && saveAsTemplate) return reply.status(409).send(templateNameConflict(saveAsTemplate));
       throw e;
     }
@@ -687,8 +681,6 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
         if (date && !code.endsWith(codeDateSuffix(date))) {
           return reply.status(400).send({ success: false, error: `Exam code must end with the exam date as ddmmyy (${codeDateSuffix(date)})` });
         }
-        const clash = await prisma.exam.findUnique({ where: { code }, select: { id: true } });
-        if (clash && clash.id !== id) return reply.status(409).send(codeConflict(code));
       }
     }
     if (examDate    !== undefined) updates.examDate    = new Date(examDate);
@@ -718,11 +710,7 @@ export const assessmentRoutes: FastifyPluginAsync = async (fastify) => {
         updates.subjects = { create: buildSubjectRows(paperSubjects, np, ns) };
       }
       return tx.exam.update({ where: { id }, data: updates, include: examInclude });
-    }).catch((e: any) => {
-      if (e?.code === "P2002" && code && uniqueTarget(e).includes("code")) return null;
-      throw e;
     });
-    if (!exam) return reply.status(409).send(codeConflict(code!));
 
     // A tracked exam's stages follow its date and subject grid.
     const tracked = await prisma.exam.findUnique({ where: { id }, select: { examTypeId: true } });

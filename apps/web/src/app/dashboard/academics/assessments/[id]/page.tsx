@@ -856,12 +856,12 @@ export default function ExamDetailPage() {
             ) : (
               <div className="min-w-max">
                 <table className="w-full text-xs border-collapse">
-                  <thead className="sticky top-0 z-10 bg-gray-50">
+                  <thead className="sticky top-0 z-30 bg-gray-50">
                     {/* Paper group row — only when multiple papers */}
                     {numPapers > 1 && (
                       <tr className="border-b border-gray-200">
-                        <th className="sticky left-0 z-20 bg-gray-50 w-28 min-w-[112px] px-3 py-2" />
-                        <th className="sticky left-28 z-20 bg-gray-50 w-40 min-w-[160px] px-3 py-2" />
+                        <th className="sticky left-0 z-40 bg-gray-50 w-28 min-w-[112px] px-3 py-2" />
+                        <th className="sticky left-28 z-40 bg-gray-50 w-40 min-w-[160px] px-3 py-2" />
                         <th className="px-3 py-2 w-24" />  {/* Present */}
                         {Array.from({ length: numPapers }, (_, pi) => paperSlotCounts[pi] > 0 && (
                           <th key={pi} colSpan={paperSlotCounts[pi]}
@@ -875,10 +875,10 @@ export default function ExamDetailPage() {
                     )}
                     {/* Subject / column headers */}
                     <tr className="border-b border-gray-200">
-                      <th className="sticky left-0 z-20 bg-gray-50 w-28 min-w-[112px] px-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wide">
+                      <th className="sticky left-0 z-40 bg-gray-50 w-28 min-w-[112px] px-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wide">
                         Roll No
                       </th>
-                      <th className="sticky left-28 z-20 bg-gray-50 w-40 min-w-[160px] px-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wide">
+                      <th className="sticky left-28 z-40 bg-gray-50 w-40 min-w-[160px] px-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wide">
                         Student
                       </th>
                       <th className="px-3 py-2.5 text-center font-semibold text-gray-600 w-24 min-w-[96px] border-r border-gray-200">
@@ -924,15 +924,18 @@ export default function ExamDetailPage() {
                       const absent  = !(attendanceMap[s.id] ?? true);
                       const total   = getTotal(s.id);
                       const overMax = exam.totalMarks && total > exam.totalMarks;
+                      // Frozen columns need an opaque fill, or names show through the
+                      // header and the mark inputs show through them while scrolling.
+                      const stickyBg = absent ? "bg-gray-50" : "bg-white group-hover:bg-[#fcfcff]";
 
                       return (
                         <tr key={s.id} className={`group transition-colors ${absent ? "bg-gray-50/80" : "hover:bg-indigo-50/20"}`}>
                           {/* Roll No */}
-                          <td className="sticky left-0 bg-inherit z-10 px-3 py-2 font-mono text-gray-500 w-28 min-w-[112px]">
+                          <td className={`sticky left-0 z-10 ${stickyBg} px-3 py-2 font-mono text-gray-500 w-28 min-w-[112px]`}>
                             {s.rollNumber ?? <span className="text-gray-300">—</span>}
                           </td>
                           {/* Student name */}
-                          <td className="sticky left-28 bg-inherit z-10 px-3 py-2 w-40 min-w-[160px]">
+                          <td className={`sticky left-28 z-10 ${stickyBg} px-3 py-2 w-40 min-w-[160px]`}>
                             <div className={`font-medium ${absent ? "text-gray-400" : "text-gray-800"}`}>
                               {fullName(s)}
                             </div>
