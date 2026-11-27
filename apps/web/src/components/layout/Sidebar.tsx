@@ -9,6 +9,7 @@ import {
   GraduationCap, Settings, LogOut, BarChart3, Building2, User,
   CalendarDays, UsersRound, ListTodo, Megaphone, ClipboardList, School, MessageSquare, IndianRupee, X,
   Archive, FolderOpen, ChevronRight, Briefcase, Wallet, BookOpen, ClipboardCheck, ListChecks, Settings2,
+  Store, Banknote,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useRouter } from "next/navigation";
@@ -90,6 +91,15 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
     .filter((k) => k.startsWith("MIS_"))
     .some((k) => permissions[k]?.canView);
 
+  // Vendors: any grant on the registry opens it; payments open for anyone who can
+  // raise, approve, pay or merely view them. Both come purely from the matrix.
+  const anyFlag = (m: string) => {
+    const p = permissions[m];
+    return !!p && (p.canView || p.canCreate || p.canEdit || p.canDelete || p.canApprove);
+  };
+  const canViewVendors = anyFlag("VENDORS");
+  const canViewVendorPayments = anyFlag("VENDOR_PAYMENTS");
+
   const profileEntry = canViewDirectory
     ? { name: "Employees", href: "/dashboard/employees", icon: Users }
     : { name: "My Profile", href: user?.id ? `/dashboard/employees/${user.id}` : "#", icon: User };
@@ -166,6 +176,8 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
     { key: "finance", label: "Finance & Reports", icon: BarChart3, items: [
       ...(canViewAdmin ? [{ name: "Revenue",     href: "/dashboard/revenue", icon: IndianRupee }] : []),
       ...(canViewMIS   ? [{ name: "MIS Reports", href: "/dashboard/mis",     icon: BarChart3   }] : []),
+      ...(canViewVendors        ? [{ name: "Vendors",         href: "/dashboard/vendors",          icon: Store    }] : []),
+      ...(canViewVendorPayments ? [{ name: "Vendor Payments", href: "/dashboard/vendors/payments", icon: Banknote }] : []),
     ] },
   ].filter((g) => g.items.length > 0);
 

@@ -65,6 +65,16 @@ export type NotifyPayload = {
   /** Footer sign-off; student emails don't use the HR one. */
   signOff?: string;
 
+  // Vendor events
+  vendorName?: string;
+  vendorCode?: string;
+  vendorCategory?: string;
+  paymentNumber?: string;
+  amount?: string;
+  invoiceNumber?: string;
+  paidSummary?: string;     // "₹40,000 paid + ₹1,000 TDS"
+  requesterName?: string;
+
   // Shared
   reason?: string;
   cancelReason?: string;
@@ -386,6 +396,76 @@ export function renderEmail(event: NotifyEvent, p: NotifyPayload): { subject: st
 
     case "ANNOUNCEMENT_POSTED":
       return null;
+
+    case "VENDOR_REGISTERED":
+      return {
+        subject: `Vendor awaiting approval: ${p.vendorName} (${p.vendorCode})`,
+        html: shell(
+          "A vendor is awaiting approval",
+          `Dear ${esc(p.recipientName)}, ${esc(p.requesterName)} registered the vendor below. Payments can be raised against it once it is approved.`,
+          row("Vendor", p.vendorName) + row("Code", p.vendorCode) + optionalRow("Category", p.vendorCategory) +
+            optionalRow("Note", p.decisionNote),
+          "Review vendor →",
+          p.link,
+          "Centum Academy Accounts",
+        ),
+      };
+
+    case "VENDOR_PAYMENT_REQUESTED":
+      return {
+        subject: `Approve vendor payment ${p.paymentNumber}: ${p.amount} to ${p.vendorName}`,
+        html: shell(
+          "A vendor payment needs your approval",
+          `Dear ${esc(p.recipientName)}, ${esc(p.requesterName)} raised the payment request below.`,
+          row("Request", p.paymentNumber) + row("Vendor", `${p.vendorName} (${p.vendorCode})`) + row("Amount", p.amount) +
+            optionalRow("Invoice", p.invoiceNumber) + optionalRow("Purpose", p.reason),
+          "Review request →",
+          p.link,
+          "Centum Academy Accounts",
+        ),
+      };
+
+    case "VENDOR_PAYMENT_APPROVED":
+      return {
+        subject: `Cleared for payment: ${p.paymentNumber} — ${p.amount} to ${p.vendorName}`,
+        html: shell(
+          "Vendor payment approved",
+          `Dear ${esc(p.recipientName)}, ${esc(p.approverName)} approved the request below. It is now cleared for payment by Accounts.`,
+          row("Request", p.paymentNumber) + row("Vendor", `${p.vendorName} (${p.vendorCode})`) + row("Amount", p.amount) +
+            optionalRow("Invoice", p.invoiceNumber) + optionalRow("Comment", p.decisionNote),
+          "Open request →",
+          p.link,
+          "Centum Academy Accounts",
+        ),
+      };
+
+    case "VENDOR_PAYMENT_REJECTED":
+      return {
+        subject: `Rejected: vendor payment ${p.paymentNumber}`,
+        html: shell(
+          "Vendor payment rejected",
+          `Dear ${esc(p.recipientName)}, ${esc(p.approverName)} rejected your payment request.`,
+          row("Request", p.paymentNumber) + row("Vendor", `${p.vendorName} (${p.vendorCode})`) + row("Amount", p.amount) +
+            row("Reason", p.decisionNote),
+          "Open request →",
+          p.link,
+          "Centum Academy Accounts",
+        ),
+      };
+
+    case "VENDOR_PAYMENT_PAID":
+      return {
+        subject: `Paid: ${p.paymentNumber} — ${p.vendorName}`,
+        html: shell(
+          "Vendor paid in full",
+          `Dear ${esc(p.recipientName)}, Accounts has settled your payment request.`,
+          row("Request", p.paymentNumber) + row("Vendor", `${p.vendorName} (${p.vendorCode})`) + row("Amount", p.amount) +
+            row("Settled", p.paidSummary),
+          "Open request →",
+          p.link,
+          "Centum Academy Accounts",
+        ),
+      };
   }
 }
 
@@ -493,6 +573,11 @@ export function whatsappTemplate(event: NotifyEvent, p: NotifyPayload): { name: 
     case "EXAM_SCHEDULED":
     case "EXAM_RESULTS_RELEASED":
     case "ANNOUNCEMENT_POSTED":
+    case "VENDOR_REGISTERED":
+    case "VENDOR_PAYMENT_REQUESTED":
+    case "VENDOR_PAYMENT_APPROVED":
+    case "VENDOR_PAYMENT_REJECTED":
+    case "VENDOR_PAYMENT_PAID":
       return null;
   }
 }
@@ -556,5 +641,16 @@ export function renderInApp(event: NotifyEvent, p: NotifyPayload): { title: stri
 
     case "ANNOUNCEMENT_POSTED":
       return { title: p.announcementTitle ?? "New announcement", body: p.announcementBody ?? "" };
+
+    case "VENDOR_REGISTERED":
+      return { title: `Approve vendor: ${p.vendorName}`, body: `${p.vendorCode}${p.vendorCategory ? ` · ${p.vendorCategory}` : ""} · by ${p.requesterName}` };
+    case "VENDOR_PAYMENT_REQUESTED":
+      return { title: `Approve payment: ${p.amount} to ${p.vendorName}`, body: `${p.paymentNumber} · by ${p.requesterName}` };
+    case "VENDOR_PAYMENT_APPROVED":
+      return { title: `Cleared for payment: ${p.amount} to ${p.vendorName}`, body: `${p.paymentNumber} · approved by ${p.approverName}` };
+    case "VENDOR_PAYMENT_REJECTED":
+      return { title: `Vendor payment rejected: ${p.paymentNumber}`, body: `${p.vendorName} · ${p.amount}${p.decisionNote ? ` · ${p.decisionNote}` : ""}` };
+    case "VENDOR_PAYMENT_PAID":
+      return { title: `Vendor paid: ${p.vendorName}`, body: `${p.paymentNumber} · ${p.paidSummary}` };
   }
 }

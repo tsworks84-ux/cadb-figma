@@ -50,6 +50,8 @@ import { notificationSettingRoutes } from "./routes/v1/notificationSettings.js";
 import { notificationRoutes } from "./routes/v1/notifications.js";
 import { resourceRoutes, cleanupAbandonedUploads } from "./routes/v1/resources.js";
 import { examRoutes } from "./routes/v1/exams.js";
+import { vendorRoutes } from "./routes/v1/vendors.js";
+import { vendorPaymentRoutes } from "./routes/v1/vendorPayments.js";
 import { confirmExpiredProbations } from "./utils/probation.js";
 import { runExamStageSweep } from "./utils/examSweep.js";
 import { drainNotifications } from "./utils/notify/dispatcher.js";
@@ -156,6 +158,8 @@ await server.register(notificationSettingRoutes, { prefix: "/api/v1/notification
 await server.register(notificationRoutes,        { prefix: "/api/v1/notifications" });
 await server.register(resourceRoutes,            { prefix: "/api/v1/resources" });
 await server.register(examRoutes,                { prefix: "/api/v1/exams" });
+await server.register(vendorRoutes,              { prefix: "/api/v1/vendors" });
+await server.register(vendorPaymentRoutes,       { prefix: "/api/v1/vendor-payments" });
 const MIME: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",

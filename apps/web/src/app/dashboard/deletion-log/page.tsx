@@ -35,6 +35,8 @@ const ENTITY_LABEL: Record<string, string> = {
   Resource:           "Resource",
   ResourceItem:       "Resource item",
   Employee:           "Employee record",
+  Vendor:             "Vendor",
+  VendorPaymentTransaction: "Vendor payment entry",
 };
 
 // Snapshot keys worth surfacing, in reading order. Anything else stays folded
@@ -260,6 +262,8 @@ export default function DeletionLogPage() {
           <option value="Resource">Resources</option>
           <option value="ResourceItem">Resource items</option>
           <option value="Employee">Employee records</option>
+          <option value="Vendor">Vendors</option>
+          <option value="VendorPaymentTransaction">Vendor payment entries</option>
         </select>
       </div>
 

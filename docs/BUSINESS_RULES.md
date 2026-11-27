@@ -235,3 +235,42 @@ Files, folders, links and videos on the academy's **Google Shared Drive**, reach
 and **always proxied through CADB** (Drive is never shared with users, so private files stay private).
 Visibility per resource: **Private** (owner only — not even Super Admin), **All staff**, or **Selected
 departments**. Moderators (Edit/Delete/Approve on `RESOURCES`) can hide others' shared resources.
+
+## 8. Vendors and vendor payments
+Code: `apps/api/src/routes/v1/vendors.ts`, `vendorPayments.ts`, `utils/vendors.ts`. Who may do what is set in
+the permission matrix (see `ACCESS_CONTROL.md`); the approving authority and the Accounts team are typically
+custom roles.
+
+**Onboarding.** A registered vendor (`VEN-0001`, sequential) starts **Pending approval** and must be approved
+by someone holding `VENDORS` Approve before any payment can be raised against it. Rejecting needs a reason;
+editing a rejected vendor resubmits it. GSTIN is unique across vendors; GSTIN, PAN, IFSC and PIN are
+format-checked. Approved vendors can be deactivated (reason required) and reactivated. A vendor with any
+payment request on record cannot be deleted — deactivate it instead.
+
+**Bank-detail changes.** Changing any bank field of an approved (or inactive) vendor sends it back to
+**Pending approval**. Until it is re-approved, no request for it can be approved and Accounts cannot record a
+payment — the classic "swap the bank account" fraud needs a second person.
+
+**Payment flow.** Request (`VP-YYYYMM-0001`) → **Awaiting approval** → approver approves (= **Cleared for
+payment**) or rejects with a reason → Accounts records one or more payment entries (amount, TDS, mode,
+transaction reference, date of payment, remarks) → **Part paid** → **Paid** once paid + TDS covers the
+amount. Rules:
+- Nobody approves a request they raised, or a vendor they submitted (Super Admin excepted).
+- Requests only against **active** vendors. The same invoice number for the same vendor cannot be on two live
+  requests.
+- A payment entry cannot exceed the balance, cannot be dated in the future, and needs a transaction reference
+  unless the mode is Cash.
+- The requester can cancel while awaiting approval; an approver can cancel a cleared request only while no
+  payment has been recorded against it.
+- A wrongly recorded entry is voided (`VENDOR_PAYMENTS` Delete, reason required); it is logged in the Deletion
+  Log and the request's status and totals are recomputed.
+
+**Notifications** (email + bell, toggled under Administration → Notifications → Vendors): new/resubmitted
+vendor → vendor approvers; new request → payment approvers; approved → requester + Accounts; rejected / paid
+in full → requester. Approvers and Accounts are everyone whose role holds the grant; Super Admins are
+notified only when no other role holds it.
+
+**Files.** Vendor documents, invoices and payment proofs are stored in `apps/api/storage/vendors/`, **outside**
+the public `/uploads` tree, and are only served through `GET /api/v1/vendors/documents/:id/file`, which
+re-checks access. PDF/JPG/PNG/WEBP, 10 MB each.
+

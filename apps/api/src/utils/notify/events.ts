@@ -27,6 +27,11 @@ export const NOTIFY_EVENTS = [
   "EXAM_APPROVAL_DECIDED",
   "EXAM_SCHEDULED",
   "EXAM_RESULTS_RELEASED",
+  "VENDOR_REGISTERED",
+  "VENDOR_PAYMENT_REQUESTED",
+  "VENDOR_PAYMENT_APPROVED",
+  "VENDOR_PAYMENT_REJECTED",
+  "VENDOR_PAYMENT_PAID",
 ] as const;
 
 export type NotifyEvent = (typeof NOTIFY_EVENTS)[number];
@@ -40,7 +45,7 @@ export type NotifyChannel = (typeof NOTIFY_CHANNELS)[number];
 const ALL_CHANNELS: readonly NotifyChannel[] = NOTIFY_CHANNELS;
 
 type EventMeta = {
-  group: "Leaves" | "Comp-off" | "Claims" | "Announcements" | "Examinations";
+  group: "Leaves" | "Comp-off" | "Claims" | "Announcements" | "Examinations" | "Vendors";
   label: string;
   audience: string;
   /**
@@ -78,6 +83,14 @@ export const EVENT_META: Record<NotifyEvent, EventMeta> = {
   EXAM_APPROVAL_DECIDED:  { group: "Examinations", label: "Exam stage approved / sent back", audience: "Stage owner",            channels: ["EMAIL", "IN_APP"] },
   EXAM_SCHEDULED:         { group: "Examinations", label: "Exam notice to students", audience: "Students and parents",                 channels: ["EMAIL"] },
   EXAM_RESULTS_RELEASED:  { group: "Examinations", label: "Results to students",     audience: "Students and parents",                 channels: ["EMAIL"] },
+  // Vendor management. Recipients come from the permission matrix: whoever holds
+  // the approving grant (Super Admins only when nobody else does), and Accounts
+  // (VENDOR_PAYMENTS edit) once a request is cleared for payment.
+  VENDOR_REGISTERED:        { group: "Vendors", label: "Vendor awaiting approval",      audience: "Vendor approvers",                      channels: ["EMAIL", "IN_APP"] },
+  VENDOR_PAYMENT_REQUESTED: { group: "Vendors", label: "Vendor payment awaiting approval", audience: "Payment approvers",                 channels: ["EMAIL", "IN_APP"] },
+  VENDOR_PAYMENT_APPROVED:  { group: "Vendors", label: "Vendor payment cleared for payment", audience: "Requester, Accounts",            channels: ["EMAIL", "IN_APP"] },
+  VENDOR_PAYMENT_REJECTED:  { group: "Vendors", label: "Vendor payment rejected",       audience: "Requester",                             channels: ["EMAIL", "IN_APP"] },
+  VENDOR_PAYMENT_PAID:      { group: "Vendors", label: "Vendor paid in full",           audience: "Requester",                             channels: ["EMAIL", "IN_APP"] },
 };
 
 /** Events whose notice goes back to the person who raised the request. */

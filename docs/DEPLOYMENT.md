@@ -24,6 +24,7 @@ verify after.**
 | API config | `~/CADB/apps/api/.env` | PM2 env in `~/CADB-staging/ecosystem.staging.config.cjs` (overrides the `.env` file) |
 | Web build URL | `NEXT_PUBLIC_API_URL=https://cadb.centumacademy.com` | `NEXT_PUBLIC_API_URL=http://65.0.41.55:4001` |
 | Uploaded files | `~/CADB/apps/api/uploads/` | `~/CADB-staging/apps/api/uploads/` |
+| Private files (vendor documents, served only via authenticated API) | `~/CADB/apps/api/storage/` | `~/CADB-staging/apps/api/storage/` |
 
 Also on the host (Phase 2, staging only): `partner-staging-api`, `partner-staging-admin` PM2 processes.
 
@@ -172,6 +173,7 @@ restore the matching `~/backups/cadb/*.sql.gz` into `cadb` with `psql`, after st
 | Production database | `~/backups/backup-cadb.sh` (pg_dump → gzip, atomic write, keeps the newest **8**, logs to `~/backups/backup.log`), cron **Sunday 02:30 UTC**, plus a manual run before every release | Stored on the same disk. Off-site S3 copy was planned (bucket exists) but not finished |
 | Staging database | ad-hoc dumps in `~/backups/cadb-staging/` | — |
 | Uploaded files (`apps/api/uploads/`) | **none** | Photos, documents and receipts exist only on the server disk |
+| Private files (`apps/api/storage/`) | **none** | Vendor KYC documents, invoices and payment proofs — same gap as uploads |
 | Code | GitHub + `~/prod-rollback/` snapshots | — |
 
 Closing the two gaps (off-site database copies, file backups or a move to S3) is the most valuable

@@ -25,6 +25,12 @@ const MODULES = [
   // Examinations. View = Exam Board and every exam, read-only; Edit = set up exams and
   // reassign stages. Running stages and editing exam settings are not granted here.
   "EXAMS",
+  // Vendor management. VENDORS: Create = register, Edit = update details / documents,
+  // Approve = approve onboarding and (de)activate, Delete = remove a vendor with no payments.
+  // VENDOR_PAYMENTS: Create = raise a request, Approve = the designated approving
+  // authority, Edit = Accounts recording payments, View = see every request,
+  // Delete = void a wrongly recorded transaction.
+  "VENDORS", "VENDOR_PAYMENTS",
 ] as const;
 
 const DEFAULT_PERMISSIONS: Record<string, Record<string, Partial<Record<"canView"|"canCreate"|"canEdit"|"canDelete"|"canApprove"|"canAppraise", boolean>>>> = {
@@ -175,6 +181,16 @@ for (const role of ROLES) {
 for (const role of ROLES) {
   const sa = role === "SUPER_ADMIN";
   DEFAULT_PERMISSIONS[role].EXAMS = { canView: sa, canCreate: false, canEdit: sa, canDelete: false, canApprove: false, canAppraise: false };
+}
+
+// Vendors and vendor payments: Super Admin only by default (implicit), so nobody's
+// access changes on deploy. The approving authority and the Accounts team are then
+// opened up from the permission matrix — typically via custom roles.
+for (const role of ROLES) {
+  for (const m of ["VENDORS", "VENDOR_PAYMENTS"]) {
+    const sa = role === "SUPER_ADMIN";
+    DEFAULT_PERMISSIONS[role][m] = { canView: sa, canCreate: sa, canEdit: sa, canDelete: sa, canApprove: sa, canAppraise: false };
+  }
 }
 
 /**

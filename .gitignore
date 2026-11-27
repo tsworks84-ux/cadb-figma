@@ -13,3 +13,6 @@ prisma/migrations/
 uploads/
 .claude/
 *.tsbuildinfo
+
+# Private files served only through authenticated API routes (vendor documents)
+storage/

@@ -285,6 +285,7 @@ model Department {
   memberships    EmployeeDepartment[]
   roleAccess     RoleDepartmentAccess[]
   resourceShares ResourceDepartment[]
+  vendorPayments VendorPayment[]
 
   @@index([code])
   @@index([hrPartnerId])
@@ -465,6 +466,12 @@ model Employee {
   examPapersApproved   ExamSubjectTeam[]         @relation("ExamPaperApprover")
   examPapersEvaluated  ExamSubjectTeam[]         @relation("ExamPaperEvaluator")
   subjectsHeaded       Subject[]                 @relation("SubjectHead")
+  vendorsCreated       Vendor[]                  @relation("VendorCreatedBy")
+  vendorsReviewed      Vendor[]                  @relation("VendorReviewedBy")
+  vendorDocsUploaded   VendorDocument[]          @relation("VendorDocUploadedBy")
+  vendorPaymentsRaised VendorPayment[]           @relation("VendorPaymentRequester")
+  vendorPaymentsDecided VendorPayment[]          @relation("VendorPaymentApprover")
+  vendorTxnsRecorded   VendorPaymentTransaction[] @relation("VendorTxnRecordedBy")
 
   @@index([departmentId])
   @@index([designationId])
@@ -2507,4 +2514,176 @@ model ExamStageEvent {
   stage ExamStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
 
   @@index([stageId])
+}
+
+// ─── VENDOR MANAGEMENT ───────────────────────────────────────────────────────
+//
+// Two flows. Onboarding: a vendor is registered, then approved by whoever holds
+// VENDORS.canApprove before anyone can raise a payment against it. Payments: a
+// request is raised against an ACTIVE vendor, approved by the designated
+// authority (VENDOR_PAYMENTS.canApprove), and then settled by Accounts
+// (VENDOR_PAYMENTS.canEdit), who record one transaction per remittance.
+
+enum VendorStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  REJECTED
+  INACTIVE
+}
+
+enum VendorPaymentStatus {
+  PENDING_APPROVAL
+  /// Approved — cleared for payment, waiting on Accounts.
+  APPROVED
+  PARTIALLY_PAID
+  PAID
+  REJECTED
+  CANCELLED
+}
+
+enum VendorPaymentMode {
+  NEFT
+  RTGS
+  IMPS
+  UPI
+  CHEQUE
+  DD
+  CASH
+  CARD
+  OTHER
+}
+
+model Vendor {
+  id            String  @id @default(cuid())
+  /// VEN-0001, sequential.
+  vendorCode    String  @unique
+  legalName     String
+  tradeName     String?
+  category      String
+  contactPerson String?
+  phone         String?
+  email         String?
+  address       String?
+  city          String?
+  state         String?
+  pincode       String?
+  /// Unique when present: one GST registration is one vendor.
+  gstin         String? @unique
+  pan           String?
+  udyamNumber   String?
+  paymentTermsDays Int?
+
+  bankAccountName   String?
+  bankAccountNumber String?
+  bankIfsc          String?
+  bankName          String?
+  bankBranch        String?
+  upiId             String?
+
+  notes        String?
+  status       VendorStatus @default(PENDING_APPROVAL)
+  /// Why the vendor is awaiting (re-)approval, rejected or inactive.
+  statusNote   String?
+  createdById  String
+  /// Whoever last sent the vendor for (re-)approval. They may not approve it themselves.
+  submittedById String?
+  reviewedById String?
+  reviewedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  createdBy  Employee         @relation("VendorCreatedBy", fields: [createdById], references: [id])
+  reviewedBy Employee?        @relation("VendorReviewedBy", fields: [reviewedById], references: [id])
+  documents  VendorDocument[]
+  payments   VendorPayment[]
+
+  @@index([status])
+  @@index([category])
+}
+
+/// Files kept outside the public /uploads tree and served only through an
+/// authenticated route — they carry PAN cards, cancelled cheques and invoices.
+model VendorDocument {
+  id           String   @id @default(cuid())
+  vendorId     String
+  /// Set for invoices and payment proofs; null for onboarding documents.
+  paymentId    String?
+  /// GST_CERTIFICATE | PAN_CARD | CANCELLED_CHEQUE | AGREEMENT | MSME_CERTIFICATE | INVOICE | PAYMENT_PROOF | OTHER
+  docType      String
+  fileName     String
+  storedName   String
+  mimeType     String
+  sizeBytes    Int
+  uploadedById String
+  createdAt    DateTime @default(now())
+
+  vendor     Vendor         @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  payment    VendorPayment? @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  uploadedBy Employee       @relation("VendorDocUploadedBy", fields: [uploadedById], references: [id])
+
+  @@index([vendorId])
+  @@index([paymentId])
+}
+
+model VendorPayment {
+  id             String              @id @default(cuid())
+  /// VP-YYYYMM-0001, sequential within the month.
+  paymentNumber  String              @unique
+  vendorId       String
+  invoiceNumber  String?
+  invoiceDate    DateTime?           @db.Date
+  dueDate        DateTime?           @db.Date
+  description    String
+  amount         Float
+  departmentId   String?
+  status         VendorPaymentStatus @default(PENDING_APPROVAL)
+
+  requestedById  String
+  approverId     String?
+  decidedAt      DateTime?
+  decisionNote   String?
+  cancelledAt    DateTime?
+  cancelReason   String?
+
+  /// Running totals of the transactions below, kept in step on every write.
+  paidAmount     Float               @default(0)
+  tdsAmount      Float               @default(0)
+  paidAt         DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vendor       Vendor                     @relation(fields: [vendorId], references: [id])
+  department   Department?                @relation(fields: [departmentId], references: [id])
+  requestedBy  Employee                   @relation("VendorPaymentRequester", fields: [requestedById], references: [id])
+  approver     Employee?                  @relation("VendorPaymentApprover", fields: [approverId], references: [id])
+  transactions VendorPaymentTransaction[]
+  documents    VendorDocument[]
+
+  @@index([vendorId])
+  @@index([status])
+  @@index([requestedById])
+}
+
+/// One remittance by Accounts against an approved request. Several are allowed
+/// (part payments); the request is PAID once paid + TDS covers the amount.
+model VendorPaymentTransaction {
+  id             String            @id @default(cuid())
+  paymentId      String
+  amount         Float
+  /// Tax deducted at source on this remittance; counts towards settling the request.
+  tdsAmount      Float             @default(0)
+  mode           VendorPaymentMode
+  transactionRef String?
+  paymentDate    DateTime          @db.Date
+  remarks        String?
+  recordedById   String
+  createdAt      DateTime          @default(now())
+
+  payment    VendorPayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  recordedBy Employee      @relation("VendorTxnRecordedBy", fields: [recordedById], references: [id])
+
+  @@index([paymentId])
+  @@index([paymentDate])
 }
