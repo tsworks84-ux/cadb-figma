@@ -6,6 +6,7 @@ minor = new capability, patch = fix.
 
 | Version | Date | Summary |
 |---|---|---|
+| v1.32.0 | 2026-11-27 | Vendor management: vendor onboarding with approval and KYC documents (bank-detail changes need re-approval); vendor payment requests → approval by the designated authority → Accounts records payments (transaction ref, amount, TDS, mode, date), part payments, Excel export; new VENDORS / VENDOR_PAYMENTS permission modules (Super Admin only by default) |
 | v1.31.1 | 2026-11-26 | Marks entry: student names no longer scroll over the column titles; Exam Code optional and can repeat across exams; exam start/end times in 5-minute steps |
 | v1.31.0 | 2026-11-21 | Academic Settings → Curriculum: chapter/topic/subtopic lists by subject, grade and board (xlsx import/export, manual rows), offered as tick-box topics in New Exam, Assignments and Schedule; seeded with 40 curricula (Foundation, CBSE, ICSE, JEE/NEET) |
 | v1.30.1 | 2026-11-21 | Saved exam templates picked from a dropdown in the New Exam window |
